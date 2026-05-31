@@ -1,0 +1,35 @@
+services:
+  openclaw-webchat-bridge:
+    build:
+      context: .
+      dockerfile: Dockerfile
+      args:
+        VITE_FIREBASE_API_KEY: ${VITE_FIREBASE_API_KEY:-}
+        VITE_FIREBASE_AUTH_DOMAIN: ${VITE_FIREBASE_AUTH_DOMAIN:-}
+        VITE_FIREBASE_PROJECT_ID: ${VITE_FIREBASE_PROJECT_ID:-}
+        VITE_FIREBASE_APP_ID: ${VITE_FIREBASE_APP_ID:-}
+        VITE_DEV_ID_TOKEN: ${VITE_DEV_ID_TOKEN:-}
+        VITE_OPENCLAW_BRIDGE_WS_URL: ${VITE_OPENCLAW_BRIDGE_WS_URL:-}
+    container_name: openclaw-webchat-bridge
+    restart: unless-stopped
+    ports:
+      - "8080:8080"
+    environment:
+      - OPENCLAW_WEBCHAT_CONFIG_FILE=/app/config/config.json
+      - FIREBASE_PROJECT_ID=${FIREBASE_PROJECT_ID}
+      - GOOGLE_APPLICATION_CREDENTIALS=/app/secrets/firebase-service-account.json
+      - OPENCLAW_OLIVIER_GATEWAY_TOKEN=${OPENCLAW_OLIVIER_GATEWAY_TOKEN}
+      - OPENCLAW_OLIVIER_DEVICE_IDENTITY=${OPENCLAW_OLIVIER_DEVICE_IDENTITY}
+      - OPENCLAW_JEROME_GATEWAY_TOKEN=${OPENCLAW_JEROME_GATEWAY_TOKEN}
+      - OPENCLAW_JEROME_DEVICE_IDENTITY=${OPENCLAW_JEROME_DEVICE_IDENTITY}
+      - ALLOWED_EMAIL_DOMAINS=lacneu.com,ataraxis-coaching.com
+      - ALLOWED_ORIGINS=${ALLOWED_ORIGINS:-*}
+      - OPENCLAW_WEBCHAT_PUBLIC_BASE_URL=${OPENCLAW_WEBCHAT_PUBLIC_BASE_URL:-}
+      - OPENCLAW_MEDIA_LINK_SECRET=${OPENCLAW_MEDIA_LINK_SECRET:?OPENCLAW_MEDIA_LINK_SECRET is required}
+      - OPENCLAW_MEDIA_LINK_TTL_SECONDS=${OPENCLAW_MEDIA_LINK_TTL_SECONDS:-3600}
+      - OPENCLAW_MEDIA_OUTBOUND_DIR=/home/node/.openclaw/media/outbound
+      - OPENCLAW_WEBCHAT_STATIC_DIR=/app/static
+    volumes:
+      - ./config.example.json:/app/config/config.json:ro
+      - ./secrets/firebase-service-account.json:/app/secrets/firebase-service-account.json:ro
+      - ${OPENCLAW_MEDIA_OUTBOUND_HOST_DIR:?OPENCLAW_MEDIA_OUTBOUND_HOST_DIR is required}:/home/node/.openclaw/media/outbound:ro

@@ -1,0 +1,35 @@
+{
+  "instances": {
+    "olivier": {
+      "url": "ws://192.168.1.49:18789",
+      "tokenEnv": "OPENCLAW_OLIVIER_GATEWAY_TOKEN",
+      "deviceIdentityEnv": "OPENCLAW_OLIVIER_DEVICE_IDENTITY"
+    },
+    "jerome": {
+      "url": "ws://192.168.1.49:18791",
+      "tokenEnv": "OPENCLAW_JEROME_GATEWAY_TOKEN",
+      "deviceIdentityEnv": "OPENCLAW_JEROME_DEVICE_IDENTITY"
+    }
+  },
+  "users": {
+    "olivier@lacneu.com": {
+      "instance": "olivier",
+      "agentId": "olivier",
+      "canonical": "olivier",
+      "displayName": "Olivier"
+    },
+    "olivier.neu@lacneu.com": {
+      "instance": "olivier",
+      "agentId": "olivier",
+      "canonical": "olivier",
+      "displayName": "Olivier"
+    },
+    "jnl@ataraxis-coaching.com": {
+      "instance": "jerome",
+      "agentId": "jerome",
+      "canonical": "jerome",
+      "displayName": "Jérôme"
+    }
+  }
+}
+

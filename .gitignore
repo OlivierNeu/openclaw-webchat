@@ -1,0 +1,35 @@
+# Python
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.coverage
+coverage.xml
+coverage.json
+htmlcov/
+backend/.venv/
+
+# Node / Vite
+frontend/node_modules/
+frontend/dist/
+frontend/.env
+frontend/.env.*
+!frontend/.env.example
+
+# Local configuration and secrets
+.env
+.env.*
+!frontend/.env.example
+*.local.json
+config.local.json
+secrets/
+firebase-service-account.json
+
+# OpenClaw diagnostics
+openclaw-frame-captures/
+*.ndjson
+*.log
+
+# OS / editors
+.DS_Store
+.idea/
+.vscode/
