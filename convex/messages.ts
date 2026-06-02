@@ -19,7 +19,7 @@
 import { v } from "convex/values";
 import { query } from "./_generated/server";
 import { Id } from "./_generated/dataModel";
-import { requireOwnedChat, requireUserId } from "./lib/access";
+import { requireActive, requireOwnedChat } from "./lib/access";
 
 // Hard upper bound on how many recent messages the reactive feed loads. Chosen
 // to cover a typical visible conversation while keeping the query (and the
@@ -39,9 +39,13 @@ type ClientPart =
 export const listByChat = query({
   args: { chatId: v.id("chats") },
   handler: async (ctx, { chatId }) => {
-    const userId = await requireUserId(ctx);
-    // Ownership check — throws if the user does not own this chat.
-    await requireOwnedChat(ctx, userId, chatId);
+    const { userId } = await requireActive(ctx);
+    // Resilient to a just-deleted chat (e.g. the active chat was removed while
+    // still selected): return empty instead of throwing, so the reactive query
+    // does not error in the client. A chat owned by someone else still throws.
+    const chat = await ctx.db.get(chatId);
+    if (chat === null) return [];
+    if (chat.userId !== userId) throw new Error("Forbidden: chat not owned by user");
 
     // Bounded read: most-recent MESSAGE_WINDOW messages, newest first.
     const recentDesc = await ctx.db
@@ -120,18 +124,33 @@ export const listByChat = query({
 export const listChats = query({
   args: {},
   handler: async (ctx) => {
-    const userId = await requireUserId(ctx);
+    const { userId } = await requireActive(ctx);
     const chats = await ctx.db
       .query("chats")
       .withIndex("by_user", (q) => q.eq("userId", userId))
       .collect();
-    chats.sort((a, b) => b.updatedAt - a.updatedAt);
+    // Single comparator: pinned first, then manual sortKey (asc), then recency.
+    // Manual order WINS over recency (user explicitly drags); recency is only a
+    // tiebreaker for chats that have never been ordered.
+    chats.sort((a, b) => {
+      const pa = a.pinned ? 0 : 1;
+      const pb = b.pinned ? 0 : 1;
+      if (pa !== pb) return pa - pb;
+      const ka = a.sortKey ?? 0;
+      const kb = b.sortKey ?? 0;
+      if (ka !== kb) return ka - kb;
+      return b.updatedAt - a.updatedAt;
+    });
     return chats
       .filter((c) => !c.archived)
       .map((c) => ({
         _id: c._id as Id<"chats">,
         title: c.title,
         updatedAt: c.updatedAt,
+        projectId: c.projectId ?? null,
+        sortKey: c.sortKey ?? 0,
+        pinned: c.pinned ?? false,
+        color: c.color ?? null,
       }));
   },
 });

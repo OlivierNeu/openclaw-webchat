@@ -17,7 +17,7 @@
 import { v } from "convex/values";
 import { mutation } from "./_generated/server";
 import { internal } from "./_generated/api";
-import { ensureProfile, requireOwnedChat } from "./lib/access";
+import { requireActive, requireOwnedChat } from "./lib/access";
 import { assertOwnsUpload } from "./uploads";
 
 export const sendMessage = mutation({
@@ -46,7 +46,7 @@ export const sendMessage = mutation({
     ),
   },
   handler: async (ctx, args) => {
-    const userId = await ensureProfile(ctx);
+    const { userId } = await requireActive(ctx);
     const chat = await requireOwnedChat(ctx, userId, args.chatId);
 
     // 2. Idempotency short-circuit. Run BEFORE any insert so a retry inserts

@@ -8,13 +8,18 @@
  * @module
  */
 
+import type * as admin from "../admin.js";
 import type * as auth from "../auth.js";
 import type * as bridge from "../bridge.js";
 import type * as bridge_ingest from "../bridge_ingest.js";
 import type * as chats from "../chats.js";
+import type * as dev from "../dev.js";
 import type * as http from "../http.js";
 import type * as lib_access from "../lib/access.js";
+import type * as me from "../me.js";
 import type * as messages from "../messages.js";
+import type * as projects from "../projects.js";
+import type * as routing from "../routing.js";
 import type * as send from "../send.js";
 import type * as stream from "../stream.js";
 import type * as uploads from "../uploads.js";
@@ -26,13 +31,18 @@ import type {
 } from "convex/server";
 
 declare const fullApi: ApiFromModules<{
+  admin: typeof admin;
   auth: typeof auth;
   bridge: typeof bridge;
   bridge_ingest: typeof bridge_ingest;
   chats: typeof chats;
+  dev: typeof dev;
   http: typeof http;
   "lib/access": typeof lib_access;
+  me: typeof me;
   messages: typeof messages;
+  projects: typeof projects;
+  routing: typeof routing;
   send: typeof send;
   stream: typeof stream;
   uploads: typeof uploads;

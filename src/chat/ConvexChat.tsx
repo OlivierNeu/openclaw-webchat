@@ -4,7 +4,6 @@ import {
   MessagePrimitive,
   ThreadPrimitive,
 } from "@assistant-ui/react";
-import { useAuthActions } from "@convex-dev/auth/react";
 import type { ConvexId } from "./convexTypes";
 import { useConvexChatRuntime } from "./useConvexChatRuntime";
 import { RunStatus } from "./RunStatus";
@@ -25,7 +24,6 @@ export function ConvexChat({ chatId }: ConvexChatProps) {
   return (
     <AssistantRuntimeProvider runtime={runtime}>
       <div className="oc-chat">
-        <ChatHeader />
         {chatId ? (
           <ChatThread />
         ) : (
@@ -33,28 +31,6 @@ export function ConvexChat({ chatId }: ConvexChatProps) {
         )}
       </div>
     </AssistantRuntimeProvider>
-  );
-}
-
-function ChatHeader() {
-  const { signOut } = useAuthActions();
-  return (
-    <header className="oc-chat__header">
-      <span className="oc-chat__title">OpenClaw</span>
-      <button
-        type="button"
-        className="oc-chat__signout"
-        onClick={() => {
-          // Sign-out closes the Convex Auth session; the AuthLoading/
-          // Unauthenticated boundary in main.tsx then swaps back to the sign-in
-          // view. The bridge's OpenClaw socket is per-deployment, not per tab,
-          // so nothing to tear down client-side here.
-          void signOut();
-        }}
-      >
-        Sign out
-      </button>
-    </header>
   );
 }
 
@@ -86,22 +62,34 @@ const contentComponents = {
   File: MediaPart as never,
 };
 
+// User turn: a subtle, low-contrast bubble aligned right (Open WebUI style).
+// Uses --muted (light grey in light, elevated grey in dark) instead of the
+// high-contrast --primary, so it never flips to a tiring solid white/black.
 function UserMessage() {
   return (
     <MessagePrimitive.Root className="oc-msg oc-msg--user">
-      <div className="oc-msg__body">
+      <div className="oc-msg__bubble">
         <MessagePrimitive.Parts components={contentComponents} />
       </div>
     </MessagePrimitive.Root>
   );
 }
 
+// Assistant turn: NO background bubble — content sits on the page background and
+// fills the readable column (Open WebUI style). An avatar + name header carries
+// the identity; RunStatus shows the live status (and hides itself when done).
 function AssistantMessage() {
   return (
     <MessagePrimitive.Root className="oc-msg oc-msg--assistant">
-      <div className="oc-msg__body">
-        <MessagePrimitive.Parts components={contentComponents} />
-        <RunStatus />
+      <div className="oc-msg__avatar" aria-hidden>
+        OC
+      </div>
+      <div className="oc-msg__col">
+        <div className="oc-msg__name">OpenClaw</div>
+        <div className="oc-msg__body">
+          <MessagePrimitive.Parts components={contentComponents} />
+          <RunStatus />
+        </div>
       </div>
     </MessagePrimitive.Root>
   );

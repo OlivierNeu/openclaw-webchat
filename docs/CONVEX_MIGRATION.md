@@ -92,6 +92,38 @@ the 12 fixtures stay as the executable regression spec for the TS port.
   drafts (`MessagePrimitive.Parts`, local ToolCard props) — re-verify on any
   assistant-ui upgrade.
 
+## Settings / RBAC + valves (VERIFIED in browser)
+
+Open WebUI-style admin layer, all enforced server-side (the UI is convenience,
+not the boundary):
+
+- **Roles** `pending → user → admin` on `profiles.role`. First sign-in becomes
+  **admin** via the `appMeta` singleton (OCC serialization point — no double-admin
+  under concurrent first sign-ins). Everyone else starts `pending` (blocked).
+  `lib/access.ensureProfile` is the SINGLE role-writer; `requireActive`
+  (user|admin) and `requireAdmin` gate everything else. Verified live: bootstrap
+  assigned exactly one admin (`appMeta.adminAssigned=true`), others pending.
+- **Re-leveled gates**: createChat/renameChat/archiveChat/generateUploadUrl,
+  send.sendMessage, messages.listByChat/listChats, uploads.registerUpload now
+  require `active` — a pending user is rejected even if the UI is bypassed.
+  `me.bootstrap` is the only mutation a pending user may call (so admins can see
+  them to approve).
+- **Valves (routing)** in `convex/routing.ts`, single resolver: per-user
+  **override** (instance/agentId) wins, else **group** — `per-user` (agentId =
+  user canonical, isolated) or `shared` (group.sharedAgentId, common agent).
+  Emits ONLY non-secret names (instanceName/agentId/canonical); the bridge maps
+  instanceName→token from its env. Wired into `bridge.getChatRouting`/`dispatch`
+  (unrouted user → outbox `failed`, never a wrong target).
+- **Admin functions** `convex/admin.ts` (all `requireAdmin`): listUsers/setRole/
+  approveUser/setUserRouting, groups CRUD (delete blocked while members exist),
+  instances upsert/delete. **Last-admin guard**: cannot demote the only admin.
+- **Frontend**: third auth state (pending waiting-screen); admin-only
+  `AdminSettings` (Users/Groups/Instances tabs, shadcn-style). Verified live:
+  role pending→admin flipped the UI reactively (no reload); created an instance
+  `olivier` + a `per-user` group `admins`; zero console errors.
+- **`convex/dev.ts`** (DEV-ONLY, gated by `OPENCLAW_ENABLE_ANON_AUTH=1`):
+  `reset` wipes app data; `makeAdmin` promotes by canonical — local testing only.
+
 ## Next milestone
 
 Wire the bridge worker to a live OpenClaw gateway and the Convex ingest endpoint,

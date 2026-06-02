@@ -17,7 +17,7 @@ import { v } from "convex/values";
 import { mutation } from "./_generated/server";
 import { Id } from "./_generated/dataModel";
 import { MutationCtx, QueryCtx } from "./_generated/server";
-import { ensureProfile } from "./lib/access";
+import { requireActive } from "./lib/access";
 
 /**
  * Record that the authenticated user owns a freshly uploaded storage blob.
@@ -30,7 +30,7 @@ import { ensureProfile } from "./lib/access";
 export const registerUpload = mutation({
   args: { storageId: v.id("_storage") },
   handler: async (ctx, { storageId }) => {
-    const userId = await ensureProfile(ctx);
+    const { userId } = await requireActive(ctx);
     // Reject if this storageId is already owned by a DIFFERENT user: a blob can
     // only ever be claimed once, so a caller cannot register an id another user
     // uploaded (defense-in-depth atop the unguessability of storage ids).

@@ -63,22 +63,95 @@ export default defineSchema({
   // returns). NO secrets (gateway URL lives in `instances`, tokens in bridge).
   profiles: defineTable({
     userId: v.id("users"), // -> authTables users (getAuthUserId result)
-    // Which OpenClaw instance / agent this user is routed to. Non-secret.
-    openclawInstance: v.optional(v.string()),
-    agentId: v.optional(v.string()),
-    // Whether this user is the canonical/primary operator session.
-    canonical: v.optional(v.boolean()),
+
+    // RBAC role (Open WebUI style). OPTIONAL so adding this field does not
+    // reject pre-existing role-less rows on schema push; the single role-writer
+    // (lib/access.ensureProfile) backfills it. Semantics:
+    //   - "pending": authenticated but NOT yet approved -> blocked from the app
+    //   - "user":    approved, full chat access
+    //   - "admin":   approved + can manage users/roles/groups/instances
+    // A row with no role is treated as "pending" by the access helpers.
+    role: v.optional(
+      v.union(v.literal("pending"), v.literal("user"), v.literal("admin")),
+    ),
+    // Display fields (non-secret) for the admin user list.
+    email: v.optional(v.string()),
+    name: v.optional(v.string()),
+
+    // Per-user theme preference (identity-level: even a pending user controls
+    // it). OPTIONAL: when unset, the resolver falls back to the admin default,
+    // then "system". `themeName` is reserved for future named palettes.
+    themeMode: v.optional(
+      v.union(v.literal("light"), v.literal("dark"), v.literal("system")),
+    ),
+    themeName: v.optional(v.string()),
+
+    // --- Routing (valves) ---------------------------------------------------
+    // Group membership drives routing by default (see `groups`). A per-user
+    // OVERRIDE wins over the group when set.
+    groupId: v.optional(v.id("groups")),
+    // Per-user override of the resolved OpenClaw target. Non-secret names only.
+    overrideInstance: v.optional(v.string()), // -> instances.name
+    overrideAgentId: v.optional(v.string()),
+    // Stable per-user key used to derive a per-user agent / session namespace
+    // (OpenClaw `canonical`). Defaults to a slug of the email when unset.
+    canonical: v.optional(v.string()),
     // Chat-id prefixes this user is allowed to address on the gateway.
     allowedChatPrefixes: v.optional(v.array(v.string())),
-  }).index("by_user", ["userId"]),
+  })
+    .index("by_user", ["userId"])
+    .index("by_role", ["role"]),
+
+  // A routing group (valve). Members of a group share an OpenClaw instance and
+  // a routing MODE:
+  //   - "per-user": each member gets their OWN agent, derived from their
+  //                 `canonical` (e.g. agentId = canonical). Isolation per user.
+  //   - "shared":   every member talks to the SAME agent (`sharedAgentId`).
+  // NO secrets — only the non-secret instance NAME the bridge maps to a token.
+  groups: defineTable({
+    name: v.string(),
+    instanceName: v.string(), // -> instances.name
+    mode: v.union(v.literal("per-user"), v.literal("shared")),
+    sharedAgentId: v.optional(v.string()), // required when mode === "shared"
+    description: v.optional(v.string()),
+  }).index("by_name", ["name"]),
 
   // OpenClaw instances the deployment knows about. NO secrets (gateway tokens
-  // and device identities are bridge-env only).
+  // and device identities are bridge-env only — the bridge maps `name` -> token).
   instances: defineTable({
     name: v.string(),
     gatewayUrl: v.string(),
     displayName: v.optional(v.string()),
-  }),
+  }).index("by_name", ["name"]),
+
+  // Singleton app metadata. Exactly one row (key === "singleton"). Acts as the
+  // serialization point for first-admin bootstrap: the first sign-in that finds
+  // `adminAssigned === false` claims admin AND flips the flag in one
+  // transaction; concurrent first sign-ins collide on THIS doc (OCC) and the
+  // loser retries, sees the flag set, and becomes "pending".
+  appMeta: defineTable({
+    key: v.string(),
+    adminAssigned: v.boolean(),
+    // Global toggle reserved for future "require admin approval" policy; the
+    // pending->user approval flow is always on for now.
+    requireApproval: v.optional(v.boolean()),
+    // Admin-defined default theme mode, used when a user has no preference.
+    // OPTIONAL: when unset, the resolver falls back to "system". `defaultThemeName`
+    // is reserved for future named palettes.
+    defaultThemeMode: v.optional(
+      v.union(v.literal("light"), v.literal("dark"), v.literal("system")),
+    ),
+    defaultThemeName: v.optional(v.string()),
+  }).index("by_key", ["key"]),
+
+  // A user's project: a named grouping of chats in the sidebar. Per-user.
+  projects: defineTable({
+    userId: v.id("users"),
+    name: v.string(),
+    sortKey: v.optional(v.number()), // fractional order key
+    color: v.optional(v.string()), // preset token name
+    collapsed: v.optional(v.boolean()),
+  }).index("by_user", ["userId"]),
 
   // A chat thread owned by exactly one user.
   chats: defineTable({
@@ -88,7 +161,14 @@ export default defineSchema({
     openclawChatId: v.optional(v.string()),
     archived: v.optional(v.boolean()),
     updatedAt: v.number(),
-  }).index("by_user", ["userId"]),
+    // Sidebar organization (all optional — additive on existing rows):
+    projectId: v.optional(v.id("projects")), // 0-or-1 project membership
+    sortKey: v.optional(v.number()), // fractional manual order (lower = higher)
+    pinned: v.optional(v.boolean()), // pinned chats sort above unpinned
+    color: v.optional(v.string()), // preset token name, list display only
+  })
+    .index("by_user", ["userId"])
+    .index("by_project", ["projectId"]),
 
   // Individual messages within a chat. Streaming assistant text is patched in
   // place on `text` (reactivity -> assistant-ui re-render).

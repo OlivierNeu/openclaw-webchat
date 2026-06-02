@@ -20,6 +20,8 @@ import {
 } from "./_generated/server";
 import { internal } from "./_generated/api";
 import { Doc, Id } from "./_generated/dataModel";
+import { getProfile } from "./lib/access";
+import { resolveTargetForProfile } from "./routing";
 
 // Read a single outbox row (used by the dispatch action, which has no db
 // access of its own — actions read via queries).
@@ -45,16 +47,25 @@ export const markOutbox = internalMutation({
   },
 });
 
-// Fetch the OpenClaw chat id for routing (non-secret metadata) so the bridge
-// can address the right thread. Reads via the chat the outbox row references.
+// Resolve routing for an outbox row's owner: the OpenClaw chat id (non-secret
+// thread id) PLUS the resolved instance/agent target from the valves. The
+// bridge maps instanceName -> token/deviceIdentity from its env; only names
+// cross this boundary, never secrets.
 export const getChatRouting = internalQuery({
-  args: { chatId: v.id("chats") },
-  handler: async (ctx, { chatId }) => {
+  args: { chatId: v.id("chats"), userId: v.id("users") },
+  handler: async (ctx, { chatId, userId }) => {
     const chat = await ctx.db.get(chatId);
     if (chat === null) {
       return null;
     }
-    return { openclawChatId: chat.openclawChatId ?? null };
+    const profile = await getProfile(ctx, userId);
+    const target = await resolveTargetForProfile(ctx, profile);
+    return {
+      openclawChatId: chat.openclawChatId ?? null,
+      // null target => the user is unrouted (no override, no group); the
+      // dispatch will mark the row failed rather than send to a wrong agent.
+      target,
+    };
   },
 });
 
@@ -88,7 +99,19 @@ export const dispatch = internalAction({
 
     const routing = await ctx.runQuery(internal.bridge.getChatRouting, {
       chatId: row.chatId as Id<"chats">,
+      userId: row.userId as Id<"users">,
     });
+
+    // Unrouted user (no override, no group) -> cannot pick an agent. Mark failed
+    // rather than send to a wrong/absent target.
+    if (!routing || routing.target === null) {
+      console.error("bridge.dispatch: user is unrouted (no valve target)");
+      await ctx.runMutation(internal.bridge.markOutbox, {
+        outboxId,
+        status: "failed",
+      });
+      return;
+    }
 
     // We mark the row terminal (sent/failed) and deliberately do NOT re-throw on
     // a transient bridge error. Re-throwing triggers Convex action retries,
@@ -108,7 +131,12 @@ export const dispatch = internalAction({
         },
         body: JSON.stringify({
           chatId: row.chatId,
-          openclawChatId: routing?.openclawChatId ?? null,
+          openclawChatId: routing.openclawChatId,
+          // Resolved valve target (non-secret names): the bridge maps
+          // instanceName -> gateway token/device identity from its env.
+          instanceName: routing.target.instanceName,
+          agentId: routing.target.agentId,
+          canonical: routing.target.canonical,
           text: row.text,
           clientMessageId: row.clientMessageId,
           attachments: row.attachmentIds,
