@@ -9,6 +9,7 @@ import { useConvexChatRuntime } from "./useConvexChatRuntime";
 import { RunStatus } from "./RunStatus";
 import { ToolCard } from "./ToolCard";
 import { MediaPart } from "./MediaPart";
+import { MarkdownText } from "./MarkdownText";
 
 // Top-level chat surface. Wires the reactive Convex-backed runtime into
 // assistant-ui and renders the thread with custom renderers for run status,
@@ -54,12 +55,20 @@ function ChatThread() {
 // Component overrides for MessagePrimitive.Parts (assistant-ui 0.14):
 //   - tool calls -> ToolCard (via tools.Fallback)
 //   - file parts (media + attachments) -> MediaPart
-//   - text + reasoning use assistant-ui defaults.
 // Typed loosely at this seam: our ToolCard/MediaPart accept the structural
 // props assistant-ui passes; the exact exported component types shifted in 0.14.
-const contentComponents = {
+//
+// Assistant turns ALSO override Text -> MarkdownText (GFM rendering). User and
+// system turns intentionally do NOT: a user's literal input must not be
+// reinterpreted as markdown (typing `*foo*` must stay `*foo*`), so they keep the
+// default plain-text renderer.
+const plainComponents = {
   tools: { Fallback: ToolCard as never },
   File: MediaPart as never,
+};
+const assistantComponents = {
+  ...plainComponents,
+  Text: MarkdownText,
 };
 
 // User turn: a subtle, low-contrast bubble aligned right (Open WebUI style).
@@ -69,7 +78,7 @@ function UserMessage() {
   return (
     <MessagePrimitive.Root className="oc-msg oc-msg--user">
       <div className="oc-msg__bubble">
-        <MessagePrimitive.Parts components={contentComponents} />
+        <MessagePrimitive.Parts components={plainComponents} />
       </div>
     </MessagePrimitive.Root>
   );
@@ -87,7 +96,7 @@ function AssistantMessage() {
       <div className="oc-msg__col">
         <div className="oc-msg__name">OpenClaw</div>
         <div className="oc-msg__body">
-          <MessagePrimitive.Parts components={contentComponents} />
+          <MessagePrimitive.Parts components={assistantComponents} />
           <RunStatus />
         </div>
       </div>
@@ -99,7 +108,7 @@ function SystemMessage() {
   return (
     <MessagePrimitive.Root className="oc-msg oc-msg--system">
       <div className="oc-msg__body">
-        <MessagePrimitive.Parts components={contentComponents} />
+        <MessagePrimitive.Parts components={plainComponents} />
       </div>
     </MessagePrimitive.Root>
   );

@@ -66,13 +66,30 @@ export const seedChat = mutation({
       userId,
       role: "assistant",
       status: "complete",
-      text:
-        "D'accord. À partir de maintenant, je te signalerai à chaque modification du PDF Hindsight.\n\n" +
-        "État actuel :\n" +
-        "- PDF de travail courant : HINDSIGHT-GUIDE.pdf\n" +
-        "- Copie source locale v4 : /home/node/.openclaw/workspace-olivier/docs/HINDSIGHT-GUIDE-v4.pdf\n\n" +
-        "Je n'ai pas encore trouvé de dossier OneDrive monté accessible depuis ce conteneur. Donne-moi le chemin du dossier OneDrive à utiliser, ou monte-le côté NAS/OpenClaw, et je copierai systématiquement le PDF modifié dedans après chaque régénération. " +
-        "Ceci est une réponse volontairement longue pour vérifier que la largeur du message suit bien l'espace de travail disponible et que le contraste du fond reste confortable pour les yeux, aussi bien en thème clair qu'en thème sombre.",
+      text: [
+        "Tu as raison : c'était **Google Drive**, pas OneDrive. J'ai corrigé et je viens de l'y déposer.",
+        "",
+        "**Emplacement Google Drive :**",
+        "",
+        "- Dossier : `OpenClaw/Hindsight`",
+        "- Fichier : `HINDSIGHT-GUIDE.pdf`",
+        "- Lien : [drive.google.com/file/d/1cM8…](https://drive.google.com/file/d/1cM8dJuLJxm4dgBvZaBopvfSPlsAuPB07/view)",
+        "",
+        "| Détail | Valeur |",
+        "| --- | --- |",
+        "| Compte | `olivier@lacneu.com` |",
+        "| Taille | 542 235 octets |",
+        "",
+        "À partir de maintenant, à chaque modification du PDF je mettrai à jour **ce même fichier Drive** avec `--replace` :",
+        "",
+        "```bash",
+        "openclaw drive upload \\",
+        "  --replace HINDSIGHT-GUIDE.pdf \\",
+        "  --folder OpenClaw/Hindsight",
+        "```",
+        "",
+        "Ceci est une réponse volontairement longue et riche pour vérifier le rendu markdown (gras, `code`, listes, lien, tableau, bloc de code) ainsi que la largeur et le contraste, en thème clair comme en thème sombre.",
+      ].join("\n"),
       updatedAt: now,
     });
 
