@@ -61,10 +61,18 @@ relative to the same origin.
 Required variables:
 
 ```bash
+# Copy and edit your routing config first (never run with config.example.json).
+cp config.example.json config.json
+export OPENCLAW_WEBCHAT_CONFIG_HOST_FILE="$PWD/config.json"
+
 export OPENCLAW_MEDIA_LINK_SECRET="<stable secret>"
-export OPENCLAW_MEDIA_OUTBOUND_HOST_DIR="/volume3/openclaw/media/outbound"
+export OPENCLAW_MEDIA_OUTBOUND_HOST_DIR="/path/to/shared/openclaw/media/outbound"
 export FIREBASE_PROJECT_ID="<firebase-project>"
-export ALLOWED_EMAIL_DOMAINS="lacneu.com,ataraxis-coaching.com"
+# Access allowlist — set the domains/emails you actually authorize.
+export ALLOWED_EMAIL_DOMAINS="example.com"
+# Gateway secrets referenced by config.json (rename to match your instances):
+export OPENCLAW_ALICE_GATEWAY_TOKEN="..."
+export OPENCLAW_ALICE_DEVICE_IDENTITY='{"id":"...","publicKey":"...","privateKey":"..."}'
 ```
 
 Then:
@@ -92,12 +100,41 @@ Generated OpenClaw files are served by the bridge through signed URLs. The
 backend container needs read-only access to the OpenClaw outbound media
 directory.
 
-Example:
-
 ```yaml
 volumes:
-  - /volume3/openclaw/media/outbound:/home/node/.openclaw/media/outbound:ro
+  - /path/to/shared/openclaw/media/outbound:/home/node/.openclaw/media/outbound:ro
 ```
+
+### Multi-instance requirement (important)
+
+The bridge serves media by reading a **single** local directory
+(`OPENCLAW_MEDIA_OUTBOUND_DIR`, mounted from `OPENCLAW_MEDIA_OUTBOUND_HOST_DIR`).
+It has no per-instance dimension. When `config.json` defines more than one
+OpenClaw instance, each instance is a separate container writing to its own
+`~/.openclaw/media/outbound`.
+
+Therefore **every OpenClaw instance must write into one shared outbound
+directory**. Back it with shared storage (an NFS export or a single shared
+Docker volume) mounted into:
+
+- every OpenClaw container at `/home/node/.openclaw/media/outbound`, and
+- the bridge (read-only) via `OPENCLAW_MEDIA_OUTBOUND_HOST_DIR`.
+
+Caveats:
+
+- **Per-instance 404**: if instances keep separate dirs and you mount only one,
+  signed links work only for that instance; files produced by any other
+  instance return HTTP 404 *Media not found* (with a valid signature, because an
+  absent file yields an empty fingerprint that still validates, failing only at
+  the final filesystem check).
+- **Filename collisions**: a single flat shared dir means two instances emitting
+  the same filename overwrite/shadow each other, and the bridge cannot tell them
+  apart (links are authorized per session but the file read is instance-agnostic).
+  Configure each instance to write under an instance-specific subdirectory, or
+  use UUID/instance-prefixed filenames.
+
+If you cannot share a directory across instances, do not rely on local-FS media
+serving for a multi-instance deployment.
 
 ## Production Checklist
 

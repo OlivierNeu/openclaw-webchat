@@ -10,6 +10,22 @@ OpenClaw avancés, tout en conservant les leçons apprises dans le pipe OWUI:
 captures NDJSON, isolation des `runId`, gestion des réponses différées,
 sanitisation des chemins locaux et tests par traces réelles.
 
+> **Statut d'implémentation (cible vs réalisé).** Ce document décrit la
+> **vision cible**. Le contrat réellement implémenté et stable fait foi et est
+> documenté dans [`BRIDGE_PROTOCOL.md`](BRIDGE_PROTOCOL.md). Écarts connus :
+> - Le bridge normalise les frames OpenClaw en événements stables
+>   `message.delta` / `message.snapshot` / `message.final` / `run.status` /
+>   `tool.status` / `media` (et conserve `openclaw.frame` brut en passthrough
+>   déprécié). Les noms d'événements « AI SDK UI » cités plus bas sont
+>   conceptuels, pas l'API exacte.
+> - Le proxy média implémenté est `GET /api/media/outbound/{filename}` avec
+>   signature HMAC `scope`/`exp`/`fp`/`sig` (pas un `mediaId` opaque).
+> - La structure actuelle est `backend/` + `frontend/` (pas un monorepo
+>   `apps/bridge` / `apps/web`). Les commandes locales de la section « Local »
+>   supposent ce monorepo : utiliser plutôt `uvicorn app.main:app --reload`
+>   depuis `backend/` et `npm run dev` depuis `frontend/`.
+> - Il n'y a pas de service `redis` dans `docker-compose.yml`.
+
 ## 1. Résumé Exécutif
 
 OpenClaw est nativement piloté par un Gateway WebSocket. Un tour utilisateur
@@ -624,8 +640,8 @@ Actuellement chaque utilisateur est généralement lié à son propre agent Open
 Exemple conceptuel:
 
 ```text
-olivier@lacneu.com -> instance olivier -> agent olivier
-jerome@lacneu.com  -> instance jerome  -> agent jerome
+olivier@example.com -> instance olivier -> agent olivier
+jerome@example.com  -> instance jerome  -> agent jerome
 ```
 
 ### 10.2 Modèle Cible
@@ -657,7 +673,7 @@ Configuration conceptuelle:
 ```json
 {
   "users": {
-    "olivier@lacneu.com": {
+    "olivier@example.com": {
       "defaultInstance": "olivier",
       "defaultAgentId": "olivier",
       "canonicalUserKey": "olivier",
@@ -672,7 +688,7 @@ Configuration conceptuelle:
       "routingMode": "shared_project_agent",
       "instance": "olivier",
       "agentId": "lightrag",
-      "members": ["olivier@lacneu.com", "denis@lacneu.com"]
+      "members": ["olivier@example.com", "denis@example.com"]
     }
   }
 }
@@ -1228,9 +1244,9 @@ Backend:
 Schéma:
 
 ```text
-chat.lacneu.com
+chat.example.com
   └─ Firebase Hosting static frontend
-       └─ wss://openclaw-webchat-api.lacneu.com/ws/chats/{chatId}
+       └─ wss://openclaw-webchat-api.example.com/ws/chats/{chatId}
             └─ Synology Docker backend
                  └─ OpenClaw Gateway WebSocket
 ```
@@ -1253,7 +1269,7 @@ Backend:
 Schéma:
 
 ```text
-chat.lacneu.com
+chat.example.com
   └─ Synology Docker all-in-one
        ├─ /                  frontend dist
        ├─ /ws/chats/{chatId} backend WebSocket
@@ -1264,8 +1280,8 @@ chat.lacneu.com
 ### 20.4 Option C Future: Firebase Frontend + Cloud Run Backend
 
 Cloud Run reste possible, mais il faut tenir compte du coût des connexions
-WebSocket longues. Un domaine backend explicite comme `bridge.lacneu.com` ou
-`ws.lacneu.com` reste préférable car Firebase Hosting ne doit pas être considéré
+WebSocket longues. Un domaine backend explicite comme `bridge.example.com` ou
+`ws.example.com` reste préférable car Firebase Hosting ne doit pas être considéré
 comme un proxy WebSocket générique.
 
 ### 20.5 Local

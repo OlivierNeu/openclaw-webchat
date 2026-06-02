@@ -2,7 +2,6 @@ import asyncio
 import base64
 import hashlib
 import json
-import time
 import uuid
 from typing import Any, Dict, Optional
 from urllib.parse import urlparse
@@ -23,6 +22,21 @@ DEFAULT_SCOPES = [
     "operator.pairing",
 ]
 
+# Client identity advertised to (and signed for) the OpenClaw Gateway.
+# These values are LOAD-BEARING, not cosmetic:
+#   - client.mode == "cli" is what makes the Gateway classify the connection as
+#     channel=webchat with sender {label: cli}; "web" lands in a different
+#     channel classification. (docs/BRIDGE_PROTOCOL.md, validated in production
+#     by the Open WebUI pipe this bridge replaces.)
+#   - client.id and client.mode are part of the Ed25519 device-signature payload
+#     (v2|deviceId|clientId|clientMode|role|scopes|ts|token|nonce), so the values
+#     signed here must equal the values sent in the connect request.
+_CLIENT_ID = "cli"
+_CLIENT_MODE = "cli"
+_CLIENT_VERSION = "1.0.0"
+_CLIENT_PLATFORM = "linux"
+_CLIENT_ROLE = "operator"
+
 
 class OpenClawError(RuntimeError):
     pass
@@ -31,15 +45,15 @@ class OpenClawError(RuntimeError):
 def sign_challenge(
     device_identity: Dict[str, Any],
     nonce: str,
-    ts: int,
+    ts: Any,
     token: str,
 ) -> Dict[str, Any]:
     parts = [
         "v2",
         device_identity["id"],
-        "openclaw-webchat",
-        "web",
-        "operator",
+        _CLIENT_ID,
+        _CLIENT_MODE,
+        _CLIENT_ROLE,
         ",".join(DEFAULT_SCOPES),
         str(ts),
         token,
@@ -92,9 +106,11 @@ class OpenClawConnection:
         if websockets is None:
             raise OpenClawError("Python package 'websockets' is required")
         try:
+            # ping_interval=None: the Gateway drives keepalive; a client ping the
+            # Gateway never answers would otherwise tear down the connection.
             ws = await websockets.connect(
                 normalize_ws_url(gateway_url),
-                ping_interval=20,
+                ping_interval=None,
             )
         except Exception as exc:
             raise OpenClawError(
@@ -108,12 +124,14 @@ class OpenClawConnection:
             ):
                 raise OpenClawError("OpenClaw did not send connect.challenge")
             challenge = first.get("payload") or {}
-            signed_device = sign_challenge(
-                device_identity,
-                challenge.get("nonce", ""),
-                int(challenge.get("ts") or time.time() * 1000),
-                token,
-            )
+            nonce = challenge.get("nonce")
+            ts = challenge.get("ts")
+            if not nonce or ts is None:
+                raise OpenClawError("connect.challenge missing nonce or ts")
+            # Sign the timestamp exactly as the Gateway issued it. Fabricating a
+            # ts (e.g. falling back to the local clock) yields a signature the
+            # Gateway cannot verify, since it rebuilds the payload from its nonce.
+            signed_device = sign_challenge(device_identity, nonce, ts, token)
             req_id = str(uuid.uuid4())
             await ws.send(
                 json.dumps(
@@ -125,16 +143,16 @@ class OpenClawConnection:
                             "minProtocol": 3,
                             "maxProtocol": 4,
                             "client": {
-                                "id": "openclaw-webchat",
-                                "version": "0.1.0",
-                                "platform": "web",
-                                "mode": "web",
+                                "id": _CLIENT_ID,
+                                "version": _CLIENT_VERSION,
+                                "platform": _CLIENT_PLATFORM,
+                                "mode": _CLIENT_MODE,
                             },
-                            "role": "operator",
+                            "role": _CLIENT_ROLE,
                             "scopes": DEFAULT_SCOPES,
                             "auth": {"token": token},
                             "device": signed_device,
-                            "locale": "fr-CA",
+                            "locale": "en-US",
                             "userAgent": "openclaw-webchat-bridge/0.1.0",
                             "caps": ["agent-events", "tool-events"],
                         },

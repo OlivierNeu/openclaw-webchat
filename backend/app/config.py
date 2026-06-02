@@ -59,6 +59,12 @@ def resolve_user_target(
     profile: UserProfile | None = config.users.get(normalized_email)
     if profile is None:
         raise ConfigError(f"Email is not mapped to an OpenClaw profile: {email}")
+    # When a profile restricts chat namespaces, the requested chatId must match
+    # one of the allowed prefixes. Empty list = no restriction.
+    if profile.allowedChatPrefixes and not any(
+        chat_id.startswith(prefix) for prefix in profile.allowedChatPrefixes
+    ):
+        raise ConfigError(f"chatId is not allowed for this user: {chat_id}")
     instance = config.instances.get(profile.instance)
     if instance is None:
         raise ConfigError(f"Unknown OpenClaw instance: {profile.instance}")

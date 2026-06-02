@@ -1,12 +1,22 @@
 import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { onAuthStateChanged, type User } from "firebase/auth";
 import { auth, loginWithGoogle, logout } from "./firebase";
+import {
+  applyStreamEvent,
+  safeHref,
+  statusLabel,
+  textFromContent,
+  type MediaItem,
+  type Streaming
+} from "./bridge";
 
 type ChatMessage = {
   id: string;
   role: "user" | "assistant" | "system";
   text: string;
   ts?: number;
+  error?: boolean;
+  media?: MediaItem[];
 };
 
 type ConnectionState =
@@ -33,67 +43,6 @@ function wsUrl(chatId: string): string {
   return `${protocol}//${window.location.host}/ws/chats/${chatId}`;
 }
 
-function textFromContent(content: unknown): string {
-  if (typeof content === "string") {
-    return content;
-  }
-  if (!Array.isArray(content)) {
-    return "";
-  }
-  return content
-    .map((part) => {
-      if (typeof part === "string") {
-        return part;
-      }
-      if (part && typeof part === "object" && "text" in part) {
-        return String((part as { text?: unknown }).text ?? "");
-      }
-      return "";
-    })
-    .filter(Boolean)
-    .join("\n");
-}
-
-function textFromMessage(message: Record<string, unknown> | undefined): string {
-  if (!message) {
-    return "";
-  }
-  return textFromContent(message.content ?? message.text);
-}
-
-function textFromToolMessage(data: Record<string, unknown>): string {
-  const args = data.args as Record<string, unknown> | undefined;
-  const result = data.result as Record<string, unknown> | undefined;
-  const text = textFromContent(
-    args?.message ??
-      args?.text ??
-      args?.content ??
-      data.message ??
-      data.text ??
-      data.content ??
-      result?.message ??
-      result?.text ??
-      result?.content
-  );
-  const mediaText = textFromContent(
-    data.mediaUrls ?? data.media_urls ?? result?.mediaUrls ?? result?.media_urls
-  );
-  return [text, mediaText].filter(Boolean).join("\n");
-}
-
-function appendOrReplace(
-  messages: ChatMessage[],
-  message: ChatMessage
-): ChatMessage[] {
-  const index = messages.findIndex((item) => item.id === message.id);
-  if (index === -1) {
-    return [...messages, message];
-  }
-  const next = [...messages];
-  next[index] = message;
-  return next;
-}
-
 function mergeMessages(current: ChatMessage[], incoming: ChatMessage[]): ChatMessage[] {
   const byId = new Map<string, ChatMessage>();
   for (const message of incoming) {
@@ -109,36 +58,9 @@ function mergeMessages(current: ChatMessage[], incoming: ChatMessage[]): ChatMes
   });
 }
 
-function appendAssistantDelta(
-  messages: ChatMessage[],
-  id: string,
-  delta: string
-): ChatMessage[] {
-  const index = messages.findIndex((item) => item.id === id);
-  if (index === -1) {
-    return [...messages, { id, role: "assistant", text: delta, ts: Date.now() }];
-  }
-  const next = [...messages];
-  next[index] = {
-    ...next[index],
-    text: `${next[index].text}${delta}`,
-    ts: Date.now()
-  };
-  return next;
-}
-
-function safeHref(href: string): string | null {
-  try {
-    const url = new URL(href, window.location.origin);
-    if (url.protocol !== "http:" && url.protocol !== "https:") {
-      return null;
-    }
-    return href;
-  } catch {
-    return null;
-  }
-}
-
+// Render plain text with safe markdown/auto links only. The bridge already
+// sanitizes server paths and signs media URLs; we still refuse non-http(s)
+// schemes so a crafted link cannot smuggle javascript:/data: targets.
 function renderText(text: string): ReactNode[] {
   const nodes: ReactNode[] = [];
   const pattern = /\[([^\]]+)\]\(([^)]+)\)|(https?:\/\/[^\s)]+)/g;
@@ -150,15 +72,10 @@ function renderText(text: string): ReactNode[] {
     }
     const label = match[1] ?? match[3] ?? "";
     const href = match[2] ?? match[3] ?? "";
-    const safe = safeHref(href);
+    const safe = safeHref(href, window.location.origin);
     if (safe) {
       nodes.push(
-        <a
-          key={`${safe}-${match.index}`}
-          href={safe}
-          rel="noreferrer"
-          target="_blank"
-        >
+        <a key={`${safe}-${match.index}`} href={safe} rel="noreferrer" target="_blank">
           {label}
         </a>
       );
@@ -173,18 +90,47 @@ function renderText(text: string): ReactNode[] {
   return nodes;
 }
 
+function MessageMedia({ media }: { media?: MediaItem[] }): ReactNode {
+  if (!media || media.length === 0) {
+    return null;
+  }
+  return (
+    <ul className="media">
+      {media.map((item) => {
+        const safe = item.url ? safeHref(item.url, window.location.origin) : null;
+        return (
+          <li key={item.filename}>
+            📎{" "}
+            {safe ? (
+              <a href={safe} rel="noreferrer" target="_blank">
+                {item.filename}
+              </a>
+            ) : (
+              item.filename
+            )}
+          </li>
+        );
+      })}
+    </ul>
+  );
+}
+
 function App() {
   const [user, setUser] = useState<User | null>(null);
   const [chatId, setChatId] = useState(() => {
     return localStorage.getItem("openclaw.chatId") || newChatId();
   });
   const [messages, setMessages] = useState<ChatMessage[]>([]);
+  const [streaming, setStreaming] = useState<Streaming | null>(null);
   const [input, setInput] = useState("");
   const [state, setState] = useState<ConnectionState>("signed-out");
   const [status, setStatus] = useState("");
   const socketRef = useRef<WebSocket | null>(null);
   const bridgeErrorRef = useRef(false);
   const bottomRef = useRef<HTMLDivElement | null>(null);
+  // Authoritative streaming value, read/written synchronously inside the frame
+  // handler to avoid stale-closure bugs; mirrored into state for rendering.
+  const streamingRef = useRef<Streaming | null>(null);
 
   const devToken = import.meta.env.VITE_DEV_ID_TOKEN as string | undefined;
 
@@ -198,12 +144,14 @@ function App() {
     return onAuthStateChanged(auth, (nextUser) => {
       setUser(nextUser);
       if (!nextUser && !devToken) {
+        // Sign-out must tear down the live socket immediately.
         const socket = socketRef.current;
         socketRef.current = null;
         socket?.close();
         bridgeErrorRef.current = false;
         setState("signed-out");
         setStatus("");
+        resetStreaming();
       }
     });
   }, [devToken]);
@@ -218,7 +166,12 @@ function App() {
 
   useEffect(() => {
     bottomRef.current?.scrollIntoView({ behavior: "smooth", block: "end" });
-  }, [messages, status]);
+  }, [messages, streaming, status]);
+
+  function resetStreaming() {
+    streamingRef.current = null;
+    setStreaming(null);
+  }
 
   async function connect() {
     const token = devToken || (user ? await user.getIdToken() : "");
@@ -228,6 +181,7 @@ function App() {
     }
     socketRef.current?.close();
     bridgeErrorRef.current = false;
+    resetStreaming();
     setState("connecting");
     setStatus("Connexion OpenClaw...");
     const socket = new WebSocket(wsUrl(chatId));
@@ -261,115 +215,96 @@ function App() {
       if (socketRef.current !== socket) {
         return;
       }
-      const frame = JSON.parse(event.data);
+      let frame: Record<string, unknown>;
+      try {
+        frame = JSON.parse(event.data);
+      } catch {
+        return;
+      }
       handleBridgeFrame(frame);
     };
   }
 
   function handleBridgeFrame(frame: Record<string, unknown>) {
-    if (frame.type === "bridge.ready") {
-      const target = frame.target as { sessionKey?: string } | undefined;
-      setStatus(`Session ${target?.sessionKey ?? ""}`);
-      return;
-    }
-    if (frame.type === "bridge.error") {
-      bridgeErrorRef.current = true;
-      setState("error");
-      setStatus(String(frame.message ?? "Erreur bridge"));
-      return;
-    }
-    if (frame.type === "chat.history") {
-      const payload = frame.payload as { messages?: unknown[] };
-      const history = Array.isArray(payload?.messages) ? payload.messages : [];
-      const mapped = history
-        .map((item, index) => {
-          const raw = item as Record<string, unknown>;
-          return {
-            id: String(raw.id ?? `history-${index}`),
-            role: raw.role === "user" ? "user" : "assistant",
-            text: textFromContent(raw.content ?? raw.text ?? raw.message),
-            ts: typeof raw.ts === "number" ? raw.ts : undefined
-          } satisfies ChatMessage;
-        })
-        .filter((item) => item.text);
-      setMessages((current) => mergeMessages(current, mapped));
-      return;
-    }
-    if (frame.type === "chat.send.result") {
-      setStatus("OpenClaw traite la demande...");
-      return;
-    }
-    if (frame.type !== "openclaw.frame") {
-      return;
-    }
-    const openclawFrame = frame.frame as Record<string, unknown>;
-    const eventType = openclawFrame.event;
-    const payload = openclawFrame.payload as Record<string, unknown> | undefined;
-    if (!payload) {
-      return;
-    }
-    if (eventType === "chat") {
-      const stateValue = payload.state;
-      const message = payload.message as Record<string, unknown> | undefined;
-      const id = String(payload.runId ?? "assistant-current");
-      const snapshotText = textFromMessage(message);
-      if (snapshotText) {
-        setMessages((current) =>
-          appendOrReplace(current, {
-            id,
-            role: "assistant",
-            text: snapshotText,
-            ts: Date.now()
-          })
-        );
-      } else if (typeof payload.deltaText === "string" && payload.deltaText) {
-        setMessages((current) =>
-          appendAssistantDelta(current, id, String(payload.deltaText))
-        );
-      } else {
+    switch (frame.type) {
+      case "bridge.ready": {
+        const target = frame.target as { sessionKey?: string } | undefined;
+        setStatus(`Session ${target?.sessionKey ?? ""}`);
         return;
       }
-      setStatus(stateValue === "final" ? "OpenClaw a terminé." : "Réponse en cours...");
-      return;
-    }
-    if (eventType === "agent") {
-      const stream = payload.stream;
-      const data = payload.data as Record<string, unknown> | undefined;
-      if (stream === "lifecycle" && data?.phase === "end") {
-        setStatus("OpenClaw finalise la réponse...");
-      } else if (stream === "tool" && data?.name) {
-        const name = String(data.name);
-        setStatus(`Outil: ${name}`);
-        if (name === "message") {
-          const text = textFromToolMessage(data);
-          if (text) {
-            setMessages((current) =>
-              appendOrReplace(current, {
-                id: String(payload.runId ?? data.toolCallId ?? "message-tool"),
-                role: "assistant",
-                text,
-                ts: Date.now()
-              })
-            );
+      case "bridge.error": {
+        const fatal = frame.fatal !== false; // default to fatal for safety
+        setStatus(String(frame.message ?? "Erreur bridge"));
+        if (fatal) {
+          bridgeErrorRef.current = true;
+          setState("error");
+        }
+        return;
+      }
+      case "bridge.warning":
+        setStatus(String(frame.message ?? "Avertissement bridge"));
+        return;
+      case "chat.history": {
+        const payload = frame.payload as { messages?: unknown[] } | undefined;
+        const history = Array.isArray(payload?.messages) ? payload!.messages : [];
+        const mapped = history
+          .map((item, index) => {
+            const raw = item as Record<string, unknown>;
+            return {
+              id: String(raw.id ?? `history-${index}`),
+              role: raw.role === "user" ? "user" : "assistant",
+              text: textFromContent(raw.content ?? raw.text ?? raw.message),
+              ts: typeof raw.ts === "number" ? raw.ts : undefined
+            } satisfies ChatMessage;
+          })
+          .filter((item) => item.text);
+        setMessages((current) => mergeMessages(current, mapped));
+        return;
+      }
+      case "chat.send.result":
+        setStatus("OpenClaw traite la demande...");
+        return;
+      case "chat.abort.result":
+        setStatus("Demande d’interruption envoyée.");
+        return;
+      case "tool.status":
+        if (frame.phase === "start" && frame.name) {
+          setStatus(`Outil : ${String(frame.name)}`);
+        }
+        return;
+      case "message.delta":
+      case "message.snapshot":
+      case "message.final":
+      case "media":
+      case "run.status": {
+        if (frame.type === "run.status") {
+          const label = statusLabel(frame.status);
+          if (label) {
+            setStatus(label);
           }
         }
-      } else if (stream === "assistant") {
-        const id = String(payload.runId ?? "assistant-current");
-        if (typeof data?.text === "string") {
-          setMessages((current) =>
-            appendOrReplace(current, {
-              id,
+        const update = applyStreamEvent(streamingRef.current, frame);
+        if (update.final) {
+          const { text, error, media } = update.final;
+          setMessages((current) => [
+            ...current,
+            {
+              id: crypto.randomUUID(),
               role: "assistant",
-              text: String(data.text),
-              ts: Date.now()
-            })
-          );
-        } else if (typeof data?.delta === "string") {
-          setMessages((current) =>
-            appendAssistantDelta(current, id, String(data.delta))
-          );
+              text,
+              ts: Date.now(),
+              error,
+              media: media.length ? media : undefined
+            }
+          ]);
         }
+        streamingRef.current = update.streaming;
+        setStreaming(update.streaming);
+        return;
       }
+      // "openclaw.frame" is a deprecated raw passthrough; the UI ignores it.
+      default:
+        return;
     }
   }
 
@@ -384,14 +319,16 @@ function App() {
       { id: clientMessageId, role: "user", text, ts: Date.now() }
     ]);
     socketRef.current.send(
-      JSON.stringify({
-        type: "chat.send",
-        message: text,
-        clientMessageId
-      })
+      JSON.stringify({ type: "chat.send", message: text, clientMessageId })
     );
     setInput("");
     setStatus("Envoi...");
+  }
+
+  function abortRun() {
+    if (socketRef.current?.readyState === WebSocket.OPEN) {
+      socketRef.current.send(JSON.stringify({ type: "chat.abort" }));
+    }
   }
 
   function startNewChat() {
@@ -399,6 +336,7 @@ function App() {
     const nextId = newChatId();
     setChatId(nextId);
     setMessages([]);
+    resetStreaming();
     setStatus("Nouvelle conversation créée.");
   }
 
@@ -416,6 +354,12 @@ function App() {
         <button onClick={connect} disabled={!user && !devToken}>
           Reconnect / Sync
         </button>
+        <button
+          onClick={abortRun}
+          disabled={socketRef.current?.readyState !== WebSocket.OPEN}
+        >
+          Stop
+        </button>
         {user || devToken ? (
           <button onClick={() => logout()}>Sign out</button>
         ) : (
@@ -431,11 +375,22 @@ function App() {
         </header>
         <div className="messages">
           {messages.map((message) => (
-            <article key={message.id} className={`message ${message.role}`}>
+            <article
+              key={message.id}
+              className={`message ${message.role}${message.error ? " error" : ""}`}
+            >
               <div className="role">{message.role}</div>
               <pre>{renderText(message.text)}</pre>
+              <MessageMedia media={message.media} />
             </article>
           ))}
+          {streaming ? (
+            <article className="message assistant streaming">
+              <div className="role">assistant</div>
+              <pre>{renderText(streaming.text)}</pre>
+              <MessageMedia media={streaming.media} />
+            </article>
+          ) : null}
           <div ref={bottomRef} />
         </div>
         <footer>

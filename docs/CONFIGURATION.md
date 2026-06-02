@@ -33,7 +33,7 @@ JSON document.
 | `VITE_FIREBASE_PROJECT_ID` | Firebase project ID. |
 | `VITE_FIREBASE_APP_ID` | Firebase web app ID. |
 | `VITE_OPENCLAW_BRIDGE_WS_URL` | Explicit backend WebSocket base URL. Leave empty in all-in-one Docker mode. |
-| `VITE_DEV_ID_TOKEN` | Development-only token, for example `dev:olivier@lacneu.com`. |
+| `VITE_DEV_ID_TOKEN` | Development-only token, for example `dev:alice@example.com`. |
 
 ## Routing Configuration
 
@@ -44,7 +44,11 @@ Each user entry maps one Firebase email to:
 - an OpenClaw instance name;
 - an OpenClaw agent ID;
 - a canonical user key;
-- a display name.
+- a display name;
+- `allowedChatPrefixes` (optional): a list of allowed `chatId` prefixes. When
+  non-empty, the bridge rejects any WebSocket whose `chatId` does not start with
+  one of them, restricting which chat namespaces the user may open. An empty
+  list (or omitting the field) means no restriction.
 
 Each instance entry defines:
 
@@ -53,6 +57,17 @@ Each instance entry defines:
 - device identity or device identity environment variable.
 
 Secrets should be provided through environment variables, not committed in JSON.
+The example `config.json` env names (`OPENCLAW_ALICE_GATEWAY_TOKEN`, ...) are
+referenced by `tokenEnv` / `deviceIdentityEnv`; rename them to match your own
+instances.
+
+The runtime config file is never the committed `config.example.json`. Copy it
+first:
+
+```bash
+cp config.example.json config.json   # then edit, and set
+export OPENCLAW_WEBCHAT_CONFIG_HOST_FILE="$PWD/config.json"
+```
 
 ## Session Key Strategy
 

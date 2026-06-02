@@ -1,6 +1,5 @@
 {
   "projects": {
-    "default": "lacneu-openclaw-webchat"
+    "default": "your-firebase-project-id"
   }
 }
-

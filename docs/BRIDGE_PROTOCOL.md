@@ -17,6 +17,12 @@ GET /api/capabilities
 Until `1.0`, message shapes can still evolve. Breaking changes must be recorded
 in this document and covered by regression tests.
 
+The stable surface clients should depend on is the **normalized streaming
+events** (`message.delta`, `message.snapshot`, `message.final`, `run.status`,
+`tool.status`, `media`). The raw `openclaw.frame` passthrough is deprecated and
+exists only for backward compatibility. See "OpenClaw Version Compatibility
+Strategy" below.
+
 ## HTTP Endpoints
 
 ### `GET /health`
@@ -192,25 +198,105 @@ Sanitized OpenClaw history payload.
 
 ### `chat.send.result`
 
-OpenClaw acknowledgement for `chat.send`.
+Sanitized OpenClaw acknowledgement for `chat.send`.
 
 ```json
 {"type": "chat.send.result", "payload": {"ok": true}}
 ```
 
-### `openclaw.frame`
+### `chat.abort.result`
 
-Sanitized frame from OpenClaw for the current session only.
+Sanitized OpenClaw acknowledgement for `chat.abort`. The bridge also finalizes
+the active turn (`run.status` = `aborted`) before sending this message.
+
+```json
+{"type": "chat.abort.result", "payload": {"ok": true}}
+```
+
+## Normalized Streaming Events
+
+These are the **stable contract** a frontend should consume. The bridge
+normalizes the raw, version-dependent OpenClaw frames (5.7 `agent` deltas, 5.19
+`chat` snapshots, tool deliveries, lifecycle, compaction, private acks, ...)
+into this small vocabulary. The reference frontend renders one in-progress
+assistant reply per turn from these events.
+
+### `message.delta`
+
+Append `text` to the current in-progress reply. Whitespace is significant and
+preserved verbatim.
+
+```json
+{"type": "message.delta", "text": "Hello "}
+```
+
+### `message.snapshot`
+
+Replace the current in-progress reply with `text` (authoritative snapshot, e.g.
+a 5.19 `chat` message or a message-tool delivery). Once a snapshot is received,
+later deltas for the same turn are ignored.
+
+```json
+{"type": "message.snapshot", "text": "Bonjour !"}
+```
+
+### `message.final`
+
+The turn's authoritative final text. The frontend should commit the reply and
+stop streaming. Carries an optional `error` string when the run failed.
+
+```json
+{"type": "message.final", "text": "Bonjour !"}
+```
+
+### `run.status`
+
+Run lifecycle for the current turn. `status` is one of `started`, `running`,
+`working`, `compacting`, `final`, `error`, `aborted`.
+
+```json
+{"type": "run.status", "status": "compacting", "runId": "run-1"}
+```
+
+`compacting` means OpenClaw abandoned the run for auto-compaction and will
+replay it; the frontend must **discard** the partial reply and wait for the
+restart.
+
+### `tool.status`
+
+Tool activity for visibility (e.g. show "Outil : write-file").
+
+```json
+{"type": "tool.status", "name": "write-file", "phase": "start", "runId": "run-1"}
+```
+
+### `media`
+
+Signed, downloadable links for files OpenClaw produced. Server paths are never
+included.
+
+```json
+{"type": "media", "items": [{"filename": "report.pdf", "url": "https://.../api/media/outbound/report.pdf?scope=..."}], "runId": "run-1"}
+```
+
+### `openclaw.frame` (deprecated)
+
+Raw, sanitized OpenClaw frame for the current session, kept only for backward
+compatibility. New clients should ignore it and consume the normalized events
+above. It will be removed in a future version.
 
 ```json
 {"type": "openclaw.frame", "frame": {"event": "chat", "payload": {}}}
 ```
 
-Security rules:
+Isolation and sanitization (applied to every forwarded frame and event):
 
-- only frames whose `payload.sessionKey` matches the current session are
-  forwarded;
-- local `/home/node/.openclaw/...` paths are removed or converted;
+- a frame is forwarded only when its `payload.sessionKey` matches the current
+  session **and** (once seeded from the `chat.send` ack) its `runId` belongs to
+  the current turn; foreign-session, sessionless and background-run frames are
+  dropped;
+- local `/home/node/.openclaw/...` paths are removed or converted to signed
+  links;
 - `mediaUrls` are converted to signed bridge URLs;
 - OpenClaw credentials are never forwarded.
 
@@ -220,8 +306,18 @@ Non-fatal client usage issue, for example an unknown browser message.
 
 ### `bridge.error`
 
-Fatal bridge or upstream error. The backend closes the WebSocket after sending
-this message.
+Bridge or upstream error.
+
+```json
+{"type": "bridge.error", "message": "OpenClaw Gateway connection closed", "fatal": true}
+```
+
+- `fatal: true` (or absent) — the backend closes the WebSocket after this
+  message (connection lost, handshake failure, internal error). The frontend
+  must treat the session as ended.
+- `fatal: false` — a contained, per-message failure (e.g. a single `chat.send`
+  timed out). The socket stays open, the optimistic message is preserved, and
+  the user can retry. The current turn is finalized with `run.status` = `error`.
 
 ## Frontend Guidance
 
@@ -230,6 +326,57 @@ Third-party frontends should:
 - call `/api/capabilities` before relying on optional features;
 - use stable `chatId` values and persist them locally;
 - reconcile state after reconnect by sending `chat.history`;
-- treat `openclaw.frame` as sanitized but still untrusted display content;
+- consume the normalized `message.*` / `run.status` / `tool.status` / `media`
+  events and ignore the deprecated `openclaw.frame`;
+- treat all forwarded text as untrusted display content;
 - render Markdown links only with safe URL schemes;
+- discard the in-progress reply on `run.status` = `compacting`;
 - close the socket on sign-out.
+
+## OpenClaw Version Compatibility Strategy
+
+OpenClaw evolves quickly and each release can change event shapes. The bridge
+shields the frontend from this with one rule: **all version-specific frame
+parsing lives in the backend normalizer; the frontend only sees the stable
+events above.**
+
+- The normalizer handles both the legacy 5.7 path (`agent` `stream: assistant`
+  incremental `data.delta`, terminated by `lifecycle:end`) and the 5.19 path
+  (`chat` frames with `payload.message` snapshots and `payload.deltaText`, plus
+  message-tool delivery). A mixed-version fleet (e.g. one instance on each)
+  works without frontend changes.
+- Known event quirks are absorbed and regression-tested: empty finals followed
+  by content, duplicate finals, lifecycle-end followed by a follow-on run,
+  auto-compaction (`livenessState == "abandoned"`), private acknowledgements,
+  and `mediaUrls` / `MEDIA:` deliveries.
+- When a new OpenClaw version changes a shape, add a fixture under
+  `backend/tests/fixtures/`, extend the normalizer, and the frontend contract
+  stays unchanged. New normalized event types are additive and announced via
+  `GET /api/capabilities`; `openclaw.frame` remains as a temporary escape hatch.
+
+## Security Model for Media and Auth
+
+Authentication:
+
+- Every WebSocket and HTTP request is authenticated with a Firebase ID token,
+  verified server-side (signature, expiry, `email_verified`, revocation).
+- Access is gated by `ALLOWED_EMAILS` / `ALLOWED_EMAIL_DOMAINS`; an
+  authenticated user is then mapped to exactly one OpenClaw instance/agent.
+  Per-user `allowedChatPrefixes` can further restrict which chat namespaces a
+  user may open.
+- OpenClaw Gateway tokens and device identities are server-side only and are
+  never sent to the browser.
+
+Media links:
+
+- Files are served via `GET /api/media/outbound/{filename}` behind an HMAC
+  signature over `filename`, `scope`, `exp` and `fp` (`OPENCLAW_MEDIA_LINK_SECRET`).
+- `scope` binds the link to the session key (HMAC of the session). `exp` makes
+  links short-lived (`OPENCLAW_MEDIA_LINK_TTL_SECONDS`). `fp` is the file's
+  size+mtime fingerprint, so a different file reusing the same basename
+  invalidates old links.
+- Server filesystem paths (`/home/node/.openclaw/...`) are never exposed; only
+  the basename appears, inside a signed URL. The download endpoint re-validates
+  the signature, expiry and fingerprint, and refuses path traversal.
+- Treat signed media links as bearer credentials for their TTL; do not persist
+  them as permanent document URLs.

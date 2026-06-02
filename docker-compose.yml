@@ -16,13 +16,18 @@ services:
       - "8080:8080"
     environment:
       - OPENCLAW_WEBCHAT_CONFIG_FILE=/app/config/config.json
-      - FIREBASE_PROJECT_ID=${FIREBASE_PROJECT_ID}
+      - FIREBASE_PROJECT_ID=${FIREBASE_PROJECT_ID:-}
       - GOOGLE_APPLICATION_CREDENTIALS=/app/secrets/firebase-service-account.json
-      - OPENCLAW_OLIVIER_GATEWAY_TOKEN=${OPENCLAW_OLIVIER_GATEWAY_TOKEN}
-      - OPENCLAW_OLIVIER_DEVICE_IDENTITY=${OPENCLAW_OLIVIER_DEVICE_IDENTITY}
-      - OPENCLAW_JEROME_GATEWAY_TOKEN=${OPENCLAW_JEROME_GATEWAY_TOKEN}
-      - OPENCLAW_JEROME_DEVICE_IDENTITY=${OPENCLAW_JEROME_DEVICE_IDENTITY}
-      - ALLOWED_EMAIL_DOMAINS=lacneu.com,ataraxis-coaching.com
+      # Gateway secrets are read by name from config.json (tokenEnv /
+      # deviceIdentityEnv). Rename these to match the env vars your config.json
+      # references (the example config uses ALICE / BOB).
+      - OPENCLAW_ALICE_GATEWAY_TOKEN=${OPENCLAW_ALICE_GATEWAY_TOKEN:-}
+      - OPENCLAW_ALICE_DEVICE_IDENTITY=${OPENCLAW_ALICE_DEVICE_IDENTITY:-}
+      - OPENCLAW_BOB_GATEWAY_TOKEN=${OPENCLAW_BOB_GATEWAY_TOKEN:-}
+      - OPENCLAW_BOB_DEVICE_IDENTITY=${OPENCLAW_BOB_DEVICE_IDENTITY:-}
+      # Access allowlist — set at least one. No personal default is baked in.
+      - ALLOWED_EMAIL_DOMAINS=${ALLOWED_EMAIL_DOMAINS:-}
+      - ALLOWED_EMAILS=${ALLOWED_EMAILS:-}
       - ALLOWED_ORIGINS=${ALLOWED_ORIGINS:-*}
       - OPENCLAW_WEBCHAT_PUBLIC_BASE_URL=${OPENCLAW_WEBCHAT_PUBLIC_BASE_URL:-}
       - OPENCLAW_MEDIA_LINK_SECRET=${OPENCLAW_MEDIA_LINK_SECRET:?OPENCLAW_MEDIA_LINK_SECRET is required}
@@ -30,6 +35,12 @@ services:
       - OPENCLAW_MEDIA_OUTBOUND_DIR=/home/node/.openclaw/media/outbound
       - OPENCLAW_WEBCHAT_STATIC_DIR=/app/static
     volumes:
-      - ./config.example.json:/app/config/config.json:ro
+      # Provide your own routing config (copy config.example.json first). The
+      # example file is NEVER mounted as the live config, to avoid booting with
+      # the template instance/user mappings.
+      - ${OPENCLAW_WEBCHAT_CONFIG_HOST_FILE:?Set OPENCLAW_WEBCHAT_CONFIG_HOST_FILE to your config.json (cp config.example.json config.json)}:/app/config/config.json:ro
       - ./secrets/firebase-service-account.json:/app/secrets/firebase-service-account.json:ro
+      # All OpenClaw instances must write generated files into ONE shared
+      # outbound directory mounted here read-only. See docs/DEPLOYMENT.md
+      # (Media Volume) for the multi-instance requirement and caveats.
       - ${OPENCLAW_MEDIA_OUTBOUND_HOST_DIR:?OPENCLAW_MEDIA_OUTBOUND_HOST_DIR is required}:/home/node/.openclaw/media/outbound:ro

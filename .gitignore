@@ -28,8 +28,27 @@ firebase-service-account.json
 openclaw-frame-captures/
 *.ndjson
 *.log
+# ...but committed regression fixtures (frame captures replayed by the test
+# suite) must stay tracked despite the *.ndjson / *.log globs above.
+!backend/tests/fixtures/
+!backend/tests/fixtures/**
 
 # OS / editors
 .DS_Store
 .idea/
 .vscode/
+
+# Node / Vite / Convex (claude-monitor-style root app)
+node_modules/
+dist/
+bridge/node_modules/
+bridge/dist/
+.convex/
+nanobanana-output/
+# NOTE: convex/_generated/ is COMMITTED on purpose (Convex convention) so the
+# repo typechecks on a fresh clone before the first `convex dev`.
+
+# Ephemeral git worktrees created by `isolation: "worktree"` workflow agents —
+# disposable checkouts of THIS repo, never source. (The .claude/skills/* symlinks
+# installed by `convex ai-files` are tracked and stay tracked.)
+.claude/worktrees/

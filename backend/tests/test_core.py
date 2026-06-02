@@ -10,10 +10,14 @@ from app import auth as auth_module
 from app.config import load_config, resolve_user_target
 from app.main import (
     _authenticate_websocket,
+    _extract_run_id,
+    _handle_abort,
+    _handle_send,
     _history_limit,
     _openclaw_to_browser,
     _send_chat_message,
 )
+from app.normalizer import Normalizer
 from app.openclaw_client import (
     OpenClawConnection,
     OpenClawError,
@@ -32,8 +36,8 @@ from app.session_keys import build_session_key
 
 def test_build_session_key_sanitizes_parts():
     assert (
-        build_session_key("olivier", "olivier.neu@lacneu.com", "chat:1 / x")
-        == "agent:olivier:webchat:chat:olivier.neu-lacneu.com:chat-1-x"
+        build_session_key("alice", "alice.smith@example.com", "chat:1 / x")
+        == "agent:alice:webchat:chat:alice.smith-example.com:chat-1-x"
     )
 
 
@@ -160,7 +164,7 @@ def test_sanitize_text_preserves_streaming_delta_spaces():
 
 
 def test_normalize_ws_url():
-    assert normalize_ws_url("192.168.1.49:18789") == "ws://192.168.1.49:18789"
+    assert normalize_ws_url("10.0.0.5:18789") == "ws://10.0.0.5:18789"
     assert normalize_ws_url("http://x:1") == "ws://x:1"
     assert normalize_ws_url("https://x") == "wss://x"
 
@@ -187,11 +191,11 @@ def test_resolve_user_target_from_env_config(monkeypatch):
             }
         },
         "users": {
-            "olivier@lacneu.com": {
+            "alice@example.com": {
                 "instance": "olivier",
-                "agentId": "olivier",
-                "canonical": "olivier",
-                "displayName": "Olivier",
+                "agentId": "alice",
+                "canonical": "alice",
+                "displayName": "Alice",
             }
         },
     }
@@ -201,12 +205,12 @@ def test_resolve_user_target_from_env_config(monkeypatch):
 
     target = resolve_user_target(
         load_config(),
-        "Olivier@Lacneu.com",
+        "Alice@Example.com",
         "chat-1",
     )
 
-    assert target.email == "olivier@lacneu.com"
-    assert target.sessionKey == "agent:olivier:webchat:chat:olivier:chat-1"
+    assert target.email == "alice@example.com"
+    assert target.sessionKey == "agent:alice:webchat:chat:alice:chat-1"
     assert target.token == "secret"
     assert target.deviceIdentity == identity
 
@@ -218,6 +222,41 @@ def test_resolve_user_target_rejects_unmapped_user(monkeypatch):
     )
     with pytest.raises(RuntimeError):
         resolve_user_target(load_config(), "unknown@example.com", "chat")
+
+
+def test_resolve_user_target_enforces_allowed_chat_prefixes(monkeypatch):
+    config = {
+        "instances": {
+            "alice": {
+                "url": "ws://gateway:18789",
+                "tokenEnv": "OPENCLAW_TEST_TOKEN",
+                "deviceIdentityEnv": "OPENCLAW_TEST_IDENTITY",
+            }
+        },
+        "users": {
+            "alice@example.com": {
+                "instance": "alice",
+                "agentId": "alice",
+                "canonical": "alice",
+                "displayName": "Alice",
+                "allowedChatPrefixes": ["team-"],
+            }
+        },
+    }
+    monkeypatch.setenv("OPENCLAW_WEBCHAT_CONFIG", json.dumps(config))
+    monkeypatch.setenv("OPENCLAW_TEST_TOKEN", "secret")
+    monkeypatch.setenv(
+        "OPENCLAW_TEST_IDENTITY",
+        json.dumps({"id": "d", "publicKey": "p", "privateKey": "k"}),
+    )
+
+    # A matching prefix is accepted.
+    target = resolve_user_target(load_config(), "alice@example.com", "team-42")
+    assert target.sessionKey.endswith("team-42")
+
+    # A non-matching chatId is rejected.
+    with pytest.raises(RuntimeError):
+        resolve_user_target(load_config(), "alice@example.com", "private-99")
 
 
 def test_history_limit_rejects_invalid_values():
@@ -287,7 +326,7 @@ async def test_invalid_firebase_token_returns_401(monkeypatch):
 async def test_unverified_firebase_email_returns_401(monkeypatch):
     def fake_verify_id_token(token, check_revoked=True):
         return {
-            "email": "olivier@lacneu.com",
+            "email": "alice@example.com",
             "email_verified": False,
             "uid": "uid-1",
         }
@@ -305,58 +344,57 @@ async def test_unverified_firebase_email_returns_401(monkeypatch):
     assert exc.value.status_code == 401
 
 
+class _FakeWebSocket:
+    def __init__(self):
+        self.sent = []
+        self.closed_code = None
+
+    async def send_json(self, payload):
+        self.sent.append(payload)
+
+    async def close(self, code=1000):
+        self.closed_code = code
+
+
+class _FakeConnection:
+    def __init__(self):
+        self.events = asyncio.Queue()
+        self.calls = []
+
+    async def request(self, method, params, timeout=30):
+        self.calls.append((method, params, timeout))
+        return {"ok": True, "method": method}
+
+
 @pytest.mark.asyncio
 async def test_openclaw_bridge_error_is_forwarded_and_closed():
-    class FakeWebSocket:
-        def __init__(self):
-            self.sent = []
-            self.closed_code = None
-
-        async def send_json(self, payload):
-            self.sent.append(payload)
-
-        async def close(self, code=1000):
-            self.closed_code = code
-
-    class FakeConnection:
-        def __init__(self):
-            self.events = asyncio.Queue()
-
-    websocket = FakeWebSocket()
-    conn = FakeConnection()
+    websocket = _FakeWebSocket()
+    conn = _FakeConnection()
+    normalizer = Normalizer("session", lambda name: None)
     await conn.events.put({"type": "bridge.error", "message": "upstream failed"})
 
-    await _openclaw_to_browser(websocket, conn, "session")
+    await _openclaw_to_browser(websocket, conn, "session", normalizer)
 
     assert websocket.sent == [
-        {"type": "bridge.error", "message": "upstream failed"}
+        {"type": "bridge.error", "message": "upstream failed", "fatal": True}
     ]
     assert websocket.closed_code == 1011
 
 
 @pytest.mark.asyncio
-async def test_openclaw_frame_without_session_key_is_not_forwarded():
-    class FakeWebSocket:
-        def __init__(self):
-            self.sent = []
-            self.closed_code = None
-
-        async def send_json(self, payload):
-            self.sent.append(payload)
-
-        async def close(self, code=1000):
-            self.closed_code = code
-
-    class FakeConnection:
-        def __init__(self):
-            self.events = asyncio.Queue()
-
-    websocket = FakeWebSocket()
-    conn = FakeConnection()
+async def test_loop_forwards_own_frames_and_drops_foreign():
+    websocket = _FakeWebSocket()
+    conn = _FakeConnection()
+    normalizer = Normalizer("session", lambda name: None)
+    loop = asyncio.get_running_loop()
+    normalizer.begin_turn(loop.time())
+    normalizer.note_run_started("run-x", loop.time())
+    # Foreign session frame (must be dropped), then an own delta, then close.
     await conn.events.put(
         {
             "event": "agent",
             "payload": {
+                "sessionKey": "other",
                 "stream": "assistant",
                 "data": {"delta": "foreign content"},
             },
@@ -367,6 +405,7 @@ async def test_openclaw_frame_without_session_key_is_not_forwarded():
             "event": "chat",
             "payload": {
                 "sessionKey": "session",
+                "runId": "run-x",
                 "state": "delta",
                 "deltaText": "own content",
             },
@@ -374,13 +413,85 @@ async def test_openclaw_frame_without_session_key_is_not_forwarded():
     )
     await conn.events.put({"type": "bridge.error", "message": "done"})
 
-    await _openclaw_to_browser(websocket, conn, "session")
+    await _openclaw_to_browser(websocket, conn, "session", normalizer)
 
-    openclaw_frames = [
-        item for item in websocket.sent if item.get("type") == "openclaw.frame"
+    serialized = json.dumps(websocket.sent)
+    assert "foreign content" not in serialized
+    deltas = [
+        e for e in websocket.sent
+        if e.get("type") == "message.delta" and e.get("text") == "own content"
     ]
-    assert len(openclaw_frames) == 1
-    assert openclaw_frames[0]["frame"]["payload"]["deltaText"] == "own content"
+    assert deltas, "own deltaText must reach the browser as a normalized event"
+    assert websocket.closed_code == 1011
+
+
+@pytest.mark.asyncio
+async def test_send_chat_message_applies_verbose_full_only_once():
+    conn = _FakeConnection()
+    await _send_chat_message(conn, "session-key", {"sessionKey": "session-key"})
+    await _send_chat_message(conn, "session-key", {"sessionKey": "session-key"})
+    patch_calls = [c for c in conn.calls if c[0] == "sessions.patch"]
+    send_calls = [c for c in conn.calls if c[0] == "chat.send"]
+    assert len(patch_calls) == 1  # verboseLevel=full applied once per connection
+    assert len(send_calls) == 2
+
+
+@pytest.mark.asyncio
+async def test_handle_abort_finalizes_turn_and_sanitizes_result():
+    websocket = _FakeWebSocket()
+    normalizer = Normalizer("session", lambda name: None)
+    loop = asyncio.get_running_loop()
+    normalizer.begin_turn(loop.time())
+
+    class AbortConn:
+        async def request(self, method, params, timeout=30):
+            return {
+                "ok": True,
+                "payload": {
+                    "note": "stopped at /home/node/.openclaw/media/outbound/x.pdf"
+                },
+            }
+
+    import os
+
+    os.environ["OPENCLAW_MEDIA_LINK_SECRET"] = "test-media-secret"
+    await _handle_abort(websocket, AbortConn(), "session", normalizer, loop.time())
+
+    serialized = json.dumps(websocket.sent)
+    assert "/home/node/.openclaw" not in serialized  # server path never leaks
+    assert any(
+        e.get("type") == "run.status" and e.get("status") == "aborted"
+        for e in websocket.sent
+    )
+    assert any(e.get("type") == "chat.abort.result" for e in websocket.sent)
+
+
+@pytest.mark.asyncio
+async def test_handle_send_failure_is_contained_without_closing_socket():
+    websocket = _FakeWebSocket()
+    normalizer = Normalizer("session", lambda name: None)
+    loop = asyncio.get_running_loop()
+
+    class FailingConn:
+        async def request(self, method, params, timeout=30):
+            raise OpenClawError("chat.send timed out")
+
+    await _handle_send(
+        websocket,
+        FailingConn(),
+        "session",
+        normalizer,
+        {"type": "chat.send", "message": "hi", "clientMessageId": "c1"},
+        loop,
+    )
+
+    assert websocket.closed_code is None  # socket stays open, message preserved
+    errors = [e for e in websocket.sent if e.get("type") == "bridge.error"]
+    assert errors and errors[0].get("fatal") is False
+    assert any(
+        e.get("type") == "run.status" and e.get("status") == "error"
+        for e in websocket.sent
+    )
 
 
 @pytest.mark.asyncio

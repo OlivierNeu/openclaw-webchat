@@ -1,0 +1,11 @@
+[tool.pytest.ini_options]
+# asyncio_mode = "auto" lets plain `async def test_*` run without per-test
+# markers; the existing @pytest.mark.asyncio decorators remain valid.
+asyncio_mode = "auto"
+testpaths = ["tests"]
+filterwarnings = [
+    # pytest-asyncio uses the asyncio event-loop-policy API deprecated in 3.14;
+    # scoped ignore so real warnings still surface.
+    "ignore:'asyncio.get_event_loop_policy' is deprecated:DeprecationWarning",
+    "ignore:'asyncio.set_event_loop_policy' is deprecated:DeprecationWarning",
+]
