@@ -1,0 +1,193 @@
+// RBAC permission engine (increment 1 "spine").
+//
+// This is a NEW layer that sits ALONGSIDE lib/access.ts — it does NOT replace
+// it (D5). lib/access keeps owning the user identity model (impersonation,
+// first-admin bootstrap, last-admin guard, audit attribution) and the
+// profiles.role validator. lib/rbac owns the role -> permission MATRIX used by:
+//   - service-account API-key principals (the increment-1 principals), and
+//   - (later increments) custom role assignment for users.
+//
+// Design:
+//   - PERMISSIONS is a compile-time const object; `Permission` is its value
+//     union, so every permission check is type-checked against the closed set.
+//   - BUILTIN_ROLES is the seeded baseline; the `roles` table is the runtime
+//     source of truth (custom roles + admin edits), with BUILTIN as fallback.
+//   - The wildcard "*" in a role's permission list means "all permissions"
+//     (the admin superset); roleHasPermission expands it.
+
+import type { MutationCtx, QueryCtx } from "../_generated/server";
+
+/**
+ * Compile-time permission keys. Mirrors docs/OBSERVABILITY_PLATFORM_PLAN.md
+ * "Permission keys". Keep this the single source: every `traces.read`-style
+ * literal in the codebase should flow from here so a typo is a type error.
+ */
+export const PERMISSIONS = {
+  TRACES_READ: "traces.read",
+  TRACES_READ_CONTENT: "traces.read.content", // gates raw-content capture (D2)
+  TRACES_WRITE: "traces.write",
+  KPI_READ: "kpi.read",
+  KPI_WRITE: "kpi.write",
+  OPENCLAW_QUERY: "openclaw.query", // query OpenClaw via the bridge
+  ANOMALIES_READ: "anomalies.read",
+  ANOMALIES_REPORT: "anomalies.report",
+  CHATS_READ: "chats.read", // read conversational data
+  ADMIN_MANAGE: "admin.manage", // superset; UI/admin only
+} as const;
+
+/** The closed set of valid permission keys. */
+export type Permission = (typeof PERMISSIONS)[keyof typeof PERMISSIONS];
+
+/** Wildcard sentinel: a role carrying it grants every permission. */
+export const WILDCARD = "*" as const;
+
+/**
+ * Built-in roles seeded into `roles`. `permissions` is either an explicit list
+ * of Permission keys or the wildcard "*" (admin superset). Keys here are the
+ * stable role keys referenced by serviceAccounts.roleKey and (later) profiles.
+ *
+ * Built-in role keys `pending|user|admin` deliberately map onto the existing
+ * lib/access role model (D5); `observer|agent` are the service-account roles.
+ */
+export const BUILTIN_ROLES: Record<
+  string,
+  { name: string; description: string; permissions: Permission[] | typeof WILDCARD }
+> = {
+  pending: {
+    name: "Pending",
+    description: "Authenticated but not yet approved (blocked).",
+    permissions: [],
+  },
+  user: {
+    name: "User",
+    description: "Approved user with chat access.",
+    permissions: [PERMISSIONS.CHATS_READ],
+  },
+  admin: {
+    name: "Admin",
+    description: "Full access (superset). UI/admin only.",
+    permissions: WILDCARD,
+  },
+  observer: {
+    name: "Observer",
+    description: "Read-only observability service account.",
+    permissions: [
+      PERMISSIONS.TRACES_READ,
+      PERMISSIONS.KPI_READ,
+      PERMISSIONS.ANOMALIES_READ,
+    ],
+  },
+  agent: {
+    name: "Agent",
+    description: "OpenClaw agent service account (query + report).",
+    permissions: [
+      PERMISSIONS.TRACES_READ,
+      PERMISSIONS.KPI_READ,
+      PERMISSIONS.OPENCLAW_QUERY,
+      PERMISSIONS.ANOMALIES_READ,
+      PERMISSIONS.ANOMALIES_REPORT,
+    ],
+  },
+};
+
+/**
+ * Resolve the permission set for a role key. Reads the `roles` table first
+ * (runtime source of truth: custom roles + admin edits), falling back to
+ * BUILTIN_ROLES when the table has no matching row (e.g. before the seed runs).
+ * A "*" entry expands to every known permission so callers can treat the result
+ * as a plain membership set.
+ *
+ * Returns an EMPTY set for an unknown role key (least privilege).
+ */
+export async function permissionsForRoleKey(
+  ctx: QueryCtx | MutationCtx,
+  roleKey: string,
+): Promise<Set<string>> {
+  const row = await ctx.db
+    .query("roles")
+    .withIndex("by_key", (q) => q.eq("key", roleKey))
+    .unique();
+
+  const perms: string[] | typeof WILDCARD = row
+    ? row.permissions
+    : (BUILTIN_ROLES[roleKey]?.permissions ?? []);
+
+  return expandPermissions(perms);
+}
+
+/** Expand a stored permission list (possibly the wildcard) into a flat Set. */
+export function expandPermissions(
+  permissions: string[] | typeof WILDCARD,
+): Set<string> {
+  if (permissions === WILDCARD || hasWildcard(permissions)) {
+    return new Set<string>(Object.values(PERMISSIONS));
+  }
+  return new Set<string>(permissions);
+}
+
+function hasWildcard(permissions: string[]): boolean {
+  return permissions.includes(WILDCARD);
+}
+
+/**
+ * Membership check against a resolved permission set. A set produced by
+ * permissionsForRoleKey/expandPermissions has already expanded "*", so this is
+ * a plain `.has()`; we also honor a raw "*" defensively for sets built ad hoc.
+ */
+export function roleHasPermission(perms: Set<string>, p: Permission): boolean {
+  return perms.has(WILDCARD) || perms.has(p);
+}
+
+/**
+ * Idempotent upsert of the built-in roles into `roles`. Safe to call lazily on
+ * hot paths (listRoles / mintApiKey) so built-ins always exist. Concurrency:
+ * roles are admin-gated and low-write, so query-by-key then insert-or-patch is
+ * sufficient (the contract's "OCC-safe" bar — there is no unique constraint to
+ * lock against, and a rare double-insert would simply be reconciled on the next
+ * call). We only patch when the stored built-in drifts from the definition, so
+ * repeated calls do not churn writes.
+ */
+export async function seedBuiltinRoles(ctx: MutationCtx): Promise<void> {
+  for (const [key, def] of Object.entries(BUILTIN_ROLES)) {
+    const permissions =
+      def.permissions === WILDCARD ? [WILDCARD] : [...def.permissions];
+    const existing = await ctx.db
+      .query("roles")
+      .withIndex("by_key", (q) => q.eq("key", key))
+      .unique();
+
+    if (existing === null) {
+      await ctx.db.insert("roles", {
+        key,
+        name: def.name,
+        description: def.description,
+        builtin: true,
+        permissions,
+      });
+      continue;
+    }
+
+    // Reconcile drift only (avoid needless writes on the common no-op path).
+    const drifted =
+      existing.name !== def.name ||
+      existing.description !== def.description ||
+      existing.builtin !== true ||
+      !sameStringSet(existing.permissions, permissions);
+    if (drifted) {
+      await ctx.db.patch(existing._id, {
+        name: def.name,
+        description: def.description,
+        builtin: true,
+        permissions,
+      });
+    }
+  }
+}
+
+/** Order-insensitive equality of two permission-key lists. */
+function sameStringSet(a: string[], b: string[]): boolean {
+  if (a.length !== b.length) return false;
+  const sa = new Set(a);
+  for (const x of b) if (!sa.has(x)) return false;
+  return true;
+}

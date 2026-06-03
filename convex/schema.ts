@@ -272,4 +272,159 @@ export default defineSchema({
     // unique because clientMessageId is a client-generated UUID; scoping by
     // userId keeps one user's id space from colliding with another's.
     .index("by_client_message", ["userId", "clientMessageId"]),
+
+  // ===========================================================================
+  // Observability & RBAC spine (increment 1). All NEW tables -> required fields
+  // are fine (no pre-existing rows to reject on schema push). See
+  // docs/OBSERVABILITY_PLATFORM_PLAN.md "Schema additions".
+  // ===========================================================================
+
+  // RBAC roles. Built-in roles (pending|user|admin|observer|agent) are seeded
+  // from lib/rbac.BUILTIN_ROLES; custom roles are added via the admin matrix.
+  // `permissions` is a bounded list of permission-key strings; the wildcard
+  // "*" (admin) means "all permissions" and is expanded by roleHasPermission.
+  // This is the role->permission source of truth; lib/access keeps owning the
+  // profiles.role validator (pending|user|admin) for THIS increment.
+  roles: defineTable({
+    key: v.string(), // stable identifier, e.g. "admin", "observer"
+    name: v.string(), // human label
+    description: v.optional(v.string()),
+    builtin: v.boolean(), // seeded by seedBuiltinRoles (not user-deletable)
+    permissions: v.array(v.string()), // permission keys, or ["*"] for all
+  }).index("by_key", ["key"]),
+
+  // A non-human principal (an OpenClaw agent / external service) that holds one
+  // or more API keys. Its `roleKey` resolves to a role -> permission set at
+  // auth time. NO secrets here (keys live hashed in `apiKeys`). Created/managed
+  // by admin-only Convex functions (D4: never via the /api/v1 HTTP surface).
+  serviceAccounts: defineTable({
+    name: v.string(),
+    roleKey: v.string(), // -> roles.key (e.g. "observer", "agent")
+    disabled: v.boolean(),
+    description: v.optional(v.string()),
+    createdByUserId: v.id("users"), // admin who created it (attribution)
+  }).index("by_name", ["name"]),
+
+  // API keys for service accounts. SECRET-SAFE: only the SHA-256 hash of the
+  // plaintext key is stored (`hashedKey`); the plaintext (`oc_live_<base62>`)
+  // is shown exactly ONCE at mint time and never persisted. `prefix`/`lastFour`
+  // are non-secret display affordances for the keys list. Verification hashes
+  // the presented Bearer token and looks it up via `by_hash`.
+  apiKeys: defineTable({
+    serviceAccountId: v.id("serviceAccounts"),
+    hashedKey: v.string(), // SHA-256 hex of the plaintext (the only stored form)
+    prefix: v.string(), // non-secret leading segment, e.g. "oc_live_AB12"
+    lastFour: v.string(), // non-secret trailing 4 chars for disambiguation
+    disabled: v.boolean(), // revoked keys are disabled, not deleted (audit)
+    createdAt: v.number(),
+    lastUsedAt: v.optional(v.number()),
+    expiresAt: v.optional(v.number()),
+  })
+    .index("by_hash", ["hashedKey"]) // O(1) verification lookup
+    .index("by_account", ["serviceAccountId"]), // list/revoke a SA's keys
+
+  // Bounded recent trace window (D1). Convex is NOT the log store: a daily cron
+  // (observability.purgeOldTraces) deletes rows older than TRACE_RETENTION_DAYS.
+  // D2 PHI: metadata only by default (route/method/status/latency/principal) —
+  // never raw message text. `redacted` records whether content was stripped.
+  // `meta` is a JSON string blob for forward-compatible, non-PHI extras.
+  traceEvents: defineTable({
+    at: v.number(),
+    kind: v.string(), // e.g. "api.call"
+    direction: v.optional(
+      v.union(
+        v.literal("inbound"),
+        v.literal("outbound"),
+        v.literal("internal"),
+      ),
+    ),
+    principalType: v.union(
+      v.literal("user"),
+      v.literal("service"),
+      v.literal("system"),
+    ),
+    principalId: v.optional(v.string()),
+    roleKey: v.optional(v.string()),
+    route: v.optional(v.string()),
+    method: v.optional(v.string()),
+    status: v.optional(v.number()),
+    latencyMs: v.optional(v.number()),
+    chatId: v.optional(v.string()),
+    runId: v.optional(v.string()),
+    correlationId: v.optional(v.string()),
+    redacted: v.boolean(),
+    meta: v.optional(v.string()), // JSON-encoded non-PHI extras
+  })
+    .index("by_at", ["at"]) // retention scan + recent-events listing
+    .index("by_correlation", ["correlationId"]) // follow a span chain
+    .index("by_principal", ["principalType", "principalId"]),
+
+  // Small, aggregated, long-lived KPI rollups (D1). STUB for increment 1 — the
+  // cron aggregation bodies land in increment 4. Defined now so the schema/
+  // index are stable for downstream agents.
+  kpiRollups: defineTable({
+    bucket: v.string(), // e.g. "2026-06-02T14" (hour granularity)
+    metric: v.string(),
+    value: v.number(),
+    dims: v.optional(v.string()), // JSON-encoded dimension breakdown
+  }).index("by_bucket_metric", ["bucket", "metric"]),
+
+  // Detected / reported anomalies (increment 6). Two sources:
+  //   - "detector": rows UPSERTED by the `anomalies.detectAnomalies` cron from
+  //     the bounded recent `traceEvents` window (high API error ratio, repeated
+  //     dispatch failures, assistant.stream error/aborted bursts, ingest
+  //     auth-denied spikes). De-duped to ONE OPEN row per `kind` (the cron
+  //     patches the existing open row instead of inserting a duplicate each run).
+  //   - "agent": rows inserted via the key-authed `POST /api/v1/anomalies` route
+  //     so an OpenClaw agent can report an anomaly OR a self-repair action taken.
+  // D2 PHI: METADATA ONLY. `evidence` is a JSON string of NON-PHI signals
+  // (counts/ratios/thresholds/window) — never message text, tokens, or paths.
+  anomalies: defineTable({
+    at: v.number(), // first-seen (insert) / last-seen (patch) timestamp
+    kind: v.string(), // stable detector key, e.g. "api.error_ratio"
+    severity: v.union(
+      v.literal("info"),
+      v.literal("warn"),
+      v.literal("critical"),
+    ),
+    status: v.union(
+      v.literal("open"),
+      v.literal("acknowledged"),
+      v.literal("resolved"),
+    ),
+    message: v.string(), // human-readable, non-PHI summary
+    source: v.union(v.literal("detector"), v.literal("agent")),
+    correlationId: v.optional(v.string()), // optional link to a span chain
+    evidence: v.optional(v.string()), // JSON-encoded non-PHI signals
+    resolvedAt: v.optional(v.number()),
+    resolvedBy: v.optional(v.string()), // principal/actor id (non-PHI), free-form
+  })
+    .index("by_status", ["status"]) // dedupe scan (open rows) + listing filter
+    .index("by_at", ["at"]) // recent-first listing
+    // (status, kind) — look up THE single open detector row of a kind directly
+    // so de-dupe (upsertDetectorAnomaly) + auto-resolve are correct regardless
+    // of how large the open set grows (no .take(500) truncation hazard).
+    .index("by_status_kind", ["status", "kind"]),
+
+  // Outbound trace-shipping cursors (increment 5). One row per vendor
+  // ("langfuse"/"opik"): `lastAt` is the `traceEvents.at` watermark up to and
+  // INCLUDING which that vendor has already received events. The periodic flush
+  // (integrations.ship.flushToVendors) reads `traceEvents` with the COMPOSITE
+  // watermark (at, _id), ships a bounded batch, then advances both ON SUCCESS
+  // only. No secrets here — vendor credentials live in deployment env (D3); this
+  // table holds only the watermark + secret-free failure bookkeeping.
+  integrationCursors: defineTable({
+    vendor: v.string(), // "langfuse" | "opik"
+    lastAt: v.number(), // last shipped traceEvents.at (watermark)
+    // M3: secondary tiebreaker so a same-millisecond batch boundary cannot drop
+    // events. Paging is (at > lastAt) OR (at == lastAt AND _id > lastId).
+    // OPTIONAL (additive on existing rows); absent => fall back to strict-gt.
+    lastId: v.optional(v.string()), // last shipped traceEvents _id (as string)
+    // L4: secret-free consecutive-failure bookkeeping for a wedged vendor. Reset
+    // to 0 on a successful send; emits an anomaly once at the threshold. NEVER a
+    // raw error message — only a reason CODE + optional vendor HTTP status.
+    failureCount: v.optional(v.number()),
+    lastError: v.optional(v.string()), // reason code (e.g. "send_failed") only
+    lastErrorStatus: v.optional(v.number()), // vendor HTTP status when present
+  }).index("by_vendor", ["vendor"]),
 });

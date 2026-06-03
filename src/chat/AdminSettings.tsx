@@ -12,6 +12,13 @@ import {
 } from "@/components/ui/select";
 import { DataTableShell } from "./admin/DataTableShell";
 import { EntitySheet } from "./admin/EntitySheet";
+import { ServiceAccountsTab } from "./admin/ServiceAccountsTab";
+import { RolesTab } from "./admin/RolesTab";
+import { TracesTab } from "./admin/TracesTab";
+import { KpiTab } from "./admin/KpiTab";
+import { AnomaliesTab } from "./admin/AnomaliesTab";
+import { IntegrationsTab } from "./admin/IntegrationsTab";
+import { ToastProvider, useToast } from "@/components/ui/toast";
 
 // Admin-only settings surface (rendered only when me.role === "admin"; every
 // underlying Convex function also enforces requireAdmin server-side, so this UI
@@ -19,12 +26,39 @@ import { EntitySheet } from "./admin/EntitySheet";
 // per-user routing), Groups (valves), Instances (non-secret meta), Theme
 // (component showroom for the active design tokens).
 
-const TABS = ["users", "groups", "instances", "theme", "audit"] as const;
+const TABS = [
+  "users",
+  "groups",
+  "instances",
+  "serviceAccounts",
+  "roles",
+  "traces",
+  "kpi",
+  "anomalies",
+  "integrations",
+  "theme",
+  "audit",
+] as const;
 type Tab = (typeof TABS)[number];
+
+// FR labels for tabs whose raw key isn't a clean capitalized word. Tabs absent
+// from this map fall back to the CSS text-transform: capitalize on the raw key.
+const TAB_LABELS: Partial<Record<Tab, string>> = {
+  serviceAccounts: "Comptes de service",
+  roles: "Rôles",
+  traces: "Traces",
+  kpi: "KPI",
+  anomalies: "Anomalies",
+  integrations: "Intégrations",
+};
 
 export function AdminSettings() {
   const [tab, setTab] = useState<Tab>("users");
   return (
+    // ToastProvider mounted here (not at App root, which is out of this pass's
+    // edit scope): every error-surfacing call site is a child of AdminSettings,
+    // so one provider here covers all admin-tab mutations.
+    <ToastProvider>
     <div className="oc-admin">
       <header className="oc-admin__header">
         <h1>Settings</h1>
@@ -32,10 +66,14 @@ export function AdminSettings() {
           {TABS.map((t) => (
             <button
               key={t}
-              className={"oc-admin__tab" + (tab === t ? " is-active" : "")}
+              className={
+                "oc-admin__tab" +
+                (tab === t ? " is-active" : "") +
+                (TAB_LABELS[t] ? " oc-admin__tab--labeled" : "")
+              }
               onClick={() => setTab(t)}
             >
-              {t}
+              {TAB_LABELS[t] ?? t}
             </button>
           ))}
         </nav>
@@ -44,10 +82,17 @@ export function AdminSettings() {
         {tab === "users" ? <UsersTab /> : null}
         {tab === "groups" ? <GroupsTab /> : null}
         {tab === "instances" ? <InstancesTab /> : null}
+        {tab === "serviceAccounts" ? <ServiceAccountsTab /> : null}
+        {tab === "roles" ? <RolesTab /> : null}
+        {tab === "traces" ? <TracesTab /> : null}
+        {tab === "kpi" ? <KpiTab /> : null}
+        {tab === "anomalies" ? <AnomaliesTab /> : null}
+        {tab === "integrations" ? <IntegrationsTab /> : null}
         {tab === "theme" ? <ThemeShowroom /> : null}
         {tab === "audit" ? <AuditTab /> : null}
       </div>
     </div>
+    </ToastProvider>
   );
 }
 
@@ -58,6 +103,26 @@ function UsersTab() {
   const setRole = useMutation(api.admin.setRole);
   const setRouting = useMutation(api.admin.setUserRouting);
   const startImpersonation = useMutation(api.admin.startImpersonation);
+  const toast = useToast();
+
+  // M5: setRole can be REFUSED server-side (e.g. "cannot demote the last
+  // admin"). Without surfacing, the controlled <Select> just snaps back on the
+  // next reactive tick with no explanation. Wrap it and toast the server error.
+  async function changeRole(args: Parameters<typeof setRole>[0]) {
+    try {
+      await setRole(args);
+    } catch (err) {
+      toast.error("Changement de rôle refusé", err);
+    }
+  }
+
+  async function changeRouting(args: Parameters<typeof setRouting>[0]) {
+    try {
+      await setRouting(args);
+    } catch (err) {
+      toast.error("Mise à jour du routage refusée", err);
+    }
+  }
 
   return (
     <DataTableShell
@@ -89,7 +154,7 @@ function UsersTab() {
             <Select
               value={u.role}
               onValueChange={(v) =>
-                void setRole({
+                void changeRole({
                   profileId: u._id,
                   role: v as "pending" | "user" | "admin",
                 })
@@ -112,7 +177,7 @@ function UsersTab() {
             <Select
               value={u.groupId ?? "none"}
               onValueChange={(v) =>
-                void setRouting({
+                void changeRouting({
                   profileId: u._id,
                   groupId: v === "none" ? null : (v as never),
                 })
@@ -140,7 +205,7 @@ function UsersTab() {
               defaultValue={u.overrideInstance ?? ""}
               placeholder="(group)"
               onBlur={(e) =>
-                void setRouting({
+                void changeRouting({
                   profileId: u._id,
                   overrideInstance: e.target.value || null,
                 })
@@ -156,7 +221,7 @@ function UsersTab() {
               defaultValue={u.overrideAgentId ?? ""}
               placeholder="(derived)"
               onBlur={(e) =>
-                void setRouting({
+                void changeRouting({
                   profileId: u._id,
                   overrideAgentId: e.target.value || null,
                 })
@@ -186,18 +251,24 @@ function GroupsTab() {
   const groups = useQuery(api.admin.listGroups, {});
   const createGroup = useMutation(api.admin.createGroup);
   const deleteGroup = useMutation(api.admin.deleteGroup);
+  const toast = useToast();
   const [sheetOpen, setSheetOpen] = useState(false);
   const [form, setForm] = useState<GroupForm>(EMPTY_GROUP);
 
   async function submit() {
-    await createGroup({
-      name: form.name,
-      instanceName: form.instanceName,
-      mode: form.mode,
-      sharedAgentId: form.mode === "shared" ? form.sharedAgentId : undefined,
-    });
-    setForm(EMPTY_GROUP);
-    setSheetOpen(false);
+    try {
+      await createGroup({
+        name: form.name,
+        instanceName: form.instanceName,
+        mode: form.mode,
+        sharedAgentId: form.mode === "shared" ? form.sharedAgentId : undefined,
+      });
+      setForm(EMPTY_GROUP);
+      setSheetOpen(false);
+    } catch (err) {
+      // M5: surface duplicate-key / validation rejections instead of swallowing.
+      toast.error("Échec de la création du groupe", err);
+    }
   }
 
   return (
@@ -301,17 +372,23 @@ function InstancesTab() {
   const instances = useQuery(api.admin.listInstances, {});
   const upsert = useMutation(api.admin.upsertInstance);
   const del = useMutation(api.admin.deleteInstance);
+  const toast = useToast();
   const [sheetOpen, setSheetOpen] = useState(false);
   const [form, setForm] = useState<InstanceForm>(EMPTY_INSTANCE);
 
   async function submit() {
-    await upsert({
-      name: form.name,
-      gatewayUrl: form.gatewayUrl,
-      displayName: form.displayName || undefined,
-    });
-    setForm(EMPTY_INSTANCE);
-    setSheetOpen(false);
+    try {
+      await upsert({
+        name: form.name,
+        gatewayUrl: form.gatewayUrl,
+        displayName: form.displayName || undefined,
+      });
+      setForm(EMPTY_INSTANCE);
+      setSheetOpen(false);
+    } catch (err) {
+      // M5: surface server-side rejection instead of swallowing.
+      toast.error("Échec de l’enregistrement de l’instance", err);
+    }
   }
 
   return (

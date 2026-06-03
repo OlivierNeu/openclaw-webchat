@@ -5,7 +5,7 @@
 // live only in the bridge env; these tables hold non-secret names).
 
 import { v } from "convex/values";
-import { mutation, query } from "./_generated/server";
+import { mutation, query, MutationCtx } from "./_generated/server";
 import { Id } from "./_generated/dataModel";
 import { getProfile, requireAdmin, roleOf } from "./lib/access";
 import { recordAudit } from "./lib/audit";
@@ -48,36 +48,55 @@ async function adminCount(ctx: Parameters<typeof requireAdmin>[0]): Promise<numb
   return admins.length;
 }
 
+type AppRole = "pending" | "user" | "admin";
+
+/**
+ * The SINGLE guarded role-change path (M1). Both setRole and approveUser route
+ * through here so the last-admin lockout guard and the impersonation-target
+ * cleanup can never be bypassed by a sibling mutation. Plain helper (a mutation
+ * cannot ctx.runMutation another mutation), mirroring observability's
+ * writeTraceEvent single-writer pattern. Preserves D5 invariants.
+ *
+ * Caller must have already passed requireAdmin.
+ */
+async function applyRoleChange(
+  ctx: MutationCtx,
+  profileId: Id<"profiles">,
+  role: AppRole,
+): Promise<void> {
+  const target = await ctx.db.get(profileId);
+  if (target === null) throw new Error("Not found: profile");
+  // Last-admin protection: never demote the only remaining admin (lockout).
+  if (roleOf(target) === "admin" && role !== "admin") {
+    if ((await adminCount(ctx)) <= 1) {
+      throw new Error("Refused: cannot demote the last admin");
+    }
+  }
+  // Security hygiene: a non-admin must not carry an impersonation target.
+  // Clearing it on demotion prevents a later re-promotion from silently
+  // resuming a stale impersonation (getActor already ignores it while the
+  // role is non-admin; this makes the state match the role).
+  const patch: { role: AppRole; impersonatingUserId?: undefined } = { role };
+  if (role !== "admin") patch.impersonatingUserId = undefined;
+  await ctx.db.patch(profileId, patch);
+}
+
 export const setRole = mutation({
   args: { profileId: v.id("profiles"), role: roleValidator },
   handler: async (ctx, { profileId, role }) => {
     await requireAdmin(ctx);
-    const target = await ctx.db.get(profileId);
-    if (target === null) throw new Error("Not found: profile");
-    // Last-admin protection: never demote the only remaining admin (lockout).
-    if (roleOf(target) === "admin" && role !== "admin") {
-      if ((await adminCount(ctx)) <= 1) {
-        throw new Error("Refused: cannot demote the last admin");
-      }
-    }
-    // Security hygiene: a non-admin must not carry an impersonation target.
-    // Clearing it on demotion prevents a later re-promotion from silently
-    // resuming a stale impersonation (getActor already ignores it while the
-    // role is non-admin; this makes the state match the role).
-    const patch: { role: typeof role; impersonatingUserId?: undefined } = { role };
-    if (role !== "admin") patch.impersonatingUserId = undefined;
-    await ctx.db.patch(profileId, patch);
+    await applyRoleChange(ctx, profileId, role);
   },
 });
 
-// Convenience: approve a pending user to "user".
+// Convenience: approve a pending user to "user". Routes through the same guarded
+// path as setRole (M1) so it cannot demote the last admin nor leave a stale
+// impersonation target if the target happens to be the sole admin.
 export const approveUser = mutation({
   args: { profileId: v.id("profiles") },
   handler: async (ctx, { profileId }) => {
     await requireAdmin(ctx);
-    const target = await ctx.db.get(profileId);
-    if (target === null) throw new Error("Not found: profile");
-    await ctx.db.patch(profileId, { role: "user" });
+    await applyRoleChange(ctx, profileId, "user");
   },
 });
 

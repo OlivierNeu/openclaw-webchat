@@ -3,7 +3,11 @@
 // auth provider). Never enabled in production.
 
 import { v } from "convex/values";
-import { mutation } from "./_generated/server";
+import { action, internalMutation, mutation } from "./_generated/server";
+import { internal } from "./_generated/api";
+import { Id } from "./_generated/dataModel";
+import { generateApiKey, hashKey } from "./lib/apikeys";
+import { seedBuiltinRoles } from "./lib/rbac";
 
 function assertDev() {
   if (process.env.OPENCLAW_ENABLE_ANON_AUTH !== "1") {
@@ -97,6 +101,132 @@ export const seedChat = mutation({
   },
 });
 
+// --- Observability spine: dev-gated service account + API key minting --------
+//
+// LIVE-VERIFY HELPER. The real mint path (apiKeys.mintApiKey) is an action that
+// requires admin auth via ctx.auth, which a bare `npx convex run` cannot supply.
+// This dev action mirrors that path WITHOUT requireAdmin (gated behind the dev
+// flag) so the lead can mint a key from the CLI to exercise /api/v1/traces.
+//
+// Mirrors the action/mutation crypto split (D3): the action generates+hashes
+// (Web Crypto, non-deterministic) then persists via an internalMutation.
+
+/**
+ * Internal: create-or-reuse a service account by name and persist a (already
+ * hashed) API key. Also seeds built-in roles so the roleKey resolves at auth
+ * time. Dev-gated. Returns the ids.
+ */
+export const seedApiKeyRecord = internalMutation({
+  args: {
+    name: v.string(),
+    roleKey: v.string(),
+    hashedKey: v.string(),
+    prefix: v.string(),
+    lastFour: v.string(),
+  },
+  handler: async (ctx, args) => {
+    assertDev();
+    await seedBuiltinRoles(ctx);
+
+    // Attribute creation to the first admin profile if one exists (dev only).
+    const admin = (await ctx.db.query("profiles").take(500)).find(
+      (p) => p.role === "admin",
+    );
+
+    let account = await ctx.db
+      .query("serviceAccounts")
+      .withIndex("by_name", (q) => q.eq("name", args.name))
+      .unique();
+    let serviceAccountId: Id<"serviceAccounts">;
+    if (account === null) {
+      serviceAccountId = await ctx.db.insert("serviceAccounts", {
+        name: args.name,
+        roleKey: args.roleKey,
+        disabled: false,
+        description: "dev-seeded service account",
+        // createdByUserId is required; fall back to the admin's userId if any.
+        // In a fresh dev deployment with no admin yet, seed an admin first
+        // (dev.makeAdmin) — but tolerate absence by reusing the account's own
+        // future id is impossible, so require an admin to exist.
+        createdByUserId: requireAdminUserId(admin),
+      });
+    } else {
+      serviceAccountId = account._id;
+      // Keep the roleKey in sync with what the caller asked for.
+      if (account.roleKey !== args.roleKey) {
+        await ctx.db.patch(serviceAccountId, { roleKey: args.roleKey });
+      }
+    }
+
+    const keyId = await ctx.db.insert("apiKeys", {
+      serviceAccountId,
+      hashedKey: args.hashedKey,
+      prefix: args.prefix,
+      lastFour: args.lastFour,
+      disabled: false,
+      createdAt: Date.now(),
+    });
+    return { serviceAccountId, keyId };
+  },
+});
+
+/** Helper: a dev seed still needs a createdByUserId; require an admin profile. */
+function requireAdminUserId(
+  admin: { userId: Id<"users"> } | undefined,
+): Id<"users"> {
+  if (!admin) {
+    throw new Error(
+      "dev.seedApiKey: no admin profile yet — sign in once (bootstrap admin) first",
+    );
+  }
+  return admin.userId;
+}
+
+/**
+ * Dev-gated mint: generate a fresh key (CSPRNG + SHA-256, action runtime),
+ * persist it for a (created-or-reused) service account, and return the plaintext
+ * ONCE. Use this for live-verifying /api/v1/traces from the CLI.
+ *
+ *   CONVEX_AGENT_MODE=anonymous npx convex run dev:seedApiKey \
+ *     '{"name":"obs-cli","roleKey":"observer"}'
+ */
+export const seedApiKey = action({
+  args: {
+    name: v.string(),
+    roleKey: v.optional(v.string()), // default "observer"
+  },
+  handler: async (
+    ctx,
+    { name, roleKey },
+  ): Promise<{
+    serviceAccountId: Id<"serviceAccounts">;
+    keyId: Id<"apiKeys">;
+    plaintext: string;
+    prefix: string;
+    lastFour: string;
+  }> => {
+    const generated = generateApiKey();
+    const hashedKey = await hashKey(generated.plaintext);
+    const { serviceAccountId, keyId } = await ctx.runMutation(
+      internal.dev.seedApiKeyRecord,
+      {
+        name,
+        roleKey: roleKey ?? "observer",
+        hashedKey,
+        prefix: generated.prefix,
+        lastFour: generated.lastFour,
+      },
+    );
+    return {
+      serviceAccountId,
+      keyId,
+      plaintext: generated.plaintext,
+      prefix: generated.prefix,
+      lastFour: generated.lastFour,
+    };
+  },
+});
+
 export const reset = mutation({
   args: {},
   handler: async (ctx) => {
@@ -107,9 +237,19 @@ export const reset = mutation({
       "outbox",
       "uploads",
       "chats",
+      "projects",
+      "instances",
       "profiles",
       "appMeta",
       "groups",
+      "auditLog",
+      "serviceAccounts",
+      "apiKeys",
+      "roles",
+      "traceEvents",
+      "kpiRollups",
+      "anomalies",
+      "integrationCursors",
     ] as const;
     let deleted = 0;
     for (const table of tables) {

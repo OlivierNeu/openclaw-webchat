@@ -18,9 +18,47 @@
 // offline tsc/vitest gate (bridge/tsconfig only includes bridge/src + test). It
 // is validated by `npx convex dev` / a live deployment.
 
-import { httpAction } from "./_generated/server";
+import { httpAction, ActionCtx } from "./_generated/server";
 import { internal } from "./_generated/api";
 import { Id } from "./_generated/dataModel";
+
+/**
+ * Emit an inbound ingest trace via the `recordEvent` internalMutation (an
+ * httpAction has no `ctx.db`, so it must go through `ctx.runMutation`). D2:
+ * metadata only — NEVER message text, attachment contents, or media paths.
+ * Wrapped so a trace failure can NEVER turn a successful ingest into a 500.
+ *
+ * correlationId: `chatId:runId` when both are available (startAssistant);
+ * otherwise the `messageId` (the message-only ops carry no chat/run id without
+ * a DB lookup, which we deliberately avoid per trace).
+ */
+async function traceIngest(
+  ctx: ActionCtx,
+  args: {
+    kind: string;
+    status?: number;
+    correlationId?: string;
+    chatId?: string;
+    runId?: string;
+    meta: Record<string, unknown>;
+  },
+): Promise<void> {
+  try {
+    await ctx.runMutation(internal.observability.recordEvent, {
+      kind: args.kind,
+      direction: "inbound",
+      principalType: "system",
+      principalId: "bridge",
+      status: args.status,
+      chatId: args.chatId,
+      runId: args.runId,
+      correlationId: args.correlationId,
+      meta: JSON.stringify(args.meta),
+    });
+  } catch {
+    // Best-effort: never break the ingest flow on a trace error.
+  }
+}
 
 // NOTE: this file exports an httpAction only. httpActions run in the DEFAULT
 // Convex runtime (fetch + ctx.storage are available; Node built-ins are NOT).
@@ -66,6 +104,13 @@ export const ingest = httpAction(async (ctx, request) => {
   const header = request.headers.get("authorization") ?? "";
   const expected = `Bearer ${secret}`;
   if (!secret || !constantTimeEqual(header, expected)) {
+    // Trace the rejected ingest (no body parsed yet -> no op/ids). NEVER log the
+    // presented secret/header.
+    await traceIngest(ctx, {
+      kind: "openclaw.ingest.denied",
+      status: 401,
+      meta: { reason: secret ? "bad_secret" : "secret_unset" },
+    });
     return new Response(JSON.stringify({ ok: false, error: "unauthorized" }), {
       status: 401,
       headers: { "Content-Type": "application/json" },
@@ -84,9 +129,19 @@ export const ingest = httpAction(async (ctx, request) => {
 
   switch (body.op) {
     case "startAssistant": {
+      const correlationId = body.runId
+        ? `${body.chatId}:${body.runId}`
+        : `${body.chatId}`;
       const messageId = await ctx.runMutation(internal.stream.startAssistant, {
         chatId: body.chatId as Id<"chats">,
         runId: body.runId ?? undefined,
+      });
+      await traceIngest(ctx, {
+        kind: "openclaw.ingest",
+        chatId: body.chatId,
+        runId: body.runId ?? undefined,
+        correlationId,
+        meta: { op: body.op, messageId, ok: true },
       });
       return json({ messageId });
     }
@@ -95,12 +150,32 @@ export const ingest = httpAction(async (ctx, request) => {
         messageId: body.messageId as Id<"messages">,
         text: body.text,
       });
+      await traceIngest(ctx, {
+        kind: "openclaw.ingest",
+        correlationId: body.messageId,
+        meta: {
+          op: body.op,
+          messageId: body.messageId,
+          textLen: body.text.length,
+          ok: true,
+        },
+      });
       return json({ ok: true });
     }
     case "setSnapshot": {
       await ctx.runMutation(internal.stream.setSnapshot, {
         messageId: body.messageId as Id<"messages">,
         text: body.text,
+      });
+      await traceIngest(ctx, {
+        kind: "openclaw.ingest",
+        correlationId: body.messageId,
+        meta: {
+          op: body.op,
+          messageId: body.messageId,
+          textLen: body.text.length,
+          ok: true,
+        },
       });
       return json({ ok: true });
     }
@@ -111,6 +186,18 @@ export const ingest = httpAction(async (ctx, request) => {
         // goes through `addMedia` (needs a storage round-trip).
         part: body.part as never,
       });
+      await traceIngest(ctx, {
+        kind: "openclaw.ingest",
+        correlationId: body.messageId,
+        meta: {
+          op: body.op,
+          messageId: body.messageId,
+          // `part.kind` is a structural label (tool/reasoning) — non-PHI.
+          partKind:
+            typeof body.part.kind === "string" ? body.part.kind : undefined,
+          ok: true,
+        },
+      });
       return json({ ok: true });
     }
     case "addMedia": {
@@ -120,10 +207,22 @@ export const ingest = httpAction(async (ctx, request) => {
       // surfaced (already validated against traversal).
       const base = (process.env.OPENCLAW_MEDIA_BASE_URL ?? "").replace(/\/$/, "");
       if (!base) {
+        await traceIngest(ctx, {
+          kind: "openclaw.ingest",
+          status: 500,
+          correlationId: body.messageId,
+          meta: { op: body.op, messageId: body.messageId, ok: false },
+        });
         return json({ ok: false, error: "media not configured" }, 500);
       }
       const res = await fetch(`${base}${body.path}`);
       if (!res.ok) {
+        await traceIngest(ctx, {
+          kind: "openclaw.ingest",
+          status: 502,
+          correlationId: body.messageId,
+          meta: { op: body.op, messageId: body.messageId, ok: false },
+        });
         return json({ ok: false, error: `media fetch ${res.status}` }, 502);
       }
       const mimeType =
@@ -134,6 +233,19 @@ export const ingest = httpAction(async (ctx, request) => {
         messageId: body.messageId as Id<"messages">,
         part: { kind: "media", storageId, filename: body.filename, mimeType },
       });
+      await traceIngest(ctx, {
+        kind: "openclaw.ingest",
+        correlationId: body.messageId,
+        meta: {
+          op: body.op,
+          messageId: body.messageId,
+          partKind: "media",
+          // mimeType is a content-type label (non-PHI). filename/path are NOT
+          // logged (a filename can hint at content).
+          mimeType,
+          ok: true,
+        },
+      });
       return json({ ok: true });
     }
     case "finalize": {
@@ -142,6 +254,20 @@ export const ingest = httpAction(async (ctx, request) => {
         status: body.status,
         text: body.text,
         error: body.error ?? undefined,
+      });
+      await traceIngest(ctx, {
+        kind: "openclaw.ingest",
+        correlationId: body.messageId,
+        meta: {
+          op: body.op,
+          messageId: body.messageId,
+          // String lifecycle status lives in meta (the `status` column is numeric).
+          finalizeStatus: body.status,
+          textLen: body.text.length,
+          // Whether an error was surfaced (boolean only — never the error text).
+          hasError: body.error != null,
+          ok: true,
+        },
       });
       return json({ ok: true });
     }

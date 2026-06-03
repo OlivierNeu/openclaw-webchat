@@ -17,8 +17,68 @@
 // streamed message.
 
 import { v } from "convex/values";
-import { internalMutation } from "./_generated/server";
+import { internalMutation, MutationCtx } from "./_generated/server";
+import { Id } from "./_generated/dataModel";
 import { messagePart } from "./schema";
+import { writeTraceEvent } from "./observability";
+
+/**
+ * Build the stable per-turn correlationId for an assistant message. Prefers
+ * `chatId:runId` (the whole conversational turn); falls back to chatId, then to
+ * the messageId, so a trace is always correlatable even mid-run.
+ *
+ * TODO(M8): the user half (send.ts traceSend) keys on `${chatId}:${outboxId}`,
+ * which is never associated with this `${chatId}:${runId}`. Linking the two
+ * halves end-to-end needs the bridge to carry a single correlationId across the
+ * turn (write the runId back onto the outbox row, or echo a shared id through
+ * startAssistant). Bridge wiring — deferred.
+ */
+function streamCorrelationId(
+  chatId: Id<"chats">,
+  runId: string | undefined,
+  messageId: Id<"messages">,
+): string {
+  if (runId) return `${chatId}:${runId}`;
+  if (chatId) return `${chatId}`;
+  return `${messageId}`;
+}
+
+/**
+ * Emit an `assistant.stream` trace (D2 metadata only — never message text).
+ * Wrapped so a trace failure can NEVER abort the bridge's streaming mutation.
+ */
+async function traceStream(
+  ctx: MutationCtx,
+  args: {
+    phase: "start" | "finalize";
+    chatId: Id<"chats">;
+    runId: string | undefined;
+    messageId: Id<"messages">;
+    streamStatus: "streaming" | "complete" | "error" | "aborted";
+    textLen?: number;
+  },
+): Promise<void> {
+  try {
+    await writeTraceEvent(ctx, {
+      kind: "assistant.stream",
+      direction: "inbound",
+      principalType: "system",
+      principalId: "bridge",
+      chatId: args.chatId,
+      runId: args.runId,
+      correlationId: streamCorrelationId(args.chatId, args.runId, args.messageId),
+      meta: JSON.stringify({
+        phase: args.phase,
+        messageId: args.messageId,
+        // String lifecycle status lives in meta (the `status` column is numeric).
+        streamStatus: args.streamStatus,
+        ...(args.textLen !== undefined ? { textLen: args.textLen } : {}),
+      }),
+    });
+  } catch {
+    // Best-effort: never break the primary stream write on a trace error.
+  }
+}
 
 // Create the streaming assistant message for a run. Returns the message id the
 // bridge then threads through the rest of the stream calls.
@@ -46,6 +106,13 @@ export const startAssistant = internalMutation({
       updatedAt: now,
     });
     await ctx.db.patch(chatId, { updatedAt: now });
+    await traceStream(ctx, {
+      phase: "start",
+      chatId,
+      runId,
+      messageId,
+      streamStatus: "streaming",
+    });
     return messageId;
   },
 });
@@ -136,6 +203,17 @@ export const finalize = internalMutation({
       ...(text !== undefined ? { text } : {}),
       ...(error !== undefined ? { error } : {}),
       updatedAt: Date.now(),
+    });
+    // The finalized text length (final authoritative text if supplied, else the
+    // accumulated message text) — never the text itself.
+    const finalLen = (text ?? message.text).length;
+    await traceStream(ctx, {
+      phase: "finalize",
+      chatId: message.chatId,
+      runId: message.runId,
+      messageId,
+      streamStatus: status,
+      textLen: finalLen,
     });
   },
 });

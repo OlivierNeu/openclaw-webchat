@@ -505,6 +505,8 @@
   background: transparent; cursor: pointer; color: var(--muted-foreground);
 }
 .oc-admin__tab.is-active { background: var(--accent); color: var(--accent-foreground); }
+/* Tabs with an explicit (multi-word) FR label opt out of the per-key capitalize. */
+.oc-admin__tab--labeled { text-transform: none; }
 .oc-admin__body { padding: 16px 20px; overflow: auto; }
 .oc-admin__hint { color: var(--muted-foreground); font-size: 0.9rem; margin-bottom: 12px; }
 .oc-admin__form { display: flex; flex-wrap: wrap; gap: 8px; margin-bottom: 16px; }
@@ -653,4 +655,230 @@
 }
 .oc-imp__exit {
   flex-shrink: 0;
+}
+
+/* --- Service accounts: per-account key lists + mint show-once dialog ----- */
+.oc-sa__keycount { font-size: 0.85rem; color: var(--muted-foreground); }
+.oc-sa__keys {
+  margin: 0.25rem 0 1rem; padding: 0.75rem 1rem;
+  border: 1px solid var(--border); border-radius: var(--radius-md);
+  background: color-mix(in srgb, var(--muted) 40%, transparent);
+}
+.oc-sa__keys-head { font-size: 0.85rem; margin-bottom: 0.5rem; }
+.oc-sa__keytable { width: 100%; border-collapse: collapse; font-size: 0.85rem; }
+.oc-sa__keytable th, .oc-sa__keytable td {
+  text-align: left; padding: 0.4rem 0.6rem;
+  border-bottom: 1px solid var(--border); vertical-align: middle;
+}
+.oc-sa__keytable th { color: var(--muted-foreground); font-weight: 500; }
+.oc-sa__keytable td.text-right, .oc-sa__keytable th.text-right { text-align: right; }
+.oc-sa__keyid {
+  font-family: var(--font-mono, ui-monospace, monospace);
+  padding: 0.1rem 0.4rem; border-radius: var(--radius-sm); background: var(--muted);
+}
+.oc-sa__stale { color: var(--destructive); }
+
+.oc-sa__minted-warning {
+  font-size: 0.85rem; line-height: 1.4; padding: 0.6rem 0.75rem;
+  border-radius: var(--radius-md);
+  border: 1px solid color-mix(in srgb, var(--destructive) 40%, transparent);
+  background: color-mix(in srgb, var(--destructive) 10%, transparent);
+  color: var(--foreground);
+}
+.oc-sa__minted-box {
+  display: flex; align-items: center; gap: 0.5rem;
+  padding: 0.5rem 0.6rem; border: 1px solid var(--border);
+  border-radius: var(--radius-md); background: var(--muted);
+}
+.oc-sa__minted-plain {
+  flex: 1; min-width: 0; font-family: var(--font-mono, ui-monospace, monospace);
+  font-size: 0.85rem; word-break: break-all; user-select: all;
+}
+
+/* --- RBAC permission matrix --------------------------------------------- */
+.oc-matrix__scroll { overflow-x: auto; border: 1px solid var(--border); border-radius: var(--radius-md); }
+.oc-matrix { border-collapse: collapse; width: 100%; font-size: 0.85rem; }
+.oc-matrix th, .oc-matrix td {
+  padding: 0.5rem 0.6rem; border-bottom: 1px solid var(--border);
+  border-right: 1px solid var(--border); text-align: center; white-space: nowrap;
+}
+.oc-matrix thead th { background: var(--muted); color: var(--muted-foreground); font-weight: 500; position: sticky; z-index: 2; }
+/* Two-row sticky header: group row pins at top:0; the per-permission row pins
+   just below it (offset by the group row's height) so they never overlap. */
+.oc-matrix thead tr:first-child th { top: 0; }
+.oc-matrix thead tr:nth-child(2) th { top: 2.05rem; }
+.oc-matrix__group { text-align: center; }
+.oc-matrix__perm { font-weight: 500; }
+.oc-matrix__phi { color: var(--destructive); }
+.oc-matrix__corner, .oc-matrix__rolecell {
+  position: sticky; left: 0; z-index: 1; background: var(--background);
+  text-align: left; min-width: 11rem;
+}
+.oc-matrix thead .oc-matrix__corner { z-index: 3; background: var(--muted); }
+.oc-matrix__rolename { display: flex; align-items: center; gap: 0.4rem; }
+.oc-matrix__rolekey { display: block; font-size: 0.75rem; color: var(--muted-foreground); margin-top: 0.15rem; }
+.oc-matrix__unseeded { display: block; font-size: 0.7rem; color: var(--destructive); margin-top: 0.1rem; }
+.oc-matrix__cell { vertical-align: middle; }
+.oc-matrix__cell .peer { margin: 0 auto; }
+
+/* --- Traces tab (recent observability events) -------------------------- */
+/* Filter row sits above DataTableShell's own titled bar. */
+.oc-traces__toolbar { display: flex; justify-content: flex-end; margin-bottom: 0.5rem; }
+.oc-traces__filters { display: flex; align-items: center; gap: 0.5rem; flex-wrap: wrap; }
+.oc-traces__muted { color: var(--muted-foreground); }
+.oc-traces__time { white-space: nowrap; font-size: 0.85rem; }
+.oc-traces__mono {
+  font-family: var(--font-mono, ui-monospace, monospace);
+  font-size: 0.8rem; color: var(--muted-foreground);
+}
+.oc-traces__principal { display: inline-flex; align-items: center; gap: 0.4rem; }
+.oc-traces__route { display: inline-flex; align-items: center; gap: 0.35rem; }
+.oc-traces__method {
+  font-size: 0.7rem; font-weight: 600; text-transform: uppercase;
+  letter-spacing: 0.02em; color: var(--muted-foreground);
+}
+/* correlationId follow trigger — looks like the monospace id, acts as a link. */
+.oc-traces__corr {
+  font-family: var(--font-mono, ui-monospace, monospace);
+  font-size: 0.8rem; color: var(--primary);
+  background: none; border: none; padding: 0; cursor: pointer;
+  text-decoration: underline; text-underline-offset: 2px;
+}
+.oc-traces__corr:hover { opacity: 0.8; }
+/* Active "follow a turn" chip with a clear ✕ to clear the filter. */
+.oc-traces__chip {
+  display: inline-flex; align-items: center; gap: 0.4rem;
+  font-size: 0.8rem; padding: 0.25rem 0.5rem;
+  border: 1px solid var(--border); border-radius: var(--radius-md);
+  background: var(--accent); color: var(--accent-foreground); cursor: pointer;
+}
+.oc-traces__chip code {
+  font-family: var(--font-mono, ui-monospace, monospace);
+}
+.oc-traces__chip-x { width: 0.85rem; height: 0.85rem; }
+/* status code coloring — the one place hex literals are allowed (per task). */
+.oc-traces__status { font-family: var(--font-mono, ui-monospace, monospace); font-size: 0.8rem; font-weight: 600; }
+.oc-traces__status--2xx { color: #16a34a; }
+.oc-traces__status--4xx { color: #d97706; }
+.oc-traces__status--5xx { color: #dc2626; }
+.oc-traces__status--other { color: var(--muted-foreground); }
+.oc-traces__meta-title { display: inline-flex; align-items: center; gap: 0.5rem; }
+.oc-traces__meta-title code {
+  font-family: var(--font-mono, ui-monospace, monospace); font-size: 0.85rem;
+}
+.oc-traces__meta-json {
+  margin-top: 0.25rem; max-height: 60vh; overflow: auto;
+  padding: 0.75rem; border-radius: var(--radius-md);
+  background: var(--muted); border: 1px solid var(--border);
+  font-family: var(--font-mono, ui-monospace, monospace);
+  font-size: 0.78rem; line-height: 1.5; white-space: pre-wrap; word-break: break-word;
+}
+
+/* KPI dashboard (increment 4). Metric cards + hand-rolled SVG bar charts over
+   the hourly rollups. Status-red reuses the trace status hex literals (the one
+   constraint-allowed exception); everything else stays on design tokens. */
+.oc-kpi__toolbar { display: flex; justify-content: flex-end; margin-bottom: 0.75rem; }
+.oc-kpi__group { margin-bottom: 1.25rem; }
+.oc-kpi__group-title {
+  font-size: 0.8rem; font-weight: 600; text-transform: uppercase;
+  letter-spacing: 0.04em; color: var(--muted-foreground); margin-bottom: 0.5rem;
+}
+.oc-kpi__grid {
+  display: grid; gap: 0.75rem;
+  grid-template-columns: repeat(auto-fill, minmax(15rem, 1fr));
+}
+.oc-kpi__card-title { font-size: 0.9rem; }
+.oc-kpi__card-metric code {
+  font-family: var(--font-mono, ui-monospace, monospace); font-size: 0.72rem;
+}
+.oc-kpi__card-body { display: flex; flex-direction: column; gap: 0.5rem; }
+.oc-kpi__value-row { display: flex; align-items: baseline; gap: 0.35rem; }
+.oc-kpi__value {
+  font-size: 1.85rem; font-weight: 700; line-height: 1;
+  font-variant-numeric: tabular-nums;
+}
+.oc-kpi__value--error { color: #dc2626; }
+.oc-kpi__unit { font-size: 0.8rem; color: var(--muted-foreground); }
+.oc-kpi__chart {
+  width: 100%; height: 48px; display: block; overflow: visible;
+}
+.oc-kpi__chart--empty {
+  border-radius: var(--radius-sm); background: var(--muted); opacity: 0.5;
+}
+.oc-kpi__bar { fill: var(--primary); }
+.oc-kpi__bar:hover { fill: var(--accent-foreground); }
+.oc-kpi__bar--error { fill: #dc2626; }
+.oc-kpi__bar--error:hover { fill: #b91c1c; }
+.oc-kpi__axis {
+  display: flex; justify-content: space-between; align-items: center;
+  font-size: 0.72rem; color: var(--muted-foreground);
+}
+.oc-kpi__axis-latest { font-variant-numeric: tabular-nums; }
+.oc-kpi__muted { color: var(--muted-foreground); }
+
+/* --- Anomalies tab (D-3) ---------------------------------------------------
+   Severity coloring via a class (hex literals allowed here, mirroring the
+   trace-status block). Message column wraps; everything else stays on tokens. */
+.oc-anomaly__sev {
+  font-family: var(--font-mono, ui-monospace, monospace);
+  font-size: 0.78rem; font-weight: 600; text-transform: uppercase;
+  letter-spacing: 0.02em;
+}
+.oc-anomaly__sev--critical { color: #dc2626; }
+.oc-anomaly__sev--warn { color: #d97706; }
+.oc-anomaly__sev--info { color: var(--muted-foreground); }
+.oc-anomaly__msg {
+  font-size: 0.85rem; line-height: 1.4;
+  display: inline-block; max-width: 28rem;
+  overflow-wrap: anywhere;
+}
+
+/* --- Integrations tab (D-3) ------------------------------------------------ */
+.oc-int__vendors {
+  display: flex; flex-wrap: wrap; gap: 0.75rem; margin-bottom: 1rem;
+}
+.oc-int__vendor {
+  display: inline-flex; align-items: center; gap: 0.5rem;
+  padding: 0.5rem 0.75rem;
+  border: 1px solid var(--border); border-radius: var(--radius-md);
+  background: var(--card);
+}
+.oc-int__vendor-name { font-size: 0.9rem; font-weight: 500; }
+
+/* --- Toast (M5 error surfacing) --------------------------------------------
+   Fixed bottom-right stack of non-blocking notifications. Auto-dismiss + manual
+   close. On tokens, except the destructive accent stripe (hex, like statuses). */
+.oc-toast__viewport {
+  position: fixed; bottom: 1rem; right: 1rem; z-index: 100;
+  display: flex; flex-direction: column; gap: 0.5rem;
+  max-width: min(24rem, calc(100vw - 2rem)); pointer-events: none;
+}
+.oc-toast {
+  pointer-events: auto;
+  display: flex; align-items: flex-start; gap: 0.5rem;
+  padding: 0.6rem 0.7rem;
+  border: 1px solid var(--border); border-left-width: 3px;
+  border-radius: var(--radius-md);
+  background: var(--popover); color: var(--popover-foreground);
+  box-shadow: var(--shadow-lg, 0 10px 25px rgba(0, 0, 0, 0.12));
+  animation: oc-toast-in 0.15s ease-out;
+}
+.oc-toast--error { border-left-color: #dc2626; }
+.oc-toast--success { border-left-color: #16a34a; }
+.oc-toast--info { border-left-color: var(--primary); }
+.oc-toast__body { flex: 1 1 auto; min-width: 0; }
+.oc-toast__title { font-size: 0.85rem; font-weight: 600; }
+.oc-toast__desc {
+  margin-top: 0.15rem; font-size: 0.8rem; color: var(--muted-foreground);
+  overflow-wrap: anywhere;
+}
+.oc-toast__close {
+  flex: 0 0 auto; background: none; border: none; cursor: pointer;
+  color: var(--muted-foreground); padding: 0.1rem; line-height: 0;
+}
+.oc-toast__close:hover { color: var(--foreground); }
+.oc-toast__close svg { width: 0.9rem; height: 0.9rem; }
+@keyframes oc-toast-in {
+  from { opacity: 0; transform: translateY(0.4rem); }
+  to { opacity: 1; transform: translateY(0); }
 }

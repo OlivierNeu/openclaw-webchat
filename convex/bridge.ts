@@ -17,11 +17,53 @@ import {
   internalAction,
   internalMutation,
   internalQuery,
+  ActionCtx,
 } from "./_generated/server";
 import { internal } from "./_generated/api";
 import { Doc, Id } from "./_generated/dataModel";
 import { getProfile } from "./lib/access";
 import { resolveTargetForProfile } from "./routing";
+
+/**
+ * Emit an outbound `openclaw.dispatch` trace via the `recordEvent`
+ * internalMutation (an action has no `ctx.db`). D2: metadata only — never the
+ * outbox text, attachment contents, or gateway tokens. Target instance/agent
+ * NAMES are non-secret (the bridge maps them to tokens) and may be logged.
+ * Wrapped so a trace failure can NEVER affect the dispatch outcome.
+ */
+async function traceDispatch(
+  ctx: ActionCtx,
+  args: {
+    outboxId: Id<"outbox">;
+    chatId?: string;
+    dispatchStatus: "sent" | "failed";
+    target?: { instanceName?: string; agentId?: string };
+    reason?: string;
+  },
+): Promise<void> {
+  try {
+    await ctx.runMutation(internal.observability.recordEvent, {
+      kind: "openclaw.dispatch",
+      direction: "outbound",
+      principalType: "system",
+      principalId: "bridge",
+      chatId: args.chatId,
+      correlationId: args.chatId
+        ? `${args.chatId}:${args.outboxId}`
+        : `${args.outboxId}`,
+      meta: JSON.stringify({
+        outboxId: args.outboxId,
+        // String lifecycle status lives in meta (the `status` column is numeric).
+        dispatchStatus: args.dispatchStatus,
+        instanceName: args.target?.instanceName,
+        agentId: args.target?.agentId,
+        ...(args.reason ? { reason: args.reason } : {}),
+      }),
+    });
+  } catch {
+    // Best-effort: never break the dispatch flow on a trace error.
+  }
+}
 
 // Read a single outbox row (used by the dispatch action, which has no db
 // access of its own — actions read via queries).
@@ -94,6 +136,12 @@ export const dispatch = internalAction({
         outboxId,
         status: "failed",
       });
+      await traceDispatch(ctx, {
+        outboxId,
+        chatId: row.chatId,
+        dispatchStatus: "failed",
+        reason: "not_configured",
+      });
       return;
     }
 
@@ -109,6 +157,12 @@ export const dispatch = internalAction({
       await ctx.runMutation(internal.bridge.markOutbox, {
         outboxId,
         status: "failed",
+      });
+      await traceDispatch(ctx, {
+        outboxId,
+        chatId: row.chatId,
+        dispatchStatus: "failed",
+        reason: "unrouted",
       });
       return;
     }
@@ -154,6 +208,17 @@ export const dispatch = internalAction({
     await ctx.runMutation(internal.bridge.markOutbox, {
       outboxId,
       status: ok ? "sent" : "failed",
+    });
+    await traceDispatch(ctx, {
+      outboxId,
+      chatId: row.chatId,
+      dispatchStatus: ok ? "sent" : "failed",
+      // Non-secret valve target names (instanceName -> token mapping is the
+      // bridge's job; only names cross this boundary).
+      target: {
+        instanceName: routing.target.instanceName,
+        agentId: routing.target.agentId,
+      },
     });
   },
 });

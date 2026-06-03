@@ -1,0 +1,178 @@
+#!/usr/bin/env node
+/**
+ * openclaw-webchat CLI — a thin shell client over the same /api/v1 calls the
+ * MCP server exposes. Same env-var auth (OPENCLAW_WEBCHAT_API_BASE +
+ * OPENCLAW_WEBCHAT_API_KEY); the Bearer key is only ever sent in the
+ * Authorization header (never echoed, never in a URL).
+ *
+ * Usage:
+ *   openclaw-webchat health
+ *   openclaw-webchat traces [--limit N] [--kind K] [--correlation-id ID]
+ *   openclaw-webchat kpi [--metric M] [--since ISO]
+ *   openclaw-webchat anomalies [--limit N] [--since ISO] [--status S]
+ *   openclaw-webchat query-openclaw [--question TEXT]
+ *   openclaw-webchat report-anomaly --kind K --severity S --message M [--correlation-id ID]
+ */
+
+import { ApiError, resolveConfig, type Config } from "./config.js";
+import {
+  getKpi,
+  health,
+  listAnomalies,
+  listTraces,
+  queryOpenClaw,
+  reportAnomaly,
+} from "./tools.js";
+
+interface ParsedArgs {
+  positionals: string[];
+  flags: Record<string, string | boolean>;
+}
+
+/** Parse `--key value`, `--key=value`, and bare `--flag` arguments. */
+function parseArgs(argv: string[]): ParsedArgs {
+  const positionals: string[] = [];
+  const flags: Record<string, string | boolean> = {};
+  for (let i = 0; i < argv.length; i++) {
+    const token = argv[i]!;
+    if (token.startsWith("--")) {
+      const eq = token.indexOf("=");
+      if (eq !== -1) {
+        flags[token.slice(2, eq)] = token.slice(eq + 1);
+      } else {
+        const next = argv[i + 1];
+        if (next !== undefined && !next.startsWith("--")) {
+          flags[token.slice(2)] = next;
+          i++;
+        } else {
+          flags[token.slice(2)] = true;
+        }
+      }
+    } else {
+      positionals.push(token);
+    }
+  }
+  return { positionals, flags };
+}
+
+function num(value: string | boolean | undefined): number | undefined {
+  if (typeof value !== "string") return undefined;
+  const n = Number(value);
+  return Number.isFinite(n) ? n : undefined;
+}
+
+function str(value: string | boolean | undefined): string | undefined {
+  return typeof value === "string" ? value : undefined;
+}
+
+const USAGE = `openclaw-webchat — thin CLI over the /api/v1 observability surface
+
+Commands:
+  health                              GET  /health
+  traces [--limit N] [--kind K] [--correlation-id ID]
+                                      GET  /traces            (traces.read)
+  kpi [--metric M] [--since ISO]      GET  /kpi               (kpi.read)
+  anomalies [--limit N] [--since ISO] [--status S]
+                                      GET  /anomalies         (anomalies.read)
+  query-openclaw [--question TEXT]    POST /openclaw/query    (openclaw.query)
+  report-anomaly --kind K --severity info|warn|critical --message M [--correlation-id ID]
+                                      POST /anomalies         (anomalies.report)
+
+Environment:
+  OPENCLAW_WEBCHAT_API_BASE  deployment .site origin (default http://127.0.0.1:3213)
+  OPENCLAW_WEBCHAT_API_KEY   oc_live_ Bearer key (required)`;
+
+async function dispatch(
+  config: Config,
+  command: string,
+  flags: Record<string, string | boolean>,
+): Promise<unknown> {
+  switch (command) {
+    case "health":
+      return health(config);
+    case "traces":
+      return listTraces(config, {
+        limit: num(flags.limit),
+        kind: str(flags.kind),
+        correlationId: str(flags["correlation-id"]),
+      });
+    case "kpi":
+      return getKpi(config, {
+        metric: str(flags.metric),
+        since: str(flags.since),
+      });
+    case "anomalies":
+      return listAnomalies(config, {
+        limit: num(flags.limit),
+        since: str(flags.since),
+        status: str(flags.status),
+      });
+    case "query-openclaw":
+      return queryOpenClaw(config, {
+        question: str(flags.question),
+      });
+    case "report-anomaly": {
+      const kind = str(flags.kind);
+      if (!kind) {
+        throw new Error("report-anomaly requires --kind");
+      }
+      const severity = str(flags.severity);
+      if (severity !== "info" && severity !== "warn" && severity !== "critical") {
+        throw new Error(
+          "report-anomaly requires --severity info|warn|critical",
+        );
+      }
+      const message = str(flags.message);
+      if (!message) {
+        throw new Error("report-anomaly requires --message");
+      }
+      return reportAnomaly(config, {
+        kind,
+        severity,
+        message,
+        correlationId: str(flags["correlation-id"]),
+      });
+    }
+    default:
+      throw new Error(`Unknown command: ${command}`);
+  }
+}
+
+async function main(): Promise<void> {
+  const { positionals, flags } = parseArgs(process.argv.slice(2));
+  const command = positionals[0];
+
+  if (!command || command === "help" || flags.help) {
+    process.stdout.write(`${USAGE}\n`);
+    return;
+  }
+
+  let config: Config;
+  try {
+    config = resolveConfig();
+  } catch (err) {
+    // Config error (e.g. missing key). Message names the env var, not its value.
+    process.stderr.write(`${(err as Error).message}\n`);
+    process.exitCode = 2;
+    return;
+  }
+
+  try {
+    const result = await dispatch(config, command, flags);
+    process.stdout.write(`${JSON.stringify(result, null, 2)}\n`);
+  } catch (err) {
+    if (err instanceof ApiError) {
+      const bodyText =
+        typeof err.body === "string"
+          ? err.body
+          : JSON.stringify(err.body, null, 2);
+      process.stderr.write(`API error ${err.status}: ${bodyText}\n`);
+      process.exitCode = 1;
+      return;
+    }
+    process.stderr.write(`${(err as Error).message}\n`);
+    process.exitCode = 1;
+  }
+}
+
+void main();

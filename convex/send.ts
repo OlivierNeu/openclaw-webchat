@@ -15,11 +15,13 @@
 // reach the bridge live only in deployment env, never here or in the browser.
 
 import { v } from "convex/values";
-import { mutation } from "./_generated/server";
+import { mutation, MutationCtx } from "./_generated/server";
 import { internal } from "./_generated/api";
+import { Id } from "./_generated/dataModel";
 import { requireActive, requireOwnedChat } from "./lib/access";
 import { auditImpersonated } from "./lib/audit";
 import { assertOwnsUpload } from "./uploads";
+import { writeTraceEvent } from "./observability";
 
 export const sendMessage = mutation({
   args: {
@@ -61,6 +63,17 @@ export const sendMessage = mutation({
       )
       .unique();
     if (existing !== null) {
+      // Trace the deduped retry (metadata only — never args.text). Defensive:
+      // a trace failure must NEVER turn a successful idempotent send into an
+      // error, so the write is wrapped and swallowed.
+      await traceSend(ctx, {
+        userId,
+        chatId: args.chatId,
+        textLen: args.text.length,
+        attachmentCount: (args.attachments ?? []).length,
+        deduped: true,
+        outboxId: existing._id,
+      });
       return {
         messageId: existing.messageId ?? null,
         outboxId: existing._id,
@@ -130,6 +143,60 @@ export const sendMessage = mutation({
       resourceId: messageId,
     });
 
+    // Trace the accepted outbound user turn (metadata only — never args.text).
+    await traceSend(ctx, {
+      userId,
+      chatId: args.chatId,
+      textLen: args.text.length,
+      attachmentCount: attachments.length,
+      deduped: false,
+      outboxId,
+    });
+
     return { messageId, outboxId, deduped: false as const };
   },
 });
+
+/**
+ * Emit a `chat.send` trace (D2 metadata only). Wrapped so a trace failure can
+ * NEVER abort the user-visible send mutation.
+ *
+ * correlationId = `${chatId}:${outboxId}` — there is no runId on the user turn
+ * yet (the assistant run id is assigned later by the bridge), so we anchor the
+ * turn on the outbox row that the dispatch/stream will be associated with.
+ *
+ * TODO(M8): the assistant half (stream.ts) keys on `${chatId}:${runId}`, so the
+ * by_correlation index cannot follow a full turn end-to-end until the bridge
+ * writes the learned runId back onto the outbox row (or echoes a shared
+ * correlationId through startAssistant). Needs bridge wiring — deferred.
+ */
+async function traceSend(
+  ctx: MutationCtx,
+  args: {
+    userId: Id<"users">;
+    chatId: Id<"chats">;
+    textLen: number;
+    attachmentCount: number;
+    deduped: boolean;
+    outboxId: Id<"outbox">;
+  },
+): Promise<void> {
+  try {
+    await writeTraceEvent(ctx, {
+      kind: "chat.send",
+      direction: "outbound",
+      principalType: "user",
+      principalId: args.userId,
+      chatId: args.chatId,
+      correlationId: `${args.chatId}:${args.outboxId}`,
+      meta: JSON.stringify({
+        textLen: args.textLen,
+        attachmentCount: args.attachmentCount,
+        deduped: args.deduped,
+        outboxId: args.outboxId,
+      }),
+    });
+  } catch {
+    // Best-effort: never break the primary send flow on a trace error.
+  }
+}
