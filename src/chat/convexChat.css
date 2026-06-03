@@ -633,3 +633,24 @@
 }
 .oc-sidebar-resizer:hover { background: color-mix(in srgb, var(--ring) 40%, transparent); }
 .oc-topbar__left { display: flex; align-items: center; gap: 0.5rem; }
+
+/* Impersonation banner: a fixed amber strip (reads in both themes), first child
+   of the shell so it pushes content down without overlap. Unmistakable so the
+   admin always knows they are acting as someone else. */
+.oc-imp {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  padding: 0.5rem 1rem;
+  background: oklch(0.82 0.14 85);
+  color: oklch(0.27 0.03 85);
+}
+.oc-imp__text {
+  flex: 1;
+  min-width: 0;
+  font-size: 0.85rem;
+  line-height: 1.35;
+}
+.oc-imp__exit {
+  flex-shrink: 0;
+}

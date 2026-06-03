@@ -98,6 +98,14 @@ export default defineSchema({
     canonical: v.optional(v.string()),
     // Chat-id prefixes this user is allowed to address on the gateway.
     allowedChatPrefixes: v.optional(v.array(v.string())),
+
+    // Admin impersonation target. When an admin starts "view/act as a user",
+    // the target's userId is recorded HERE, on the ADMIN's own profile. The
+    // access layer resolves the EFFECTIVE user from it (real admin identity +
+    // this target); cleared on stop. ONLY honored when this profile's role is
+    // "admin" (a non-admin row carrying it would be ignored), so it can never
+    // be used to escalate. OPTIONAL (additive on existing rows).
+    impersonatingUserId: v.optional(v.id("users")),
   })
     .index("by_user", ["userId"])
     .index("by_role", ["role"]),
@@ -143,6 +151,25 @@ export default defineSchema({
     ),
     defaultThemeName: v.optional(v.string()),
   }).index("by_key", ["key"]),
+
+  // Append-only audit trail for cross-identity (impersonation) actions. Records
+  // WHO really acted (`realUserId` = the admin) and AS WHOM (`effectiveUserId` =
+  // the impersonated target), so every create / delete / send performed "in
+  // place of" a user is attributable to the real operator — the traceability
+  // requirement for the impersonation module. This is a NEW table (no existing
+  // rows) so its fields are required. NEVER stores message content or other PHI:
+  // only the action verb + the resource kind/id that was touched.
+  auditLog: defineTable({
+    at: v.number(),
+    action: v.string(), // e.g. "chat.create", "chat.delete", "impersonation.start"
+    realUserId: v.id("users"), // the actual signed-in operator
+    effectiveUserId: v.id("users"), // the identity the action ran as
+    impersonated: v.boolean(), // realUserId !== effectiveUserId
+    resource: v.optional(v.string()), // resource kind, e.g. "chat", "project", "message"
+    resourceId: v.optional(v.string()),
+  })
+    .index("by_time", ["at"])
+    .index("by_real", ["realUserId"]),
 
   // A user's project: a named grouping of chats in the sidebar. Per-user.
   projects: defineTable({

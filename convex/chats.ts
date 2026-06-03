@@ -9,6 +9,7 @@ import { mutation } from "./_generated/server";
 import type { MutationCtx } from "./_generated/server";
 import type { Id } from "./_generated/dataModel";
 import { requireActive, requireOwnedChat } from "./lib/access";
+import { auditImpersonated } from "./lib/audit";
 
 async function requireOwnedProject(
   ctx: MutationCtx,
@@ -62,7 +63,7 @@ export const createChat = mutation({
     projectId: v.optional(v.id("projects")),
   },
   handler: async (ctx, { title, openclawChatId, projectId }) => {
-    const { userId } = await requireActive(ctx);
+    const { userId, actor } = await requireActive(ctx);
     if (projectId) await requireOwnedProject(ctx, userId, projectId);
     const now = Date.now();
     // New chats go to the TOP: a key below the current minimum sortKey.
@@ -76,6 +77,10 @@ export const createChat = mutation({
       sortKey: minKey - 1,
       updatedAt: now,
     });
+    await auditImpersonated(ctx, actor, "chat.create", {
+      resource: "chat",
+      resourceId: chatId,
+    });
     return chatId;
   },
 });
@@ -83,9 +88,13 @@ export const createChat = mutation({
 export const renameChat = mutation({
   args: { chatId: v.id("chats"), title: v.string() },
   handler: async (ctx, { chatId, title }) => {
-    const { userId } = await requireActive(ctx);
+    const { userId, actor } = await requireActive(ctx);
     await requireOwnedChat(ctx, userId, chatId);
     await ctx.db.patch(chatId, { title, updatedAt: Date.now() });
+    await auditImpersonated(ctx, actor, "chat.rename", {
+      resource: "chat",
+      resourceId: chatId,
+    });
   },
 });
 
@@ -123,9 +132,13 @@ export async function cascadeDeleteChat(
 export const deleteChat = mutation({
   args: { chatId: v.id("chats") },
   handler: async (ctx, { chatId }) => {
-    const { userId } = await requireActive(ctx);
+    const { userId, actor } = await requireActive(ctx);
     await requireOwnedChat(ctx, userId, chatId);
     await cascadeDeleteChat(ctx, chatId);
+    await auditImpersonated(ctx, actor, "chat.delete", {
+      resource: "chat",
+      resourceId: chatId,
+    });
   },
 });
 
@@ -150,13 +163,17 @@ export const setChatColor = mutation({
 export const moveChatToProject = mutation({
   args: { chatId: v.id("chats"), projectId: v.union(v.id("projects"), v.null()) },
   handler: async (ctx, { chatId, projectId }) => {
-    const { userId } = await requireActive(ctx);
+    const { userId, actor } = await requireActive(ctx);
     await requireOwnedChat(ctx, userId, chatId);
     if (projectId) await requireOwnedProject(ctx, userId, projectId);
     const minKey = await minChatSortKey(ctx, userId, projectId);
     await ctx.db.patch(chatId, {
       projectId: projectId ?? undefined,
       sortKey: minKey - 1, // drop at the top of the destination list
+    });
+    await auditImpersonated(ctx, actor, "chat.move", {
+      resource: "chat",
+      resourceId: chatId,
     });
   },
 });

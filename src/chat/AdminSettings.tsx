@@ -19,7 +19,7 @@ import { EntitySheet } from "./admin/EntitySheet";
 // per-user routing), Groups (valves), Instances (non-secret meta), Theme
 // (component showroom for the active design tokens).
 
-const TABS = ["users", "groups", "instances", "theme"] as const;
+const TABS = ["users", "groups", "instances", "theme", "audit"] as const;
 type Tab = (typeof TABS)[number];
 
 export function AdminSettings() {
@@ -45,6 +45,7 @@ export function AdminSettings() {
         {tab === "groups" ? <GroupsTab /> : null}
         {tab === "instances" ? <InstancesTab /> : null}
         {tab === "theme" ? <ThemeShowroom /> : null}
+        {tab === "audit" ? <AuditTab /> : null}
       </div>
     </div>
   );
@@ -53,14 +54,29 @@ export function AdminSettings() {
 function UsersTab() {
   const users = useQuery(api.admin.listUsers, {});
   const groups = useQuery(api.admin.listGroups, {});
+  const me = useQuery(api.me.getMe);
   const setRole = useMutation(api.admin.setRole);
   const setRouting = useMutation(api.admin.setUserRouting);
+  const startImpersonation = useMutation(api.admin.startImpersonation);
 
   return (
     <DataTableShell
       title="Users"
       rows={users}
       emptyHint="Aucun utilisateur."
+      rowActions={(u) =>
+        // No self-impersonation (the server also rejects it); hide the action
+        // on the admin's own row.
+        u.userId === me?.userId
+          ? []
+          : [
+              {
+                label: "Voir comme cet utilisateur",
+                onSelect: () =>
+                  void startImpersonation({ profileId: u._id }),
+              },
+            ]
+      }
       columns={[
         {
           header: "User",
@@ -374,5 +390,43 @@ function Field({ label, children }: { label: string; children: React.ReactNode }
       <span className="oc-field__label">{label}</span>
       {children}
     </label>
+  );
+}
+
+// Audit trail of impersonated actions: WHO really acted and AS WHOM. Read-only.
+// Message content is never recorded server-side (PHI), so only the action verb
+// and the touched resource kind/id are shown.
+function AuditTab() {
+  const rows = useQuery(api.admin.listAudit, {});
+  return (
+    <>
+      <p className="oc-admin__hint">
+        Trace des actions effectuées sous usurpation d’identité : qui a
+        réellement agi (acteur réel) et au nom de quel utilisateur. Le contenu
+        des messages n’est jamais enregistré.
+      </p>
+      <DataTableShell
+        title="Audit"
+        rows={rows}
+        emptyHint="Aucune action tracée pour l’instant."
+        columns={[
+          {
+            header: "Quand",
+            cell: (r) => new Date(r.at).toLocaleString("fr-FR"),
+          },
+          { header: "Action", cell: (r) => r.action },
+          { header: "Acteur réel", cell: (r) => r.realLabel },
+          { header: "Au nom de", cell: (r) => r.targetLabel ?? "—" },
+          {
+            header: "Ressource",
+            cell: (r) =>
+              r.resource
+                ? r.resource +
+                  (r.resourceId ? ` · ${r.resourceId.slice(0, 8)}` : "")
+                : "—",
+          },
+        ]}
+      />
+    </>
   );
 }

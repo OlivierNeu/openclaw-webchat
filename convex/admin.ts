@@ -8,6 +8,7 @@ import { v } from "convex/values";
 import { mutation, query } from "./_generated/server";
 import { Id } from "./_generated/dataModel";
 import { getProfile, requireAdmin, roleOf } from "./lib/access";
+import { recordAudit } from "./lib/audit";
 
 const roleValidator = v.union(
   v.literal("pending"),
@@ -59,7 +60,13 @@ export const setRole = mutation({
         throw new Error("Refused: cannot demote the last admin");
       }
     }
-    await ctx.db.patch(profileId, { role });
+    // Security hygiene: a non-admin must not carry an impersonation target.
+    // Clearing it on demotion prevents a later re-promotion from silently
+    // resuming a stale impersonation (getActor already ignores it while the
+    // role is non-admin; this makes the state match the role).
+    const patch: { role: typeof role; impersonatingUserId?: undefined } = { role };
+    if (role !== "admin") patch.impersonatingUserId = undefined;
+    await ctx.db.patch(profileId, patch);
   },
 });
 
@@ -71,6 +78,79 @@ export const approveUser = mutation({
     const target = await ctx.db.get(profileId);
     if (target === null) throw new Error("Not found: profile");
     await ctx.db.patch(profileId, { role: "user" });
+  },
+});
+
+// --- Impersonation ("view/act as a user") -----------------------------------
+//
+// Start records the target on the REAL admin's profile; the access layer then
+// resolves the effective identity for all user-data functions. requireAdmin
+// keys off the REAL identity, so an admin keeps the power to stop even while
+// impersonating a non-admin. Both transitions are audited.
+
+export const startImpersonation = mutation({
+  args: { profileId: v.id("profiles") },
+  handler: async (ctx, { profileId }) => {
+    const realUserId = await requireAdmin(ctx);
+    const target = await ctx.db.get(profileId);
+    if (target === null) throw new Error("Not found: profile");
+    if (target.userId === realUserId) {
+      throw new Error("Refused: cannot impersonate yourself");
+    }
+    const realProfile = await getProfile(ctx, realUserId);
+    if (realProfile === null) throw new Error("Not found: admin profile");
+    await ctx.db.patch(realProfile._id, { impersonatingUserId: target.userId });
+    await recordAudit(
+      ctx,
+      { realUserId, effectiveUserId: target.userId, impersonating: true },
+      "impersonation.start",
+      { resource: "user", resourceId: target.userId },
+    );
+  },
+});
+
+export const stopImpersonation = mutation({
+  args: {},
+  handler: async (ctx) => {
+    const realUserId = await requireAdmin(ctx);
+    const realProfile = await getProfile(ctx, realUserId);
+    const wasTarget = realProfile?.impersonatingUserId;
+    if (realProfile && wasTarget) {
+      await ctx.db.patch(realProfile._id, { impersonatingUserId: undefined });
+      await recordAudit(
+        ctx,
+        { realUserId, effectiveUserId: wasTarget, impersonating: true },
+        "impersonation.stop",
+        { resource: "user", resourceId: wasTarget },
+      );
+    }
+  },
+});
+
+// --- Audit trail (read) -----------------------------------------------------
+
+export const listAudit = query({
+  args: {},
+  handler: async (ctx) => {
+    await requireAdmin(ctx);
+    // Most-recent first. Bounded; paginate later if a deployment grows large.
+    const rows = await ctx.db.query("auditLog").order("desc").take(200);
+    // Resolve userIds -> human labels (small admin dataset).
+    const profiles = await ctx.db.query("profiles").take(500);
+    const labelOf = (uid: Id<"users">) => {
+      const p = profiles.find((x) => x.userId === uid);
+      return p?.email ?? p?.name ?? p?.canonical ?? String(uid).slice(0, 8);
+    };
+    return rows.map((r) => ({
+      _id: r._id,
+      at: r.at,
+      action: r.action,
+      realLabel: labelOf(r.realUserId),
+      targetLabel: r.impersonated ? labelOf(r.effectiveUserId) : null,
+      impersonated: r.impersonated,
+      resource: r.resource ?? null,
+      resourceId: r.resourceId ?? null,
+    }));
   },
 });
 

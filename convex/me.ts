@@ -15,7 +15,15 @@
 import { v } from "convex/values";
 import { mutation, query } from "./_generated/server";
 import type { MutationCtx, QueryCtx } from "./_generated/server";
-import { ensureProfile, getProfile, requireUserId, roleOf } from "./lib/access";
+import {
+  ensureProfile,
+  getActor,
+  getProfile,
+  requireRealUserId,
+  requireUserId,
+  roleOf,
+} from "./lib/access";
+import { auditImpersonated } from "./lib/audit";
 
 const APP_META_KEY = "singleton";
 
@@ -82,11 +90,14 @@ export const setThemeMode = mutation({
     ),
   },
   handler: async (ctx, { mode }) => {
-    const userId = await requireUserId(ctx);
+    // Effective identity: while impersonating, this acts on the TARGET's theme
+    // (full "act as the user" scope) and is audited.
+    const actor = await getActor(ctx);
+    const userId = actor.effectiveUserId;
     const profile = await getProfile(ctx, userId);
     if (profile === null) {
-      // No profile yet (pre-bootstrap). Create a minimal pending profile that
-      // only carries the theme pref; ensureProfile will fill the rest later.
+      // No profile yet (pre-bootstrap, real user only — a target always has one).
+      // Create a minimal pending profile carrying just the theme pref.
       await ctx.db.insert("profiles", {
         userId,
         role: "pending",
@@ -95,5 +106,33 @@ export const setThemeMode = mutation({
       return;
     }
     await ctx.db.patch(profile._id, { themeMode: mode ?? undefined });
+    await auditImpersonated(ctx, actor, "theme.set", {
+      resource: "profile",
+      resourceId: userId,
+    });
+  },
+});
+
+// Whether the caller is CURRENTLY impersonating, for the warning banner. Keyed
+// off the REAL identity (requireRealUserId) so it never resolves through the
+// impersonation it is reporting on. Returns false for non-admins (no leak).
+export const getImpersonation = query({
+  args: {},
+  handler: async (ctx) => {
+    const realUserId = await requireRealUserId(ctx);
+    const realProfile = await getProfile(ctx, realUserId);
+    const targetId = realProfile?.impersonatingUserId;
+    if (roleOf(realProfile) !== "admin" || !targetId) {
+      return { impersonating: false as const };
+    }
+    const target = await getProfile(ctx, targetId);
+    if (target === null) return { impersonating: false as const };
+    return {
+      impersonating: true as const,
+      targetLabel:
+        target.email ?? target.name ?? target.canonical ?? "utilisateur",
+      targetRole: roleOf(target),
+      realLabel: realProfile.email ?? realProfile.name ?? "admin",
+    };
   },
 });

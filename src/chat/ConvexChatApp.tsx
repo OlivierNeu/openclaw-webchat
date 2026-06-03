@@ -11,6 +11,7 @@ import {
   Settings as SettingsIcon,
   PanelLeftClose,
   PanelLeftOpen,
+  Eye,
 } from "lucide-react";
 import { api } from "./convexApi";
 import type { ConvexId } from "./convexTypes";
@@ -23,8 +24,11 @@ import { Button } from "@/components/ui/button";
 import { useApplyTheme, type ThemeMode } from "@/lib/useTheme";
 import { useSidebarLayout } from "@/lib/useSidebarLayout";
 
-// What getMe returns (the bits the shell needs).
+// What getMe returns (the bits the shell needs). `userId` is the EFFECTIVE id
+// (impersonation-aware) — used as a remount key so switching identity resets
+// transient UI (e.g. the selected chat) cleanly.
 type Me = {
+  userId: string;
   role: "pending" | "user" | "admin";
   email: string | null;
   name: string | null;
@@ -108,6 +112,7 @@ function RoleGate() {
   if (me.role === "pending") {
     return (
       <div className="oc-shell">
+        <ImpersonationBanner />
         <header className="oc-topbar">
           <span className="oc-topbar__brand">OpenClaw</span>
           <div className="oc-topbar__actions">
@@ -127,10 +132,49 @@ function RoleGate() {
 
   return (
     <ChatWorkspace
+      // Remount on identity change (start/stop impersonation) so the active
+      // chat selection never points at a chat the effective user can't access.
+      key={me.userId}
       isAdmin={me.role === "admin"}
       userLabel={userLabel}
       themeMode={me.themeMode}
     />
+  );
+}
+
+// Persistent warning strip shown whenever the admin is impersonating a user.
+// Driven by me.getImpersonation (REAL-identity query, so it survives the
+// effective-identity flip it reports on). Rendered on EVERY authenticated
+// surface (incl. the pending screen) so "Quitter" is always reachable.
+function ImpersonationBanner() {
+  const imp = useQuery(api.me.getImpersonation) as
+    | { impersonating: false }
+    | {
+        impersonating: true;
+        targetLabel: string;
+        targetRole: string;
+        realLabel: string;
+      }
+    | undefined;
+  const stop = useMutation(api.admin.stopImpersonation);
+  if (!imp || !imp.impersonating) return null;
+  return (
+    <div className="oc-imp" role="alert">
+      <Eye className="size-4 shrink-0" />
+      <span className="oc-imp__text">
+        Vous explorez l’application en tant que{" "}
+        <strong>{imp.targetLabel}</strong>. Toute action est exécutée et tracée
+        en votre nom (<strong>{imp.realLabel}</strong>).
+      </span>
+      <Button
+        size="sm"
+        variant="outline"
+        className="oc-imp__exit"
+        onClick={() => void stop()}
+      >
+        Quitter
+      </Button>
+    </div>
   );
 }
 
@@ -183,6 +227,7 @@ function ChatWorkspace({
 
   return (
     <div className="oc-shell">
+      <ImpersonationBanner />
       <AppTopBar
         userLabel={userLabel}
         themeMode={themeMode}

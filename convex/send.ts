@@ -18,6 +18,7 @@ import { v } from "convex/values";
 import { mutation } from "./_generated/server";
 import { internal } from "./_generated/api";
 import { requireActive, requireOwnedChat } from "./lib/access";
+import { auditImpersonated } from "./lib/audit";
 import { assertOwnsUpload } from "./uploads";
 
 export const sendMessage = mutation({
@@ -46,7 +47,7 @@ export const sendMessage = mutation({
     ),
   },
   handler: async (ctx, args) => {
-    const { userId } = await requireActive(ctx);
+    const { userId, actor } = await requireActive(ctx);
     const chat = await requireOwnedChat(ctx, userId, args.chatId);
 
     // 2. Idempotency short-circuit. Run BEFORE any insert so a retry inserts
@@ -121,6 +122,13 @@ export const sendMessage = mutation({
 
     // 6. Schedule the dispatch to the bridge (cannot fetch from a mutation).
     await ctx.scheduler.runAfter(0, internal.bridge.dispatch, { outboxId });
+
+    // Audit a send performed under impersonation. PHI: we log the message id
+    // ONLY — never `args.text` or attachment contents.
+    await auditImpersonated(ctx, actor, "message.send", {
+      resource: "message",
+      resourceId: messageId,
+    });
 
     return { messageId, outboxId, deduped: false as const };
   },

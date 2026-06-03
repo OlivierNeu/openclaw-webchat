@@ -5,6 +5,7 @@ import { mutation, query } from "./_generated/server";
 import type { MutationCtx, QueryCtx } from "./_generated/server";
 import type { Id } from "./_generated/dataModel";
 import { requireActive } from "./lib/access";
+import { auditImpersonated } from "./lib/audit";
 import { cascadeDeleteChat } from "./chats";
 
 async function requireOwnedProject(
@@ -40,7 +41,7 @@ export const listProjects = query({
 export const createProject = mutation({
   args: { name: v.string() },
   handler: async (ctx, { name }) => {
-    const { userId } = await requireActive(ctx);
+    const { userId, actor } = await requireActive(ctx);
     const existing = await ctx.db
       .query("projects")
       .withIndex("by_user", (q) => q.eq("userId", userId))
@@ -48,20 +49,29 @@ export const createProject = mutation({
     const minKey = existing.length
       ? Math.min(...existing.map((p) => p.sortKey ?? 0))
       : 0;
-    return await ctx.db.insert("projects", {
+    const projectId = await ctx.db.insert("projects", {
       userId,
       name,
       sortKey: minKey - 1,
     });
+    await auditImpersonated(ctx, actor, "project.create", {
+      resource: "project",
+      resourceId: projectId,
+    });
+    return projectId;
   },
 });
 
 export const renameProject = mutation({
   args: { projectId: v.id("projects"), name: v.string() },
   handler: async (ctx, { projectId, name }) => {
-    const { userId } = await requireActive(ctx);
+    const { userId, actor } = await requireActive(ctx);
     await requireOwnedProject(ctx, userId, projectId);
     await ctx.db.patch(projectId, { name });
+    await auditImpersonated(ctx, actor, "project.rename", {
+      resource: "project",
+      resourceId: projectId,
+    });
   },
 });
 
@@ -95,7 +105,7 @@ export const projectChatCount = query({
 export const deleteProject = mutation({
   args: { projectId: v.id("projects") },
   handler: async (ctx, { projectId }) => {
-    const { userId } = await requireActive(ctx);
+    const { userId, actor } = await requireActive(ctx);
     await requireOwnedProject(ctx, userId, projectId);
     const chats = await ctx.db
       .query("chats")
@@ -103,5 +113,9 @@ export const deleteProject = mutation({
       .take(500);
     for (const c of chats) await cascadeDeleteChat(ctx, c._id);
     await ctx.db.delete(projectId);
+    await auditImpersonated(ctx, actor, "project.delete", {
+      resource: "project",
+      resourceId: projectId,
+    });
   },
 });

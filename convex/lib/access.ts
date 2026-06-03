@@ -22,15 +22,71 @@ import { MutationCtx, QueryCtx } from "../_generated/server";
 export type Role = "pending" | "user" | "admin";
 const APP_META_KEY = "singleton";
 
-/** Authenticated user id (Id<"users">) or throw. Does NOT check role. */
-export async function requireUserId(
-  ctx: QueryCtx | MutationCtx,
-): Promise<Id<"users">> {
+/**
+ * The identity context for a request:
+ *   - realUserId      = who is actually signed in (always the auth identity)
+ *   - effectiveUserId = the identity the request operates AS. Equal to
+ *     realUserId, EXCEPT when the real caller is an admin who started
+ *     impersonation: then it is the impersonated target.
+ *   - impersonating   = the two differ.
+ *
+ * This split is the whole impersonation model: user-data functions scope to
+ * `effectiveUserId` (so the admin sees/acts exactly as the target), while
+ * admin/control functions key off `realUserId` (so admin power — and the
+ * ability to stop impersonation — is always tied to who you really are, and
+ * impersonation can never escalate).
+ */
+export type Actor = {
+  realUserId: Id<"users">;
+  effectiveUserId: Id<"users">;
+  impersonating: boolean;
+};
+
+/** Raw authenticated user id (NEVER impersonation-resolved) or throw. */
+async function rawUserId(ctx: QueryCtx | MutationCtx): Promise<Id<"users">> {
   const userId = await getAuthUserId(ctx);
   if (userId === null) {
     throw new Error("Unauthorized: authentication required");
   }
   return userId;
+}
+
+/** The REAL signed-in user id — bypasses impersonation. Used by control paths. */
+export async function requireRealUserId(
+  ctx: QueryCtx | MutationCtx,
+): Promise<Id<"users">> {
+  return rawUserId(ctx);
+}
+
+/**
+ * Resolve the request's Actor. Reads ONLY the real profile's
+ * `impersonatingUserId` once — no recursion (a target's own field is ignored),
+ * and only when the real profile is an admin and the target still exists.
+ */
+export async function getActor(ctx: QueryCtx | MutationCtx): Promise<Actor> {
+  const realUserId = await rawUserId(ctx);
+  const realProfile = await getProfile(ctx, realUserId);
+  let effectiveUserId = realUserId;
+  const target = realProfile?.impersonatingUserId;
+  if (roleOf(realProfile) === "admin" && target) {
+    const targetProfile = await getProfile(ctx, target);
+    if (targetProfile !== null) effectiveUserId = target;
+  }
+  return {
+    realUserId,
+    effectiveUserId,
+    impersonating: effectiveUserId !== realUserId,
+  };
+}
+
+/**
+ * Effective user id (impersonation-aware). This is the default identity for
+ * user-data functions. Does NOT check role.
+ */
+export async function requireUserId(
+  ctx: QueryCtx | MutationCtx,
+): Promise<Id<"users">> {
+  return (await getActor(ctx)).effectiveUserId;
 }
 
 /** Read the caller's profile (or null). Read-only; never creates. */
@@ -63,7 +119,9 @@ export function roleOf(profile: Doc<"profiles"> | null): Role {
  * MUTATIONS only (it may insert). Returns the userId.
  */
 export async function ensureProfile(ctx: MutationCtx): Promise<Id<"users">> {
-  const userId = await requireUserId(ctx);
+  // Provisions the CALLER's OWN profile -> must be the REAL identity, never the
+  // impersonated one (otherwise an impersonating admin would touch the target).
+  const userId = await rawUserId(ctx);
   const existing = await getProfile(ctx, userId);
   if (existing !== null) {
     // Backfill a role-less legacy row to "pending" (least privilege) so the
@@ -129,23 +187,40 @@ export function canonicalFromEmail(
  * every chat/data function must use — being merely authenticated (which a
  * "pending" user is) is NOT enough.
  */
-export async function requireActive(
-  ctx: QueryCtx | MutationCtx,
-): Promise<{ userId: Id<"users">; role: Role; profile: Doc<"profiles"> | null }> {
-  const userId = await requireUserId(ctx);
-  const profile = await getProfile(ctx, userId);
+export async function requireActive(ctx: QueryCtx | MutationCtx): Promise<{
+  userId: Id<"users">; // EFFECTIVE id (impersonation-aware); existing callers use this
+  realUserId: Id<"users">;
+  impersonating: boolean;
+  actor: Actor; // pass straight to the audit helper
+  role: Role; // EFFECTIVE role (so impersonating a pending user is blocked, as it should be)
+  profile: Doc<"profiles"> | null; // EFFECTIVE profile
+}> {
+  const actor = await getActor(ctx);
+  const profile = await getProfile(ctx, actor.effectiveUserId);
   const role = roleOf(profile);
   if (role === "pending") {
     throw new Error("Forbidden: account pending approval");
   }
-  return { userId, role, profile };
+  return {
+    userId: actor.effectiveUserId,
+    realUserId: actor.realUserId,
+    impersonating: actor.impersonating,
+    actor,
+    role,
+    profile,
+  };
 }
 
-/** Require the caller to be an admin. Used by every admin.* function. */
+/**
+ * Require the caller to be an admin. Keys off the REAL identity, so admin power
+ * is tied to who you actually are: impersonation never grants it, never removes
+ * it, and an admin impersonating a regular user can still stop impersonating.
+ * Returns the real admin's userId.
+ */
 export async function requireAdmin(
   ctx: QueryCtx | MutationCtx,
 ): Promise<Id<"users">> {
-  const userId = await requireUserId(ctx);
+  const userId = await rawUserId(ctx);
   const profile = await getProfile(ctx, userId);
   if (roleOf(profile) !== "admin") {
     throw new Error("Forbidden: admin role required");
