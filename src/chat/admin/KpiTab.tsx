@@ -3,19 +3,17 @@ import { useQuery } from "convex/react";
 import { api } from "../convexApi";
 import type { Id } from "../convexApi";
 import {
+  TimeRangePicker,
+  useResolvedRange,
+} from "./filters/TimeRangePicker";
+import type { TimeRange } from "./filters/types";
+import {
   Card,
   CardContent,
   CardDescription,
   CardHeader,
   CardTitle,
 } from "@/components/ui/card";
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from "@/components/ui/select";
 
 // "KPI" tab — the observability dashboard (increment 4). Reads
 // api.kpi.listKpis, an admin query returning the SMALL, long-lived per-hour
@@ -24,8 +22,8 @@ import {
 //
 // Two non-obvious points:
 //  - `listKpis`' `limit` counts ROWS, not buckets, and the rollup writes ALL
-//    metrics for EVERY bucket. So "last N buckets" needs limit = N * (metric
-//    count). See `bucketsToLimit` below.
+//    metrics for EVERY bucket. So the selected time range is translated to a row
+//    limit = (hours in range) * (metric count). See `rangeToLimits` below.
 //  - The flat {bucket, metric, value} rows are pivoted client-side into one
 //    ascending-by-bucket series per metric (ISO hour strings sort
 //    lexicographically == chronologically, so a string sort is correct).
@@ -85,29 +83,41 @@ const METRIC_COUNT = METRIC_CONFIG.length;
 // Group render order.
 const GROUP_ORDER: MetricGroup[] = ["API", "OpenClaw", "Chat", "Assistant"];
 
-// Bucket-window presets. The control is a bucket count; we translate to a row
-// limit for the backend (which caps at MAX_LIST_LIMIT = 1000, so 168 buckets
-// over-asks slightly and the OLDEST bucket may come back partial — cosmetic on
-// the chart, never affecting the latest-bucket cards which always return first).
-const BUCKET_OPTIONS = [
-  { value: "24", label: "24 dernières heures" },
-  { value: "72", label: "72 dernières heures" },
-  { value: "168", label: "7 derniers jours" },
-] as const;
-type BucketValue = (typeof BUCKET_OPTIONS)[number]["value"];
+// Backend row cap (MAX_LIST_LIMIT in convex/kpi.ts). `limit` counts ROWS, not
+// buckets, and the rollup writes one row per metric per bucket — so the row
+// budget caps how many hour-buckets we can actually pull back.
+const MAX_ROW_LIMIT = 1000;
+const MS_PER_HOUR = 3_600_000;
 
-function bucketsToLimit(buckets: number): number {
-  return buckets * METRIC_COUNT;
+// Default window: live "last 24h". Re-resolves to NOW via useResolvedRange.
+const DEFAULT_RANGE: TimeRange = { kind: "relative", from: "now-24h", to: "now" };
+
+// Derive a backend ROW limit + a bucket count from a resolved ms range. The
+// number of hour buckets spanned drives the row limit (× metric count); both
+// are clamped to the backend cap so a 90-day window stays bounded (the oldest
+// buckets come back partial — cosmetic on the chart).
+function rangeToLimits(from: number, to: number): {
+  rowLimit: number;
+  buckets: number;
+} {
+  const hours = Math.max(1, Math.ceil((to - from) / MS_PER_HOUR));
+  const rowLimit = Math.min(hours * METRIC_COUNT, MAX_ROW_LIMIT);
+  // How many buckets the row budget can actually represent (used to clip the
+  // pivoted series so a partial over/under-fetch never stretches the x-axis).
+  const buckets = Math.max(1, Math.floor(rowLimit / METRIC_COUNT));
+  return { rowLimit, buckets };
 }
 
 type Point = { bucket: string; value: number };
 
 export function KpiTab() {
-  const [bucketsChoice, setBucketsChoice] = useState<BucketValue>("24");
-  const buckets = Number(bucketsChoice);
+  const [range, setRange] = useState<TimeRange>(DEFAULT_RANGE);
+  const { from, to } = useResolvedRange(range);
+  const { rowLimit, buckets } = rangeToLimits(from, to);
 
   const rollups = useQuery(api.kpi.listKpis, {
-    limit: bucketsToLimit(buckets),
+    limit: rowLimit,
+    filter: { from, to },
   }) as KpiRollupView[] | undefined;
 
   // Pivot the flat rows into one ascending-by-bucket series per metric. Sorting
@@ -137,9 +147,13 @@ export function KpiTab() {
       <p className="oc-admin__hint">
         Indicateurs agrégés par heure à partir des traces expurgées (métadonnées
         non-PHI uniquement). Mise à jour en direct (useQuery) — le rollup tourne
-        chaque heure.
+        chaque heure.{" "}
+        <span className="oc-filter__window">
+          La plage filtre l’historique des rollups — une plage antérieure peut
+          être partielle.
+        </span>
       </p>
-      <Toolbar value={bucketsChoice} onChange={setBucketsChoice} />
+      <Toolbar value={range} onChange={setRange} />
     </>
   );
 
@@ -195,23 +209,12 @@ function Toolbar({
   value,
   onChange,
 }: {
-  value: BucketValue;
-  onChange: (v: BucketValue) => void;
+  value: TimeRange;
+  onChange: (v: TimeRange) => void;
 }) {
   return (
     <div className="oc-kpi__toolbar">
-      <Select value={value} onValueChange={(v) => onChange(v as BucketValue)}>
-        <SelectTrigger size="sm" className="w-48">
-          <SelectValue />
-        </SelectTrigger>
-        <SelectContent>
-          {BUCKET_OPTIONS.map((o) => (
-            <SelectItem key={o.value} value={o.value}>
-              {o.label}
-            </SelectItem>
-          ))}
-        </SelectContent>
-      </Select>
+      <TimeRangePicker value={value} onChange={onChange} />
     </div>
   );
 }

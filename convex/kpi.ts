@@ -25,6 +25,7 @@ import {
 } from "./_generated/server";
 import { Doc } from "./_generated/dataModel";
 import { requireAdmin } from "./lib/access";
+import { filterValidator, type Filter } from "./lib/filters";
 
 // How many full hours back the rollup recomputes. The cutoff is snapped to an
 // hour BOUNDARY so every COMPLETED bucket in range is always scanned in full
@@ -236,6 +237,11 @@ function toView(r: Doc<"kpiRollups">): KpiRollupView {
   };
 }
 
+/** The hour bucket a ms timestamp falls in, e.g. 1717336800000 -> "2026-06-02T14". */
+function bucketOf(ms: number): string {
+  return new Date(ms).toISOString().slice(0, 13);
+}
+
 /**
  * Fetch recent rollups, newest bucket first. Shared core for the admin query and
  * the key-authed API path (mirrors observability.fetchRecentEvents). The
@@ -245,25 +251,54 @@ function toView(r: Doc<"kpiRollups">): KpiRollupView {
  * `metric` filters to one metric (uses the index prefix-free, so it is applied
  * in memory over a bounded scan); `since` keeps only buckets >= the given hour
  * bucket string (e.g. "2026-06-02T00").
+ *
+ * Filtering (KPI is the odd resource): its time field is a STRING hour bucket,
+ * NOT a numeric `at`, so the generic numeric time path does not apply. A
+ * `filter.from`/`filter.to` (epoch ms) is converted to its hour bucket and
+ * range-compared against `bucket`; `filter.metric` reconciles with the `metric`
+ * arg (both ANDed). The `q`/advanced clauses do not apply to KPI (no search
+ * fields). NOTE (D1): a `filter.from` older than the bounded rollup history
+ * returns PARTIAL results.
  */
 async function fetchKpis(
   ctx: QueryCtx,
-  opts: { limit?: number; metric?: string; since?: string },
+  opts: { limit?: number; metric?: string; since?: string; filter?: Filter },
 ): Promise<KpiRollupView[]> {
   // L3: clamp to a non-negative integer so a negative/non-integer ?limit can
   // never reach `.take()` (which Convex rejects -> a 500 in the http route).
   const limit = clampLimit(opts.limit, DEFAULT_LIST_LIMIT, MAX_LIST_LIMIT);
-  // Over-fetch when filtering by metric so the post-filter still fills `limit`,
-  // but keep the scan bounded.
-  const scan = opts.metric ? Math.min(Math.max(limit, 1) * 6, MAX_LIST_LIMIT) : limit;
+  const filter = opts.filter;
+  // KPI's quick filter (`metric`) is the dedicated `metric` arg (HTTP `?metric=`);
+  // the shared Filter only contributes the time range for this resource.
+  const metric = opts.metric;
+  // Convert the filter's epoch-ms bounds into hour-bucket strings (KPI's time
+  // field). `from` AND the existing string `since` are both lower bounds.
+  const fromBucket =
+    filter?.from !== undefined ? bucketOf(filter.from) : undefined;
+  const toBucket = filter?.to !== undefined ? bucketOf(filter.to) : undefined;
+  const lowerBound =
+    opts.since !== undefined && fromBucket !== undefined
+      ? opts.since > fromBucket
+        ? opts.since
+        : fromBucket
+      : (opts.since ?? fromBucket);
+  // Over-fetch when filtering so the post-filter still fills `limit` (bounded).
+  const filtering =
+    metric !== undefined ||
+    lowerBound !== undefined ||
+    toBucket !== undefined;
+  const scan = filtering
+    ? Math.min(Math.max(limit, 1) * 6, MAX_LIST_LIMIT)
+    : limit;
   const rows = await ctx.db
     .query("kpiRollups")
     .withIndex("by_bucket_metric")
     .order("desc")
     .take(scan);
   let filtered = rows;
-  if (opts.metric) filtered = filtered.filter((r) => r.metric === opts.metric);
-  if (opts.since) filtered = filtered.filter((r) => r.bucket >= opts.since!);
+  if (metric) filtered = filtered.filter((r) => r.metric === metric);
+  if (lowerBound) filtered = filtered.filter((r) => r.bucket >= lowerBound);
+  if (toBucket) filtered = filtered.filter((r) => r.bucket <= toBucket);
   return filtered.slice(0, limit).map(toView);
 }
 
@@ -286,10 +321,11 @@ export const listKpis = query({
     limit: v.optional(v.number()),
     metric: v.optional(v.string()),
     since: v.optional(v.string()),
+    filter: v.optional(filterValidator),
   },
-  handler: async (ctx, { limit, metric, since }) => {
+  handler: async (ctx, { limit, metric, since, filter }) => {
     await requireAdmin(ctx);
-    return await fetchKpis(ctx, { limit, metric, since });
+    return await fetchKpis(ctx, { limit, metric, since, filter });
   },
 });
 
@@ -304,8 +340,9 @@ export const kpisInternal = internalQuery({
     limit: v.optional(v.number()),
     metric: v.optional(v.string()),
     since: v.optional(v.string()),
+    filter: v.optional(filterValidator),
   },
-  handler: async (ctx, { limit, metric, since }) => {
-    return await fetchKpis(ctx, { limit, metric, since });
+  handler: async (ctx, { limit, metric, since, filter }) => {
+    return await fetchKpis(ctx, { limit, metric, since, filter });
   },
 });

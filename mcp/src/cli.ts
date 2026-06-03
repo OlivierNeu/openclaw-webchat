@@ -7,11 +7,16 @@
  *
  * Usage:
  *   openclaw-webchat health
- *   openclaw-webchat traces [--limit N] [--kind K] [--correlation-id ID]
- *   openclaw-webchat kpi [--metric M] [--since ISO]
- *   openclaw-webchat anomalies [--limit N] [--since ISO] [--status S]
+ *   openclaw-webchat traces [--limit N] [--q TEXT] [--from T] [--to T] [--kind K]
+ *       [--status CODE] [--status-class 2xx|4xx|5xx] [--direction D]
+ *       [--principal-type T] [--role-key K] [--correlation-id ID]
+ *   openclaw-webchat kpi [--metric M] [--since ISO] [--from T] [--to T]
+ *   openclaw-webchat anomalies [--limit N] [--since ISO] [--q TEXT] [--from T]
+ *       [--to T] [--status S] [--severity S] [--source S] [--kind K]
  *   openclaw-webchat query-openclaw [--question TEXT]
  *   openclaw-webchat report-anomaly --kind K --severity S --message M [--correlation-id ID]
+ *
+ * --from/--to accept epoch ms OR a Grafana relative token (e.g. now-24h, now).
  */
 
 import { ApiError, resolveConfig, type Config } from "./config.js";
@@ -69,14 +74,23 @@ const USAGE = `openclaw-webchat — thin CLI over the /api/v1 observability surf
 
 Commands:
   health                              GET  /health
-  traces [--limit N] [--kind K] [--correlation-id ID]
+  traces [--limit N] [--q TEXT] [--from T] [--to T] [--kind K] [--status CODE]
+         [--status-class 2xx|4xx|5xx] [--direction D] [--principal-type T]
+         [--role-key K] [--correlation-id ID]
                                       GET  /traces            (traces.read)
-  kpi [--metric M] [--since ISO]      GET  /kpi               (kpi.read)
-  anomalies [--limit N] [--since ISO] [--status S]
+  kpi [--metric M] [--since ISO] [--from T] [--to T]
+                                      GET  /kpi               (kpi.read)
+  anomalies [--limit N] [--since ISO] [--q TEXT] [--from T] [--to T]
+            [--status S] [--severity S] [--source S] [--kind K]
                                       GET  /anomalies         (anomalies.read)
   query-openclaw [--question TEXT]    POST /openclaw/query    (openclaw.query)
   report-anomaly --kind K --severity info|warn|critical --message M [--correlation-id ID]
                                       POST /anomalies         (anomalies.report)
+
+Filters:
+  --from / --to accept epoch ms (e.g. 1717372800000) OR a Grafana relative
+  token: now, or now-<N><unit> with unit s|m|h|d|w (e.g. --from now-24h --to now).
+  Example: traces --from now-24h --to now --status-class 4xx --kind api.call --q foo
 
 Environment:
   OPENCLAW_WEBCHAT_API_BASE  deployment .site origin (default http://127.0.0.1:3213)
@@ -90,22 +104,48 @@ async function dispatch(
   switch (command) {
     case "health":
       return health(config);
-    case "traces":
+    case "traces": {
+      const statusClass = str(flags["status-class"]);
+      if (
+        statusClass !== undefined &&
+        statusClass !== "2xx" &&
+        statusClass !== "4xx" &&
+        statusClass !== "5xx"
+      ) {
+        throw new Error("--status-class must be one of 2xx|4xx|5xx");
+      }
       return listTraces(config, {
         limit: num(flags.limit),
+        q: str(flags.q),
+        from: str(flags.from),
+        to: str(flags.to),
         kind: str(flags.kind),
+        status: num(flags.status),
+        statusClass,
+        direction: str(flags.direction),
+        principalType: str(flags["principal-type"]),
+        roleKey: str(flags["role-key"]),
         correlationId: str(flags["correlation-id"]),
       });
+    }
     case "kpi":
       return getKpi(config, {
         metric: str(flags.metric),
         since: str(flags.since),
+        from: str(flags.from),
+        to: str(flags.to),
       });
     case "anomalies":
       return listAnomalies(config, {
         limit: num(flags.limit),
         since: str(flags.since),
+        q: str(flags.q),
+        from: str(flags.from),
+        to: str(flags.to),
         status: str(flags.status),
+        severity: str(flags.severity),
+        source: str(flags.source),
+        kind: str(flags.kind),
       });
     case "query-openclaw":
       return queryOpenClaw(config, {

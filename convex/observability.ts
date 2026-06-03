@@ -20,6 +20,12 @@ import {
 import { internal } from "./_generated/api";
 import { Doc } from "./_generated/dataModel";
 import { requireAdmin } from "./lib/access";
+import {
+  applyFilter,
+  filterValidator,
+  type Filter,
+  type FilterConfig,
+} from "./lib/filters";
 
 // Default retention horizon when TRACE_RETENTION_DAYS is unset (D1).
 const DEFAULT_RETENTION_DAYS = 14;
@@ -165,18 +171,54 @@ function toView(r: Doc<"traceEvents">): TraceEventView {
 }
 
 /**
- * Fetch the most recent events (optionally filtered by `kind`), newest first.
- * Shared core for both the admin query and the internal API path. There is no
- * `by_kind` index by contract, so `kind` is filtered in memory over a bounded
- * `by_at` scan — fine for the bounded recent window.
+ * Filter config for the traces resource (docs/FILTERS_SPEC.md). Applied over the
+ * VIEW objects (TraceEventView) the query returns. `q` searches the redacted
+ * metadata only (D2). `correlationId` is NOT here — it stays a dedicated arg on
+ * the by_correlation index path.
+ */
+const TRACES_FILTER_CFG: FilterConfig = {
+  searchFields: ["kind", "principalId", "roleKey", "route", "correlationId"],
+  timeField: "at",
+  structured: {
+    kind: { field: "kind", kind: "string" },
+    // Exact numeric status (FILTERS_SPEC.md /api/v1 params line) AND the coarser
+    // statusClass range both map onto the numeric `status` view field.
+    status: { field: "status", kind: "number" },
+    statusClass: { field: "status", kind: "statusClass" },
+    principalType: { field: "principalType", kind: "string" },
+    direction: { field: "direction", kind: "string" },
+    roleKey: { field: "roleKey", kind: "string" },
+  },
+  advanced: true,
+};
+
+/**
+ * Fetch the most recent events, newest first. Shared core for the admin query
+ * and the internal API path. There is no `by_kind` index by contract, so `kind`
+ * is filtered in memory over a bounded `by_at` scan — fine for the bounded
+ * recent window.
+ *
+ * Filtering: an optional `filter` (the per-resource subset of the shared Filter
+ * model) is applied in-memory over the bounded read, AFTER the read but BEFORE
+ * the `limit` slice — so `limit` caps the FILTERED set. When a `filter` is
+ * present we scan up to MAX_LIST_LIMIT so the post-filter can still fill `limit`
+ * (the scan stays bounded). NOTE (D1): a `filter.from` older than the bounded
+ * recent window returns PARTIAL results — the full firehose lives in
+ * Opik/Langfuse, not here.
  */
 async function fetchRecentEvents(
   ctx: Parameters<typeof requireAdmin>[0],
-  opts: { limit?: number; kind?: string; correlationId?: string },
+  opts: {
+    limit?: number;
+    kind?: string;
+    correlationId?: string;
+    filter?: Filter;
+  },
 ): Promise<TraceEventView[]> {
   // L3: clamp to a non-negative integer so a negative/non-integer ?limit can
   // never reach `.take()` (which Convex rejects -> a 500 in the http route).
   const limit = clampLimit(opts.limit, DEFAULT_LIST_LIMIT, MAX_LIST_LIMIT);
+  const hasFilter = opts.filter !== undefined;
   // M7: a correlationId filter follows a span chain via the dedicated index
   // (the MCP client advertises it). Newest-first within the chain.
   if (opts.correlationId !== undefined) {
@@ -188,18 +230,23 @@ async function fetchRecentEvents(
       .take(Math.min(Math.max(limit, 1) * 5, MAX_LIST_LIMIT));
     rows.sort((a, b) => b.at - a.at);
     const chain = opts.kind ? rows.filter((r) => r.kind === opts.kind) : rows;
-    return chain.slice(0, limit).map(toView);
+    const views = applyFilter(chain.map(toView), opts.filter, TRACES_FILTER_CFG);
+    return views.slice(0, limit);
   }
-  // Over-fetch a little when filtering by kind so the post-filter still returns
-  // up to `limit`, but keep the scan bounded.
-  const scan = opts.kind ? Math.min(Math.max(limit, 1) * 5, MAX_LIST_LIMIT) : limit;
+  // Over-fetch when filtering (by `kind` arg OR a `filter`) so the post-filter
+  // still returns up to `limit`, but keep the scan bounded.
+  const scan =
+    opts.kind || hasFilter
+      ? Math.min(Math.max(limit, 1) * 5, MAX_LIST_LIMIT)
+      : limit;
   const rows = await ctx.db
     .query("traceEvents")
     .withIndex("by_at")
     .order("desc")
     .take(scan);
-  const filtered = opts.kind ? rows.filter((r) => r.kind === opts.kind) : rows;
-  return filtered.slice(0, limit).map(toView);
+  const byKind = opts.kind ? rows.filter((r) => r.kind === opts.kind) : rows;
+  const views = applyFilter(byKind.map(toView), opts.filter, TRACES_FILTER_CFG);
+  return views.slice(0, limit);
 }
 
 /** Clamp an optional numeric limit to a non-negative integer within [0, max]. */
@@ -224,10 +271,11 @@ export const listEvents = query({
     limit: v.optional(v.number()),
     kind: v.optional(v.string()),
     correlationId: v.optional(v.string()),
+    filter: v.optional(filterValidator),
   },
-  handler: async (ctx, { limit, kind, correlationId }) => {
+  handler: async (ctx, { limit, kind, correlationId, filter }) => {
     await requireAdmin(ctx);
-    return await fetchRecentEvents(ctx, { limit, kind, correlationId });
+    return await fetchRecentEvents(ctx, { limit, kind, correlationId, filter });
   },
 });
 
@@ -242,9 +290,10 @@ export const recentEventsInternal = internalQuery({
     limit: v.optional(v.number()),
     kind: v.optional(v.string()),
     correlationId: v.optional(v.string()),
+    filter: v.optional(filterValidator),
   },
-  handler: async (ctx, { limit, kind, correlationId }) => {
-    return await fetchRecentEvents(ctx, { limit, kind, correlationId });
+  handler: async (ctx, { limit, kind, correlationId, filter }) => {
+    return await fetchRecentEvents(ctx, { limit, kind, correlationId, filter });
   },
 });
 

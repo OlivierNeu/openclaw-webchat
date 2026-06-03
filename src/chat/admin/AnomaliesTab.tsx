@@ -1,8 +1,11 @@
-import { useState } from "react";
+import { useMemo, useState } from "react";
 import { useMutation, useQuery } from "convex/react";
 import { api } from "../convexApi";
 import type { Id } from "../convexApi";
 import { DataTableShell } from "./DataTableShell";
+import { FilterBar } from "./filters/FilterBar";
+import { useResolvedRange } from "./filters/TimeRangePicker";
+import type { TimeRange } from "./filters/types";
 import { useConfirm } from "@/components/ConfirmDialog";
 import { useToast } from "@/components/ui/toast";
 import { Badge } from "@/components/ui/badge";
@@ -39,24 +42,78 @@ type AnomalyView = {
   resolvedBy: string | null;
 };
 
-const STATUS_FILTERS = [
+// "Select all" sentinel for the quick <Select>s (radix has no empty value).
+const ALL = "__all__";
+
+// anomalyStatus options (the backend filter key is `anomalyStatus`, NOT the
+// top-level `status` arg). Default "open" preserves today's view.
+const STATUS_OPTIONS = [
   { value: "open", label: "Ouvertes" },
-  { value: "all", label: "Toutes" },
+  { value: "acknowledged", label: "Acquittées" },
+  { value: "resolved", label: "Résolues" },
 ] as const;
-type StatusFilter = (typeof STATUS_FILTERS)[number]["value"];
+
+const SEVERITIES = ["info", "warn", "critical"] as const;
+const SOURCES = ["detector", "agent"] as const;
+
+// Default time window for the anomalies table. Wide (30d) so seeded/older
+// anomalies surface on load — anomalies previously had NO time filter, so a
+// narrow default would hide rows older than it within the bounded window.
+const DEFAULT_RANGE: TimeRange = { kind: "relative", from: "now-30d", to: "now" };
 
 const LIST_LIMIT = 200;
 
 export function AnomaliesTab() {
-  const [statusFilter, setStatusFilter] = useState<StatusFilter>("open");
+  const [q, setQ] = useState("");
+  // Default to "open" (mirrors the previous default view).
+  const [anomalyStatus, setAnomalyStatus] = useState<string>("open");
+  const [severity, setSeverity] = useState<string>(ALL);
+  const [source, setSource] = useState<string>(ALL);
+  const [kind, setKind] = useState<string>(ALL);
+  const [range, setRange] = useState<TimeRange>(DEFAULT_RANGE);
+  const { from, to } = useResolvedRange(range);
+
   const confirm = useConfirm();
   const toast = useToast();
   const resolveAnomaly = useMutation(api.anomalies.resolveAnomaly);
 
   const rows = useQuery(api.anomalies.listAnomalies, {
-    status: statusFilter === "open" ? "open" : undefined,
     limit: LIST_LIMIT,
+    filter: {
+      q: q || undefined,
+      from,
+      to,
+      // The backend status filter key for anomalies is `anomalyStatus`.
+      anomalyStatus: anomalyStatus === ALL ? undefined : anomalyStatus,
+      severity: severity === ALL ? undefined : severity,
+      source: source === ALL ? undefined : source,
+      kind: kind === ALL ? undefined : kind,
+    },
   }) as AnomalyView[] | undefined;
+
+  // Distinct kinds present in the current window (dynamic option list).
+  const kindOptions = useMemo(() => {
+    const set = new Set<string>();
+    for (const r of rows ?? []) set.add(r.kind);
+    return [...set].sort();
+  }, [rows]);
+
+  const filtersActive =
+    q !== "" ||
+    anomalyStatus !== "open" ||
+    severity !== ALL ||
+    source !== ALL ||
+    kind !== ALL ||
+    range.kind !== "relative" ||
+    range.from !== DEFAULT_RANGE.from;
+  function resetFilters() {
+    setQ("");
+    setAnomalyStatus("open");
+    setSeverity(ALL);
+    setSource(ALL);
+    setKind(ALL);
+    setRange(DEFAULT_RANGE);
+  }
 
   async function resolve(row: AnomalyView) {
     const ok = await confirm({
@@ -93,34 +150,81 @@ export function AnomaliesTab() {
       <p className="oc-admin__hint">
         Anomalies détectées (cron) ou signalées par les agents OpenClaw. Données
         non-PHI uniquement (type, sévérité, message, corrélation). Résoudre ou
-        acquitter une anomalie ouverte la sort du décompte de heartbeat.
+        acquitter une anomalie ouverte la sort du décompte de heartbeat.{" "}
+        <span className="oc-filter__window">
+          La plage temporelle filtre la fenêtre récente — une plage antérieure
+          peut être partielle.
+        </span>
       </p>
 
-      <div className="oc-traces__toolbar">
-        <div className="oc-traces__filters">
-          <Select
-            value={statusFilter}
-            onValueChange={(v) => setStatusFilter(v as StatusFilter)}
-          >
-            <SelectTrigger size="sm" className="w-40">
-              <SelectValue />
-            </SelectTrigger>
-            <SelectContent>
-              {STATUS_FILTERS.map((s) => (
-                <SelectItem key={s.value} value={s.value}>
-                  {s.label}
-                </SelectItem>
-              ))}
-            </SelectContent>
-          </Select>
-        </div>
-      </div>
+      <FilterBar
+        q={q}
+        onQChange={setQ}
+        searchPlaceholder="Rechercher (message, type, corrélation)"
+        timeRange={range}
+        onTimeRangeChange={setRange}
+        onReset={resetFilters}
+        canReset={filtersActive}
+      >
+        <Select value={anomalyStatus} onValueChange={setAnomalyStatus}>
+          <SelectTrigger size="sm" className="w-36">
+            <SelectValue />
+          </SelectTrigger>
+          <SelectContent>
+            <SelectItem value={ALL}>Tous les statuts</SelectItem>
+            {STATUS_OPTIONS.map((s) => (
+              <SelectItem key={s.value} value={s.value}>
+                {s.label}
+              </SelectItem>
+            ))}
+          </SelectContent>
+        </Select>
+        <Select value={severity} onValueChange={setSeverity}>
+          <SelectTrigger size="sm" className="w-36">
+            <SelectValue placeholder="Sévérité" />
+          </SelectTrigger>
+          <SelectContent>
+            <SelectItem value={ALL}>Toutes sévérités</SelectItem>
+            {SEVERITIES.map((s) => (
+              <SelectItem key={s} value={s}>
+                {s}
+              </SelectItem>
+            ))}
+          </SelectContent>
+        </Select>
+        <Select value={source} onValueChange={setSource}>
+          <SelectTrigger size="sm" className="w-32">
+            <SelectValue placeholder="Source" />
+          </SelectTrigger>
+          <SelectContent>
+            <SelectItem value={ALL}>Toutes sources</SelectItem>
+            {SOURCES.map((s) => (
+              <SelectItem key={s} value={s}>
+                {s}
+              </SelectItem>
+            ))}
+          </SelectContent>
+        </Select>
+        <Select value={kind} onValueChange={setKind}>
+          <SelectTrigger size="sm" className="w-36">
+            <SelectValue placeholder="Type" />
+          </SelectTrigger>
+          <SelectContent>
+            <SelectItem value={ALL}>Tous les types</SelectItem>
+            {kindOptions.map((k) => (
+              <SelectItem key={k} value={k}>
+                {k}
+              </SelectItem>
+            ))}
+          </SelectContent>
+        </Select>
+      </FilterBar>
 
       <DataTableShell
         title="Anomalies"
         rows={rows}
         emptyHint={
-          statusFilter === "open"
+          anomalyStatus === "open"
             ? "Aucune anomalie ouverte. 🎉"
             : "Aucune anomalie enregistrée."
         }

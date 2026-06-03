@@ -12,8 +12,46 @@ import { auth } from "./auth";
 import { ingest } from "./bridge_ingest";
 import { authenticateApiKey, principalHasPermission } from "./lib/apiAuth";
 import { PERMISSIONS } from "./lib/rbac";
+import { parseRange } from "./lib/timeRange";
+import type { Filter } from "./lib/filters";
 
 const http = httpRouter();
+
+// ---------------------------------------------------------------------------
+// /api/v1 filter parsing (shared by the GET list routes).
+//
+// The advanced predicate DSL is NOT exposed over HTTP — only the structured
+// params + `q` + the relative-time range. A bad/unparseable `from`/`to` token is
+// simply DROPPED (parseRange never throws), mirroring the L3 limit-clamp: the
+// route degrades silently and still returns 200, never a 400/500 on input.
+// ---------------------------------------------------------------------------
+
+/** Trim a query param to a non-empty string, or undefined. */
+function strParam(url: URL, name: string): string | undefined {
+  const raw = url.searchParams.get(name);
+  if (raw === null) return undefined;
+  const t = raw.trim();
+  return t === "" ? undefined : t;
+}
+
+/** Parse the shared `q` + `from`/`to` range into the base of a Filter. */
+function baseFilter(url: URL, nowMs: number): Filter {
+  const filter: Filter = {};
+  const q = strParam(url, "q");
+  if (q !== undefined) filter.q = q;
+  const range = parseRange(
+    { from: strParam(url, "from"), to: strParam(url, "to") },
+    nowMs,
+  );
+  if (range.from !== undefined) filter.from = range.from;
+  if (range.to !== undefined) filter.to = range.to;
+  return filter;
+}
+
+/** Is the filter empty (no clauses set)? Then we pass `undefined` downstream. */
+function emptyFilter(f: Filter): boolean {
+  return Object.keys(f).length === 0;
+}
 
 // Registers /api/auth/* routes (OAuth start/callback, token exchange).
 auth.addHttpRoutes(http);
@@ -87,20 +125,40 @@ http.route({
       );
     }
 
-    // Optional bounded paging (?limit=, ?kind=, ?correlationId=). The internal
-    // query is called only AFTER the permission check (httpActions cannot run
-    // the check itself). The fetch helper clamps a negative/non-integer limit
-    // (L3) so it returns [] instead of 500. M7: correlationId follows a chain.
+    // Optional bounded paging (?limit=, ?kind=, ?correlationId=) + the shared
+    // filter (?q=, ?from=, ?to=, ?status=, ?statusClass=, ?direction=,
+    // ?principalType=, ?roleKey=). The internal query is called only AFTER the
+    // permission check (httpActions cannot run the check itself). The fetch
+    // helper clamps a negative/non-integer limit (L3) so it returns [] instead
+    // of 500. M7: correlationId follows a chain. The advanced DSL is NOT exposed.
     const limitParam = url.searchParams.get("limit");
-    const kindParam = url.searchParams.get("kind") ?? undefined;
-    const correlationId = url.searchParams.get("correlationId") ?? undefined;
+    const kindParam = strParam(url, "kind");
+    const correlationId = strParam(url, "correlationId");
     const limit = limitParam ? Number(limitParam) : undefined;
+
+    const filter = baseFilter(url, startedAt);
+    if (kindParam !== undefined) filter.kind = kindParam;
+    const statusParam = strParam(url, "status");
+    const status = statusParam !== undefined ? Number(statusParam) : undefined;
+    if (status !== undefined && Number.isFinite(status)) filter.status = status;
+    const statusClass = strParam(url, "statusClass");
+    if (statusClass === "2xx" || statusClass === "4xx" || statusClass === "5xx") {
+      filter.statusClass = statusClass;
+    }
+    const direction = strParam(url, "direction");
+    if (direction !== undefined) filter.direction = direction;
+    const principalType = strParam(url, "principalType");
+    if (principalType !== undefined) filter.principalType = principalType;
+    const roleKey = strParam(url, "roleKey");
+    if (roleKey !== undefined) filter.roleKey = roleKey;
+
     const events = await ctx.runQuery(
       internal.observability.recentEventsInternal,
       {
         limit: Number.isFinite(limit) ? limit : undefined,
         kind: kindParam,
         correlationId,
+        filter: emptyFilter(filter) ? undefined : filter,
       },
     );
 
@@ -154,16 +212,24 @@ http.route({
       return apiJson({ ok: false, error: "missing permission: kpi.read" }, 403);
     }
 
-    // Optional bounded filtering (?limit=, ?metric=, ?since=). The internal query
-    // is called only AFTER the permission check (httpActions cannot run it).
+    // Optional bounded filtering (?limit=, ?metric=, ?since=) + the shared time
+    // range (?from=, ?to= as epoch-ms OR relative tokens). The internal query is
+    // called only AFTER the permission check (httpActions cannot run it). KPI's
+    // time field is the STRING hour bucket, so the internal query converts the
+    // filter's epoch-ms from/to into buckets. `?metric=` stays the dedicated arg
+    // (KPI's only quick filter). `?since=` is the existing bucket-string lower
+    // bound. `?q=` has no search fields for KPI and is ignored downstream.
     const limitParam = url.searchParams.get("limit");
-    const metricParam = url.searchParams.get("metric") ?? undefined;
-    const sinceParam = url.searchParams.get("since") ?? undefined;
+    const metricParam = strParam(url, "metric");
+    const sinceParam = strParam(url, "since");
     const limit = limitParam ? Number(limitParam) : undefined;
+
+    const filter = baseFilter(url, startedAt);
     const rollups = await ctx.runQuery(internal.kpi.kpisInternal, {
       limit: Number.isFinite(limit) ? limit : undefined,
       metric: metricParam,
       since: sinceParam,
+      filter: emptyFilter(filter) ? undefined : filter,
     });
 
     // Record the successful call (metadata only -> redacted by the writer).
@@ -226,9 +292,12 @@ http.route({
       );
     }
 
-    // Optional bounded filtering (?status=, ?limit=, ?since=). The internal
+    // Optional bounded filtering (?status=, ?limit=, ?since=) + the shared
+    // filter (?q=, ?from=, ?to=, ?severity=, ?source=, ?kind=). The internal
     // query runs only AFTER the permission check (httpActions cannot run it).
-    // L8: `since` is a numeric ms watermark (keeps at >= since). L3: a negative/
+    // `?status=` maps to the lifecycle status (= anomalyStatus) and drives the
+    // by_status index path; we also fold it into the filter (idempotent). L8:
+    // `since` is a numeric ms watermark (keeps at >= since). L3: a negative/
     // non-integer ?limit is clamped by the fetch helper (returns [] not 500).
     const statusParam = url.searchParams.get("status");
     const status =
@@ -241,10 +310,21 @@ http.route({
     const limit = limitParam ? Number(limitParam) : undefined;
     const sinceParam = url.searchParams.get("since");
     const since = sinceParam !== null ? Number(sinceParam) : undefined;
+
+    const filter = baseFilter(url, startedAt);
+    if (status !== undefined) filter.anomalyStatus = status;
+    const severity = strParam(url, "severity");
+    if (severity !== undefined) filter.severity = severity;
+    const source = strParam(url, "source");
+    if (source !== undefined) filter.source = source;
+    const kindParam = strParam(url, "kind");
+    if (kindParam !== undefined) filter.kind = kindParam;
+
     const anomalies = await ctx.runQuery(internal.anomalies.anomaliesInternal, {
       status,
       limit: Number.isFinite(limit) ? limit : undefined,
       since: since !== undefined && Number.isFinite(since) ? since : undefined,
+      filter: emptyFilter(filter) ? undefined : filter,
     });
 
     await ctx.runMutation(internal.observability.recordEvent, {

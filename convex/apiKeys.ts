@@ -32,6 +32,26 @@ import {
   PERMISSIONS,
   seedBuiltinRoles,
 } from "./lib/rbac";
+import {
+  applyFilter,
+  filterValidator,
+  type FilterConfig,
+} from "./lib/filters";
+
+// Filter config for service accounts (docs/FILTERS_SPEC.md). Applied over the
+// VIEW objects listServiceAccounts returns. The shared `role` key maps onto the
+// view's `roleKey` field (a service account's role is its roleKey).
+const SERVICE_ACCOUNTS_FILTER_CFG: FilterConfig = {
+  searchFields: ["name"],
+  structured: {
+    role: { field: "roleKey", kind: "string" },
+    disabled: { field: "disabled", kind: "bool" },
+  },
+  advanced: false,
+};
+
+// Bounded cascade-delete batch for deleteServiceAccount (mutation limits).
+const KEY_DELETE_BATCH = 200;
 
 // Human-only built-in role keys (L2): a service account must never carry these.
 // `admin` is the wildcard superset (UI/admin only); pending/user are user-facing
@@ -140,11 +160,11 @@ export const createServiceAccount = mutation({
 });
 
 export const listServiceAccounts = query({
-  args: {},
-  handler: async (ctx) => {
+  args: { filter: v.optional(filterValidator) },
+  handler: async (ctx, { filter }) => {
     await requireAdmin(ctx);
     const accounts = await ctx.db.query("serviceAccounts").order("desc").take(200);
-    return accounts.map((a) => ({
+    const views = accounts.map((a) => ({
       _id: a._id,
       name: a.name,
       roleKey: a.roleKey,
@@ -153,6 +173,49 @@ export const listServiceAccounts = query({
       createdByUserId: a.createdByUserId,
       createdAt: a._creationTime,
     }));
+    return applyFilter(views, filter, SERVICE_ACCOUNTS_FILTER_CFG);
+  },
+});
+
+/**
+ * Admin: delete a service account entirely, cascade-deleting its API keys first.
+ *
+ * Distinct from `revokeApiKey` (which only DISABLES a key so its id stays
+ * referenceable for audit): this removes the whole account + every key it owns.
+ * The keys are deleted in bounded batches via the `by_account` index (mutation
+ * limits), then the account row is deleted. requireAdmin (REAL identity,
+ * impersonation never grants it) gates it; the action is audited. Throws
+ * "Not found" if the account does not exist.
+ */
+export const deleteServiceAccount = mutation({
+  args: { serviceAccountId: v.id("serviceAccounts") },
+  handler: async (ctx, { serviceAccountId }) => {
+    await requireAdmin(ctx);
+    const account = await ctx.db.get(serviceAccountId);
+    if (account === null) throw new Error("Not found: service account");
+    // Cascade-delete this account's API keys (bounded batches via by_account).
+    let deletedKeys = 0;
+    for (;;) {
+      const batch = await ctx.db
+        .query("apiKeys")
+        .withIndex("by_account", (q) =>
+          q.eq("serviceAccountId", serviceAccountId),
+        )
+        .take(KEY_DELETE_BATCH);
+      if (batch.length === 0) break;
+      for (const key of batch) {
+        await ctx.db.delete(key._id);
+        deletedKeys += 1;
+      }
+      if (batch.length < KEY_DELETE_BATCH) break;
+    }
+    await ctx.db.delete(serviceAccountId);
+    const actor = await getActor(ctx);
+    await recordAudit(ctx, actor, "serviceAccount.delete", {
+      resource: "serviceAccount",
+      resourceId: serviceAccountId,
+    });
+    return { ok: true, deletedKeys };
   },
 });
 

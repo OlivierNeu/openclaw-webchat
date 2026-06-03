@@ -1,4 +1,4 @@
-import { useState, type ReactNode } from "react";
+import { Fragment, useState, type ReactNode } from "react";
 import { MoreVertical, Plus, Trash2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Checkbox } from "@/components/ui/checkbox";
@@ -46,6 +46,8 @@ export function DataTableShell<T extends { _id: string }>({
   addLabel = "Add",
   bulkActions,
   emptyHint = "Aucun élément.",
+  isExpanded,
+  renderExpanded,
 }: {
   title: string;
   rows: T[] | undefined;
@@ -55,9 +57,17 @@ export function DataTableShell<T extends { _id: string }>({
   addLabel?: string;
   bulkActions?: { label: string; onSelect: (ids: string[]) => void; variant?: "default" | "destructive" }[];
   emptyHint?: string;
+  // Optional inline row expansion: when both are provided and isExpanded(row)
+  // is true, an extra full-width row is rendered IMMEDIATELY AFTER that row
+  // (so the detail card sits under the row it belongs to, not at the bottom).
+  isExpanded?: (row: T) => boolean;
+  renderExpanded?: (row: T) => ReactNode;
 }) {
   const [selected, setSelected] = useState<Set<string>>(new Set());
   const list = rows ?? [];
+  // Total column span for the full-width expansion cell.
+  const colCount =
+    (bulkActions ? 1 : 0) + columns.length + (rowActions ? 1 : 0);
   const allChecked = list.length > 0 && selected.size === list.length;
   const someChecked = selected.size > 0 && !allChecked;
 
@@ -129,8 +139,10 @@ export function DataTableShell<T extends { _id: string }>({
           <TableBody>
             {list.map((row) => {
               const actions = rowActions?.(row) ?? [];
+              const expanded = isExpanded?.(row) ?? false;
               return (
-                <TableRow key={row._id} className="group/row">
+                <Fragment key={row._id}>
+                <TableRow className="group/row">
                   {bulkActions ? (
                     <TableCell>
                       <Checkbox
@@ -180,6 +192,14 @@ export function DataTableShell<T extends { _id: string }>({
                     </TableCell>
                   ) : null}
                 </TableRow>
+                {expanded && renderExpanded ? (
+                  <TableRow className="oc-dt__expansion">
+                    <TableCell colSpan={colCount} className="oc-dt__expansion-cell">
+                      {renderExpanded(row)}
+                    </TableCell>
+                  </TableRow>
+                ) : null}
+                </Fragment>
               );
             })}
           </TableBody>

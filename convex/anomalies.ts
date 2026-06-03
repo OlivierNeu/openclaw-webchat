@@ -33,6 +33,12 @@ import {
 import { Doc, Id } from "./_generated/dataModel";
 import { getActor, requireAdmin } from "./lib/access";
 import { recordAudit } from "./lib/audit";
+import {
+  applyFilter,
+  filterValidator,
+  type Filter,
+  type FilterConfig,
+} from "./lib/filters";
 
 // --- Detection tuning (single source so the cron + test cannot drift) --------
 
@@ -386,9 +392,35 @@ const statusValidator = v.union(
 );
 
 /**
+ * Filter config for the anomalies resource (docs/FILTERS_SPEC.md). Applied over
+ * the VIEW objects (AnomalyView) the query returns. `q` searches the non-PHI
+ * message/kind/correlationId only (D2). `anomalyStatus` maps onto the view's
+ * `status` field (the shared Filter uses a distinct key so it never collides
+ * with the numeric `status` used by traces).
+ */
+const ANOMALIES_FILTER_CFG: FilterConfig = {
+  searchFields: ["message", "kind", "correlationId"],
+  timeField: "at",
+  structured: {
+    anomalyStatus: { field: "status", kind: "string" },
+    severity: { field: "severity", kind: "string" },
+    source: { field: "source", kind: "string" },
+    kind: { field: "kind", kind: "string" },
+  },
+  advanced: false,
+};
+
+/**
  * Fetch recent anomalies (optionally filtered by status), newest first. Shared
  * core for the admin query and the key-authed API path. When a status filter is
  * given we use the `by_status` index; otherwise the `by_at` index newest-first.
+ *
+ * Filtering: an optional `filter` (the per-resource subset of the shared Filter
+ * model) is applied in-memory over the bounded read, AFTER the read but BEFORE
+ * the `limit` slice — so `limit` caps the FILTERED set. When a `filter` is
+ * present we scan up to MAX_LIST_LIMIT so the post-filter can still fill `limit`
+ * (bounded). NOTE (D1): a `filter.from` older than the bounded recent window
+ * returns PARTIAL results — the full firehose lives in Opik/Langfuse, not here.
  */
 async function fetchAnomalies(
   ctx: QueryCtx,
@@ -396,6 +428,7 @@ async function fetchAnomalies(
     status?: "open" | "acknowledged" | "resolved";
     limit?: number;
     since?: number;
+    filter?: Filter;
   },
 ): Promise<AnomalyView[]> {
   // L3: clamp to a non-negative integer so a negative/non-integer ?limit can
@@ -404,16 +437,26 @@ async function fetchAnomalies(
   const status = opts.status;
   // L8: `since` is a numeric ms watermark (newer-or-equal `at` only).
   const since = opts.since;
+  const hasFilter = opts.filter !== undefined;
+  // Over-fetch when a `filter` is present so the post-filter can still fill
+  // `limit`. The non-filter, non-status `by_at` path keeps reading exactly
+  // `limit` (its order is already correct).
+  const scan = Math.min(Math.max(limit, 1) * 5, MAX_LIST_LIMIT);
   if (status) {
     const rows = await ctx.db
       .query("anomalies")
       .withIndex("by_status", (q) => q.eq("status", status))
-      .take(Math.min(Math.max(limit, 1) * 5, MAX_LIST_LIMIT));
+      .take(scan);
     // by_status is not time-ordered; filter + sort newest-first then slice.
-    const filtered =
+    const sinceFiltered =
       since !== undefined ? rows.filter((r) => r.at >= since) : rows;
-    filtered.sort((a, b) => b.at - a.at);
-    return filtered.slice(0, limit).map(toView);
+    sinceFiltered.sort((a, b) => b.at - a.at);
+    const views = applyFilter(
+      sinceFiltered.map(toView),
+      opts.filter,
+      ANOMALIES_FILTER_CFG,
+    );
+    return views.slice(0, limit);
   }
   const rows = await ctx.db
     .query("anomalies")
@@ -421,8 +464,9 @@ async function fetchAnomalies(
       since !== undefined ? q.gte("at", since) : q,
     )
     .order("desc")
-    .take(limit);
-  return rows.map(toView);
+    .take(hasFilter ? scan : limit);
+  const views = applyFilter(rows.map(toView), opts.filter, ANOMALIES_FILTER_CFG);
+  return views.slice(0, limit);
 }
 
 /** Clamp an optional numeric limit to a non-negative integer within [0, max]. */
@@ -444,10 +488,11 @@ export const listAnomalies = query({
     status: v.optional(statusValidator),
     limit: v.optional(v.number()),
     since: v.optional(v.number()),
+    filter: v.optional(filterValidator),
   },
-  handler: async (ctx, { status, limit, since }) => {
+  handler: async (ctx, { status, limit, since, filter }) => {
     await requireAdmin(ctx);
-    return await fetchAnomalies(ctx, { status, limit, since });
+    return await fetchAnomalies(ctx, { status, limit, since, filter });
   },
 });
 
@@ -462,9 +507,10 @@ export const anomaliesInternal = internalQuery({
     status: v.optional(statusValidator),
     limit: v.optional(v.number()),
     since: v.optional(v.number()),
+    filter: v.optional(filterValidator),
   },
-  handler: async (ctx, { status, limit, since }) => {
-    return await fetchAnomalies(ctx, { status, limit, since });
+  handler: async (ctx, { status, limit, since, filter }) => {
+    return await fetchAnomalies(ctx, { status, limit, since, filter });
   },
 });
 

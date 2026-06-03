@@ -549,6 +549,11 @@
 }
 .oc-dt__title { font-size: 1rem; font-weight: 600; }
 .oc-dt__bar-actions { display: flex; align-items: center; gap: 0.5rem; }
+/* Inline row expansion (DataTableShell): the detail card sits directly under
+   its row, full-width, with no hover highlight. */
+.oc-dt__expansion:hover { background: transparent; }
+.oc-dt__expansion-cell { padding: 0 0.5rem 0.75rem; }
+.oc-dt__expansion-cell .oc-sa__keys { margin: 0; }
 
 .oc-form { display: flex; flex-direction: column; gap: 1rem; max-width: 32rem; }
 .oc-field { display: flex; flex-direction: column; gap: 0.375rem; }
@@ -725,6 +730,9 @@
 /* Filter row sits above DataTableShell's own titled bar. */
 .oc-traces__toolbar { display: flex; justify-content: flex-end; margin-bottom: 0.5rem; }
 .oc-traces__filters { display: flex; align-items: center; gap: 0.5rem; flex-wrap: wrap; }
+/* The correlationId "follow" chip now sits on its own slim line above the table
+   (kind + row-limit selects moved into the FilterBar for one coherent toolbar). */
+.oc-traces__followline { display: flex; margin-bottom: 0.6rem; }
 .oc-traces__muted { color: var(--muted-foreground); }
 .oc-traces__time { white-space: nowrap; font-size: 0.85rem; }
 .oc-traces__mono {
@@ -882,3 +890,121 @@
   from { opacity: 0; transform: translateY(0.4rem); }
   to { opacity: 1; transform: translateY(0); }
 }
+
+/* --- Reusable filter primitives (src/chat/admin/filters/) --------------- */
+/* FilterBar: a row above the table — search + quick selects + time picker +
+   reset. Wraps gracefully on narrow widths. Tokens only. */
+.oc-filterbar {
+  display: flex; align-items: center; gap: 0.5rem; flex-wrap: wrap;
+  margin-bottom: 0.6rem;
+}
+.oc-filterbar__search {
+  position: relative; flex: 1 1 16rem; min-width: 12rem; max-width: 24rem;
+}
+.oc-filterbar__search-icon {
+  position: absolute; left: 0.55rem; top: 50%; transform: translateY(-50%);
+  width: 0.9rem; height: 0.9rem; color: var(--muted-foreground);
+  pointer-events: none;
+}
+.oc-filterbar__search input { padding-left: 1.75rem; }
+.oc-filterbar__quick {
+  display: flex; align-items: center; gap: 0.5rem; flex-wrap: wrap;
+}
+/* Quick-filter selects size to their label (with a sensible floor) so long
+   options ("Toutes directions", "Toutes sévérités", "Usurpation : toutes"…)
+   aren't truncated/cramped against the chevron. Overrides the fixed Tailwind
+   w-32/w-36 widths (unlayered CSS beats layered utilities). */
+.oc-filterbar__quick [data-slot="select-trigger"] {
+  width: auto;
+  min-width: 7.5rem;
+}
+.oc-filterbar__reset { margin-left: auto; }
+
+/* Bounded-window caveat hint (inline, muted, slightly emphasized). */
+.oc-filter__window { color: var(--muted-foreground); font-style: italic; }
+
+/* TimeRangePicker: Grafana-style popover. Trigger shows the human label; the
+   panel mirrors SelectContent's popover styling (already token-styled inline). */
+.oc-timerange__trigger { font-weight: 500; }
+.oc-timerange__panel { padding: 0.75rem; width: min(34rem, 92vw); }
+.oc-timerange__cols {
+  display: grid; grid-template-columns: 1fr 1fr; gap: 0.9rem;
+}
+@media (max-width: 30rem) {
+  .oc-timerange__cols { grid-template-columns: 1fr; }
+}
+.oc-timerange__absolute { display: flex; flex-direction: column; gap: 0.5rem; }
+.oc-timerange__section-title {
+  font-size: 0.72rem; font-weight: 600; text-transform: uppercase;
+  letter-spacing: 0.04em; color: var(--muted-foreground); margin-bottom: 0.1rem;
+}
+.oc-timerange__apply { align-self: flex-start; margin-top: 0.15rem; }
+.oc-timerange__relative {
+  display: flex; flex-direction: column; gap: 0.45rem;
+  border-left: 1px solid var(--border); padding-left: 0.9rem;
+}
+@media (max-width: 30rem) {
+  .oc-timerange__relative {
+    border-left: none; border-top: 1px solid var(--border);
+    padding-left: 0; padding-top: 0.7rem;
+  }
+}
+.oc-timerange__search { position: relative; }
+.oc-timerange__search-icon {
+  position: absolute; left: 0.55rem; top: 50%; transform: translateY(-50%);
+  width: 0.9rem; height: 0.9rem; color: var(--muted-foreground);
+  pointer-events: none;
+}
+.oc-timerange__search input { padding-left: 1.75rem; }
+.oc-timerange__list {
+  list-style: none; margin: 0; padding: 0;
+  max-height: 14rem; overflow-y: auto;
+  display: flex; flex-direction: column; gap: 0.1rem;
+}
+.oc-timerange__option {
+  display: block; width: 100%; text-align: left;
+  padding: 0.35rem 0.5rem; border: none; border-radius: var(--radius-sm);
+  background: none; color: var(--foreground); font: inherit;
+  font-size: 0.85rem; cursor: pointer;
+}
+.oc-timerange__option:hover { background: var(--accent); color: var(--accent-foreground); }
+.oc-timerange__option.is-active {
+  background: var(--primary); color: var(--primary-foreground); font-weight: 500;
+}
+.oc-timerange__empty {
+  padding: 0.35rem 0.5rem; font-size: 0.85rem; color: var(--muted-foreground);
+}
+
+/* AdvancedFilter: collapsible predicate builder (Traces + Audit). */
+.oc-advfilter { margin-bottom: 0.6rem; }
+.oc-advfilter__toggle {
+  display: inline-flex; align-items: center; gap: 0.35rem;
+  background: none; border: none; padding: 0.1rem 0; cursor: pointer;
+  font: inherit; font-size: 0.85rem; color: var(--muted-foreground);
+}
+.oc-advfilter__toggle:hover { color: var(--foreground); }
+.oc-advfilter__chevron {
+  width: 0.9rem; height: 0.9rem; transition: transform 0.15s ease;
+}
+.oc-advfilter__chevron.is-open { transform: rotate(180deg); }
+.oc-advfilter__count {
+  display: inline-flex; align-items: center; justify-content: center;
+  min-width: 1.1rem; height: 1.1rem; padding: 0 0.3rem;
+  border-radius: 999px; font-size: 0.7rem; font-weight: 600;
+  background: var(--primary); color: var(--primary-foreground);
+}
+.oc-advfilter__body {
+  margin-top: 0.5rem; padding: 0.7rem;
+  border: 1px solid var(--border); border-radius: var(--radius-md);
+  background: var(--muted);
+  display: flex; flex-direction: column; gap: 0.5rem;
+}
+.oc-advfilter__rows {
+  list-style: none; margin: 0; padding: 0;
+  display: flex; flex-direction: column; gap: 0.4rem;
+}
+.oc-advfilter__row {
+  display: flex; align-items: center; gap: 0.4rem; flex-wrap: wrap;
+}
+.oc-advfilter__value { flex: 1 1 10rem; min-width: 8rem; max-width: 18rem; }
+.oc-advfilter__add { align-self: flex-start; }

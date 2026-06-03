@@ -37,10 +37,26 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table";
+import { FilterBar } from "./admin/filters/FilterBar";
+import { TimeRangePicker } from "./admin/filters/TimeRangePicker";
+import { AdvancedFilter, type AdvancedField } from "./admin/filters/AdvancedFilter";
+import type { TimeRange } from "./admin/filters/types";
 
 // Living style guide: renders every component the app uses with the active
 // design tokens, the way ui.shadcn.com does. Use it to verify the chart in both
 // light and dark (toggle from the top-bar theme switcher).
+
+// "Select all" sentinel (radix has no empty value), mirrors the admin tabs.
+const SHOW_ALL = "__all__";
+const SHOW_RANGE: TimeRange = { kind: "relative", from: "now-24h", to: "now" };
+// Demo fields for the advanced-filter builder (no backend; preview only).
+const SHOW_ADV_FIELDS: AdvancedField[] = [
+  { value: "status", label: "Statut" },
+  { value: "latencyMs", label: "Latence (ms)" },
+  { value: "route", label: "Route" },
+  { value: "roleKey", label: "Rôle" },
+  { value: "correlationId", label: "Corrélation" },
+];
 
 function Section({
   title,
@@ -100,6 +116,19 @@ export function ThemeShowroom() {
   const [checked, setChecked] = useState(true);
   const [sel, setSel] = useState("per-user");
 
+  // Local state for the Filters showcase (no backend — preview of the tokens).
+  const [fq, setFq] = useState("");
+  const [fdir, setFdir] = useState(SHOW_ALL);
+  const [fsev, setFsev] = useState(SHOW_ALL);
+  const [frange, setFrange] = useState<TimeRange>(SHOW_RANGE);
+  const filtersActive = fq !== "" || fdir !== SHOW_ALL || fsev !== SHOW_ALL;
+  function resetShowFilters() {
+    setFq("");
+    setFdir(SHOW_ALL);
+    setFsev(SHOW_ALL);
+    setFrange(SHOW_RANGE);
+  }
+
   return (
     <div className="oc-show">
       <DefaultThemeControl />
@@ -152,6 +181,53 @@ export function ThemeShowroom() {
               />
               Checkbox
             </label>
+          </div>
+        </div>
+      </Section>
+
+      <Section
+        title="Filtres & plage temporelle"
+        description="Barre réutilisable (recherche debouncée + selects rapides à largeur auto + plage façon Grafana) et constructeur de filtre avancé. Câblée dans Users, Groups, Comptes de service, Traces, Anomalies, Audit et KPI."
+      >
+        <div className="oc-show__row oc-show__row--col">
+          <FilterBar
+            q={fq}
+            onQChange={setFq}
+            searchPlaceholder="Rechercher (kind, principal, rôle, route…)"
+            timeRange={frange}
+            onTimeRangeChange={setFrange}
+            onReset={resetShowFilters}
+            canReset={filtersActive}
+          >
+            <Select value={fdir} onValueChange={setFdir}>
+              <SelectTrigger size="sm">
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value={SHOW_ALL}>Toutes directions</SelectItem>
+                <SelectItem value="inbound">inbound</SelectItem>
+                <SelectItem value="outbound">outbound</SelectItem>
+                <SelectItem value="internal">internal</SelectItem>
+              </SelectContent>
+            </Select>
+            <Select value={fsev} onValueChange={setFsev}>
+              <SelectTrigger size="sm">
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value={SHOW_ALL}>Toutes sévérités</SelectItem>
+                <SelectItem value="info">info</SelectItem>
+                <SelectItem value="warn">warn</SelectItem>
+                <SelectItem value="critical">critical</SelectItem>
+              </SelectContent>
+            </Select>
+          </FilterBar>
+
+          <AdvancedFilter fields={SHOW_ADV_FIELDS} onChange={() => {}} />
+
+          <div className="oc-show__row">
+            <span className="oc-show__desc">Sélecteur de plage seul :</span>
+            <TimeRangePicker value={frange} onChange={setFrange} />
           </div>
         </div>
       </Section>

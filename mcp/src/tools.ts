@@ -17,13 +17,30 @@ import { apiFetch, type ApiFetchOptions, type Config } from "./config.js";
 
 export interface ListTracesArgs {
   limit?: number;
+  /** Case-insensitive substring over kind/principalId/roleKey/route/correlationId. */
+  q?: string;
+  /** Lower time bound: epoch ms OR Grafana relative token (e.g. `now-24h`). */
+  from?: string;
+  /** Upper time bound: epoch ms OR Grafana relative token (e.g. `now`). */
+  to?: string;
   kind?: string;
+  /** Exact HTTP status code (e.g. 404). */
+  status?: number;
+  /** HTTP status class. */
+  statusClass?: "2xx" | "4xx" | "5xx";
+  direction?: string;
+  principalType?: string;
+  roleKey?: string;
   correlationId?: string;
 }
 
 export interface GetKpiArgs {
   metric?: string;
   since?: string;
+  /** Lower time bound: epoch ms OR Grafana relative token (e.g. `now-24h`). */
+  from?: string;
+  /** Upper time bound: epoch ms OR Grafana relative token (e.g. `now`). */
+  to?: string;
 }
 
 export interface QueryOpenClawArgs {
@@ -36,7 +53,17 @@ export interface QueryOpenClawArgs {
 export interface ListAnomaliesArgs {
   limit?: number;
   since?: string;
+  /** Case-insensitive substring over message/kind/correlationId. */
+  q?: string;
+  /** Lower time bound: epoch ms OR Grafana relative token (e.g. `now-24h`). */
+  from?: string;
+  /** Upper time bound: epoch ms OR Grafana relative token (e.g. `now`). */
+  to?: string;
+  /** Anomaly status (maps to anomalyStatus, e.g. 'open'|'acknowledged'). */
   status?: string;
+  severity?: string;
+  source?: string;
+  kind?: string;
 }
 
 export interface ReportAnomalyArgs {
@@ -72,6 +99,68 @@ export const reportAnomalyInput = {
     .describe("Free-form structured, non-PHI evidence."),
 } as const;
 
+/**
+ * Time-range token: epoch ms (numeric string) OR a Grafana-style relative
+ * token — `now`, or `now-<N><unit>` with unit in s|m|h|d|w (e.g. `now-24h`).
+ * Passed through verbatim; the server resolves tokens → ms at request time.
+ */
+const FROM_DESCRIBE =
+  "Lower time bound. Epoch ms (e.g. '1717372800000') OR Grafana relative " +
+  "token: 'now' or 'now-<N><unit>' with unit s|m|h|d|w (e.g. 'now-24h').";
+const TO_DESCRIBE =
+  "Upper time bound. Epoch ms (e.g. '1717459200000') OR Grafana relative " +
+  "token: 'now' or 'now-<N><unit>' with unit s|m|h|d|w (e.g. 'now').";
+
+export const listTracesInput = {
+  limit: z.number().int().min(1).max(200).optional()
+    .describe("Max events to return (1-200)."),
+  q: z.string().optional()
+    .describe(
+      "Case-insensitive substring over kind, principalId, roleKey, route, correlationId.",
+    ),
+  from: z.string().optional().describe(FROM_DESCRIBE),
+  to: z.string().optional().describe(TO_DESCRIBE),
+  kind: z.string().optional()
+    .describe("Filter by event kind (e.g. 'api.call')."),
+  status: z.number().int().optional()
+    .describe("Filter by exact HTTP status code (e.g. 404)."),
+  statusClass: z.enum(["2xx", "4xx", "5xx"]).optional()
+    .describe("Filter by HTTP status class: '2xx' | '4xx' | '5xx'."),
+  direction: z.string().optional()
+    .describe("Filter by direction (e.g. 'inbound' | 'outbound')."),
+  principalType: z.string().optional()
+    .describe("Filter by principal type (e.g. 'user' | 'service')."),
+  roleKey: z.string().optional().describe("Filter by role key."),
+  correlationId: z.string().optional()
+    .describe("Filter to one correlation chain."),
+} as const;
+
+export const getKpiInput = {
+  metric: z.string().optional()
+    .describe("Filter to a single metric name."),
+  since: z.string().optional()
+    .describe("ISO timestamp or bucket lower bound (kept; equivalent to from)."),
+  from: z.string().optional().describe(FROM_DESCRIBE),
+  to: z.string().optional().describe(TO_DESCRIBE),
+} as const;
+
+export const listAnomaliesInput = {
+  limit: z.number().int().min(1).max(200).optional()
+    .describe("Max anomalies to return (1-200)."),
+  since: z.string().optional()
+    .describe("ISO timestamp lower bound (kept; equivalent to from)."),
+  q: z.string().optional()
+    .describe("Case-insensitive substring over message, kind, correlationId."),
+  from: z.string().optional().describe(FROM_DESCRIBE),
+  to: z.string().optional().describe(TO_DESCRIBE),
+  status: z.string().optional()
+    .describe("Filter by anomaly status (e.g. 'open' | 'acknowledged')."),
+  severity: z.string().optional()
+    .describe("Filter by severity (e.g. 'info' | 'warn' | 'critical')."),
+  source: z.string().optional().describe("Filter by anomaly source."),
+  kind: z.string().optional().describe("Filter by anomaly kind/type."),
+} as const;
+
 /** Build a query string from defined values only (Bearer is never in the URL). */
 function qs(params: Record<string, string | number | undefined>): string {
   const sp = new URLSearchParams();
@@ -100,7 +189,15 @@ export function listTraces(
 ): Promise<unknown> {
   const query = qs({
     limit: args.limit,
+    q: args.q,
+    from: args.from,
+    to: args.to,
     kind: args.kind,
+    status: args.status,
+    statusClass: args.statusClass,
+    direction: args.direction,
+    principalType: args.principalType,
+    roleKey: args.roleKey,
     correlationId: args.correlationId,
   });
   return apiFetch(config, `/traces${query}`, {}, options);
@@ -112,7 +209,12 @@ export function getKpi(
   args: GetKpiArgs = {},
   options?: ApiFetchOptions,
 ): Promise<unknown> {
-  const query = qs({ metric: args.metric, since: args.since });
+  const query = qs({
+    metric: args.metric,
+    since: args.since,
+    from: args.from,
+    to: args.to,
+  });
   return apiFetch(config, `/kpi${query}`, {}, options);
 }
 
@@ -143,7 +245,13 @@ export function listAnomalies(
   const query = qs({
     limit: args.limit,
     since: args.since,
+    q: args.q,
+    from: args.from,
+    to: args.to,
     status: args.status,
+    severity: args.severity,
+    source: args.source,
+    kind: args.kind,
   });
   return apiFetch(config, `/anomalies${query}`, {}, options);
 }

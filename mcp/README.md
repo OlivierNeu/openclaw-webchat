@@ -57,9 +57,16 @@ node dist/cli.js health
 node dist/cli.js traces --limit 20
 node dist/cli.js traces --kind api.call --correlation-id abc123
 
+# filtering (traces): --q substring, time range, structured fields
+#   --from/--to accept epoch ms OR a Grafana relative token (now, now-<N><unit>)
+node dist/cli.js traces --from now-24h --to now --status-class 4xx --kind api.call --q foo
+node dist/cli.js traces --status 404 --principal-type service --role-key admin
+
 # once increments 4/6 land
 node dist/cli.js kpi --metric api.calls --since 2026-06-01T00:00
+node dist/cli.js kpi --metric api.calls --from now-24h --to now
 node dist/cli.js anomalies --limit 50 --status open
+node dist/cli.js anomalies --from now-1h --severity critical --source detector --q spike
 node dist/cli.js query-openclaw --prompt "summarize last run" --chat-id c1
 node dist/cli.js report-anomaly --kind latency.spike --severity warn --message "p99 > 5s"
 ```

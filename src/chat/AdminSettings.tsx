@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useMemo, useState } from "react";
 import { useMutation, useQuery } from "convex/react";
 import { api } from "./convexApi";
 import { ThemeShowroom } from "./ThemeShowroom";
@@ -19,6 +19,20 @@ import { KpiTab } from "./admin/KpiTab";
 import { AnomaliesTab } from "./admin/AnomaliesTab";
 import { IntegrationsTab } from "./admin/IntegrationsTab";
 import { ToastProvider, useToast } from "@/components/ui/toast";
+import { FilterBar } from "./admin/filters/FilterBar";
+import { AdvancedFilter } from "./admin/filters/AdvancedFilter";
+import { useResolvedRange } from "./admin/filters/TimeRangePicker";
+import type { Predicate, TimeRange } from "./admin/filters/types";
+
+// Default relative window for the time-ranged admin tabs (audit). Wide (30d) so
+// older/seeded rows surface on load — audit previously had NO time filter, so a
+// narrow default would hide rows older than it within the bounded window.
+// Re-resolves to NOW via useResolvedRange so the subscription stays current.
+const DEFAULT_RANGE: TimeRange = { kind: "relative", from: "now-30d", to: "now" };
+
+// A "select all" sentinel for the quick <Select>s (radix Select has no empty
+// value), mapped back to `undefined` (no filter) when building the query arg.
+const ALL = "__all__";
 
 // Admin-only settings surface (rendered only when me.role === "admin"; every
 // underlying Convex function also enforces requireAdmin server-side, so this UI
@@ -97,13 +111,36 @@ export function AdminSettings() {
 }
 
 function UsersTab() {
-  const users = useQuery(api.admin.listUsers, {});
+  const [q, setQ] = useState("");
+  const [role, setRoleFilter] = useState<string>(ALL);
+
+  const users = useQuery(api.admin.listUsers, {
+    filter: {
+      q: q || undefined,
+      role: role === ALL ? undefined : role,
+    },
+  });
+  // Groups are unfiltered here (they feed the per-row routing <Select>).
   const groups = useQuery(api.admin.listGroups, {});
   const me = useQuery(api.me.getMe);
   const setRole = useMutation(api.admin.setRole);
   const setRouting = useMutation(api.admin.setUserRouting);
   const startImpersonation = useMutation(api.admin.startImpersonation);
   const toast = useToast();
+
+  // Role options: the three built-ins plus any custom role already present on a
+  // user row (forward-compatible if a deployment adds more).
+  const roleOptions = useMemo(() => {
+    const set = new Set<string>(["pending", "user", "admin"]);
+    for (const u of users ?? []) set.add(u.role);
+    return [...set];
+  }, [users]);
+
+  const active = q !== "" || role !== ALL;
+  function reset() {
+    setQ("");
+    setRoleFilter(ALL);
+  }
 
   // M5: setRole can be REFUSED server-side (e.g. "cannot demote the last
   // admin"). Without surfacing, the controlled <Select> just snaps back on the
@@ -125,6 +162,28 @@ function UsersTab() {
   }
 
   return (
+    <>
+    <FilterBar
+      q={q}
+      onQChange={setQ}
+      searchPlaceholder="Rechercher (email, nom)"
+      onReset={reset}
+      canReset={active}
+    >
+      <Select value={role} onValueChange={setRoleFilter}>
+        <SelectTrigger size="sm" className="w-36">
+          <SelectValue />
+        </SelectTrigger>
+        <SelectContent>
+          <SelectItem value={ALL}>Tous les rôles</SelectItem>
+          {roleOptions.map((r) => (
+            <SelectItem key={r} value={r}>
+              {r}
+            </SelectItem>
+          ))}
+        </SelectContent>
+      </Select>
+    </FilterBar>
     <DataTableShell
       title="Users"
       rows={users}
@@ -231,6 +290,7 @@ function UsersTab() {
         },
       ]}
     />
+    </>
   );
 }
 
@@ -248,12 +308,25 @@ const EMPTY_GROUP: GroupForm = {
 };
 
 function GroupsTab() {
-  const groups = useQuery(api.admin.listGroups, {});
+  const [q, setQ] = useState("");
+  const [mode, setMode] = useState<string>(ALL);
+  const groups = useQuery(api.admin.listGroups, {
+    filter: {
+      q: q || undefined,
+      mode: mode === ALL ? undefined : mode,
+    },
+  });
   const createGroup = useMutation(api.admin.createGroup);
   const deleteGroup = useMutation(api.admin.deleteGroup);
   const toast = useToast();
   const [sheetOpen, setSheetOpen] = useState(false);
   const [form, setForm] = useState<GroupForm>(EMPTY_GROUP);
+
+  const active = q !== "" || mode !== ALL;
+  function reset() {
+    setQ("");
+    setMode(ALL);
+  }
 
   async function submit() {
     try {
@@ -273,6 +346,24 @@ function GroupsTab() {
 
   return (
     <>
+      <FilterBar
+        q={q}
+        onQChange={setQ}
+        searchPlaceholder="Rechercher (nom, instance)"
+        onReset={reset}
+        canReset={active}
+      >
+        <Select value={mode} onValueChange={setMode}>
+          <SelectTrigger size="sm" className="w-40">
+            <SelectValue />
+          </SelectTrigger>
+          <SelectContent>
+            <SelectItem value={ALL}>Tous les modes</SelectItem>
+            <SelectItem value="per-user">per-user</SelectItem>
+            <SelectItem value="shared">shared</SelectItem>
+          </SelectContent>
+        </Select>
+      </FilterBar>
       <DataTableShell
         title="Groups"
         rows={groups}
@@ -473,15 +564,123 @@ function Field({ label, children }: { label: string; children: React.ReactNode }
 // Audit trail of impersonated actions: WHO really acted and AS WHOM. Read-only.
 // Message content is never recorded server-side (PHI), so only the action verb
 // and the touched resource kind/id are shown.
+// Field list for the audit advanced builder (view fields the backend exposes).
+const AUDIT_ADV_FIELDS = [
+  { value: "action", label: "action" },
+  { value: "realLabel", label: "acteur réel" },
+  { value: "targetLabel", label: "au nom de" },
+  { value: "impersonated", label: "usurpation" },
+  { value: "resource", label: "ressource" },
+  { value: "resourceId", label: "id ressource" },
+];
+
 function AuditTab() {
-  const rows = useQuery(api.admin.listAudit, {});
+  const [q, setQ] = useState("");
+  const [action, setAction] = useState<string>(ALL);
+  const [impersonated, setImpersonated] = useState<string>(ALL);
+  const [resource, setResource] = useState<string>(ALL);
+  const [range, setRange] = useState<TimeRange>(DEFAULT_RANGE);
+  const [advanced, setAdvanced] = useState<Predicate[]>([]);
+  const { from, to } = useResolvedRange(range);
+
+  const rows = useQuery(api.admin.listAudit, {
+    filter: {
+      q: q || undefined,
+      from,
+      to,
+      action: action === ALL ? undefined : action,
+      resource: resource === ALL ? undefined : resource,
+      impersonated: impersonated === ALL ? undefined : impersonated === "yes",
+      advanced: advanced.length > 0 ? advanced : undefined,
+    },
+  });
+
+  // Dynamic option lists derived from the loaded window.
+  const actionOptions = useMemo(() => {
+    const set = new Set<string>();
+    for (const r of rows ?? []) set.add(r.action);
+    return [...set].sort();
+  }, [rows]);
+  const resourceOptions = useMemo(() => {
+    const set = new Set<string>();
+    for (const r of rows ?? []) if (r.resource) set.add(r.resource);
+    return [...set].sort();
+  }, [rows]);
+
+  const active =
+    q !== "" ||
+    action !== ALL ||
+    impersonated !== ALL ||
+    resource !== ALL ||
+    advanced.length > 0 ||
+    range.kind !== "relative" ||
+    range.from !== DEFAULT_RANGE.from;
+  function reset() {
+    setQ("");
+    setAction(ALL);
+    setImpersonated(ALL);
+    setResource(ALL);
+    setRange(DEFAULT_RANGE);
+    setAdvanced([]);
+  }
+
   return (
     <>
       <p className="oc-admin__hint">
         Trace des actions effectuées sous usurpation d’identité : qui a
         réellement agi (acteur réel) et au nom de quel utilisateur. Le contenu
-        des messages n’est jamais enregistré.
+        des messages n’est jamais enregistré.{" "}
+        <span className="oc-filter__window">
+          Fenêtre récente bornée — une plage antérieure peut être partielle.
+        </span>
       </p>
+      <FilterBar
+        q={q}
+        onQChange={setQ}
+        searchPlaceholder="Rechercher (action, acteur, ressource)"
+        timeRange={range}
+        onTimeRangeChange={setRange}
+        onReset={reset}
+        canReset={active}
+      >
+        <Select value={action} onValueChange={setAction}>
+          <SelectTrigger size="sm" className="w-40">
+            <SelectValue placeholder="Action" />
+          </SelectTrigger>
+          <SelectContent>
+            <SelectItem value={ALL}>Toutes les actions</SelectItem>
+            {actionOptions.map((a) => (
+              <SelectItem key={a} value={a}>
+                {a}
+              </SelectItem>
+            ))}
+          </SelectContent>
+        </Select>
+        <Select value={impersonated} onValueChange={setImpersonated}>
+          <SelectTrigger size="sm" className="w-40">
+            <SelectValue />
+          </SelectTrigger>
+          <SelectContent>
+            <SelectItem value={ALL}>Usurpation : toutes</SelectItem>
+            <SelectItem value="yes">Sous usurpation</SelectItem>
+            <SelectItem value="no">Sans usurpation</SelectItem>
+          </SelectContent>
+        </Select>
+        <Select value={resource} onValueChange={setResource}>
+          <SelectTrigger size="sm" className="w-40">
+            <SelectValue placeholder="Ressource" />
+          </SelectTrigger>
+          <SelectContent>
+            <SelectItem value={ALL}>Toutes les ressources</SelectItem>
+            {resourceOptions.map((r) => (
+              <SelectItem key={r} value={r}>
+                {r}
+              </SelectItem>
+            ))}
+          </SelectContent>
+        </Select>
+      </FilterBar>
+      <AdvancedFilter fields={AUDIT_ADV_FIELDS} onChange={setAdvanced} />
       <DataTableShell
         title="Audit"
         rows={rows}

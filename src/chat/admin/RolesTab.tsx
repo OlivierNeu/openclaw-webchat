@@ -208,7 +208,8 @@ export function RolesTab() {
         n’accorder qu’à bon escient.
       </p>
 
-      <div className="oc-dt__bar">
+      <div className="oc-dt">
+        <div className="oc-dt__bar">
         <h2 className="oc-dt__title">Rôles</h2>
         <div className="oc-dt__bar-actions">
           <Button
@@ -316,6 +317,7 @@ export function RolesTab() {
           </table>
         </div>
       )}
+      </div>
 
       <EntitySheet
         open={sheetOpen}

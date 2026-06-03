@@ -9,6 +9,38 @@ import { mutation, query, MutationCtx } from "./_generated/server";
 import { Id } from "./_generated/dataModel";
 import { getProfile, requireAdmin, roleOf } from "./lib/access";
 import { recordAudit } from "./lib/audit";
+import {
+  applyFilter,
+  filterValidator,
+  type FilterConfig,
+} from "./lib/filters";
+
+// --- Per-resource filter configs (docs/FILTERS_SPEC.md) --------------------
+// Applied over the VIEW objects each query returns (so q/advanced see computed
+// fields like the audit labels, and never a field the view does not expose — D2).
+
+const USERS_FILTER_CFG: FilterConfig = {
+  searchFields: ["email", "name", "canonical"],
+  structured: { role: { field: "role", kind: "string" } },
+  advanced: false,
+};
+
+const GROUPS_FILTER_CFG: FilterConfig = {
+  searchFields: ["name", "instanceName"],
+  structured: { mode: { field: "mode", kind: "string" } },
+  advanced: false,
+};
+
+const AUDIT_FILTER_CFG: FilterConfig = {
+  searchFields: ["action", "realLabel", "targetLabel", "resourceId"],
+  timeField: "at",
+  structured: {
+    action: { field: "action", kind: "string" },
+    impersonated: { field: "impersonated", kind: "bool" },
+    resource: { field: "resource", kind: "string" },
+  },
+  advanced: true,
+};
 
 const roleValidator = v.union(
   v.literal("pending"),
@@ -19,13 +51,13 @@ const roleValidator = v.union(
 // --- Users ------------------------------------------------------------------
 
 export const listUsers = query({
-  args: {},
-  handler: async (ctx) => {
+  args: { filter: v.optional(filterValidator) },
+  handler: async (ctx, { filter }) => {
     await requireAdmin(ctx);
     // Bounded: take the most recent N profiles. (Admin user lists are small;
     // paginate later if a deployment grows large.)
     const profiles = await ctx.db.query("profiles").order("desc").take(500);
-    return profiles.map((p) => ({
+    const views = profiles.map((p) => ({
       _id: p._id,
       userId: p.userId,
       role: roleOf(p),
@@ -36,6 +68,8 @@ export const listUsers = query({
       overrideAgentId: p.overrideAgentId ?? null,
       canonical: p.canonical ?? null,
     }));
+    // Filter in-memory over the bounded view set (the per-resource subset).
+    return applyFilter(views, filter, USERS_FILTER_CFG);
   },
 });
 
@@ -149,8 +183,8 @@ export const stopImpersonation = mutation({
 // --- Audit trail (read) -----------------------------------------------------
 
 export const listAudit = query({
-  args: {},
-  handler: async (ctx) => {
+  args: { filter: v.optional(filterValidator) },
+  handler: async (ctx, { filter }) => {
     await requireAdmin(ctx);
     // Most-recent first. Bounded; paginate later if a deployment grows large.
     const rows = await ctx.db.query("auditLog").order("desc").take(200);
@@ -160,7 +194,7 @@ export const listAudit = query({
       const p = profiles.find((x) => x.userId === uid);
       return p?.email ?? p?.name ?? p?.canonical ?? String(uid).slice(0, 8);
     };
-    return rows.map((r) => ({
+    const views = rows.map((r) => ({
       _id: r._id,
       at: r.at,
       action: r.action,
@@ -170,6 +204,10 @@ export const listAudit = query({
       resource: r.resource ?? null,
       resourceId: r.resourceId ?? null,
     }));
+    // Filter in-memory over the VIEW objects (so q can search the COMPUTED
+    // realLabel/targetLabel, which do not exist on the raw auditLog row). NOTE
+    // (D1): a `filter.from` older than the bounded 200-row window is partial.
+    return applyFilter(views, filter, AUDIT_FILTER_CFG);
   },
 });
 
@@ -238,10 +276,13 @@ export const setUserRouting = mutation({
 const modeValidator = v.union(v.literal("per-user"), v.literal("shared"));
 
 export const listGroups = query({
-  args: {},
-  handler: async (ctx) => {
+  args: { filter: v.optional(filterValidator) },
+  handler: async (ctx, { filter }) => {
     await requireAdmin(ctx);
-    return await ctx.db.query("groups").order("desc").take(200);
+    // listGroups returns the raw docs (no toView) — "view" == the returned
+    // object, so the filter reads the doc's own fields (name/instanceName/mode).
+    const groups = await ctx.db.query("groups").order("desc").take(200);
+    return applyFilter(groups, filter, GROUPS_FILTER_CFG);
   },
 });
 

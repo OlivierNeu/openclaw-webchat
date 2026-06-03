@@ -4,6 +4,10 @@ import { X } from "lucide-react";
 import { api } from "../convexApi";
 import type { Id } from "../convexApi";
 import { DataTableShell } from "./DataTableShell";
+import { FilterBar } from "./filters/FilterBar";
+import { AdvancedFilter } from "./filters/AdvancedFilter";
+import { useResolvedRange } from "./filters/TimeRangePicker";
+import type { Predicate, TimeRange } from "./filters/types";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import {
@@ -61,6 +65,30 @@ const LIMIT_OPTIONS = [50, 100, 200, 500] as const;
 type LimitValue = (typeof LIMIT_OPTIONS)[number];
 
 const ALL_KINDS = "all";
+// "Select all" sentinel for the new quick <Select>s (radix has no empty value).
+const ALL = "__all__";
+
+// Fixed enum option lists (closed sets — not derived from the window).
+const STATUS_CLASSES = ["2xx", "4xx", "5xx"] as const;
+const PRINCIPAL_TYPES = ["user", "service", "system"] as const;
+const DIRECTIONS = ["inbound", "outbound", "internal"] as const;
+
+// Default time window for the traces table. Wide (30d) so seeded/older events
+// surface on load — traces previously had NO time filter, so a narrow default
+// would silently hide rows older than it within the bounded window.
+const DEFAULT_RANGE: TimeRange = { kind: "relative", from: "now-30d", to: "now" };
+
+// Field list for the traces advanced builder (view fields the backend exposes).
+const TRACES_ADV_FIELDS = [
+  { value: "kind", label: "kind" },
+  { value: "status", label: "status" },
+  { value: "latencyMs", label: "latence (ms)" },
+  { value: "principalType", label: "principal" },
+  { value: "direction", label: "direction" },
+  { value: "roleKey", label: "rôle" },
+  { value: "route", label: "route" },
+  { value: "correlationId", label: "correlationId" },
+];
 
 export function TracesTab() {
   const [limit, setLimit] = useState<LimitValue>(100);
@@ -70,15 +98,44 @@ export function TracesTab() {
   // The row whose `meta` JSON is open in the shared Dialog.
   const [metaRow, setMetaRow] = useState<TraceEventView | null>(null);
 
-  // Option list + correlation base: never kind-filtered (see header note).
+  // New quick filters + time range + advanced predicates. These ride the
+  // `filter` arg passed ONLY to the `filtered` query (NOT the unfiltered one,
+  // which must stay filter-free so the kind/role option lists don't collapse
+  // and a followed correlationId turn still shows whole).
+  const [q, setQ] = useState("");
+  // Named *Filter to avoid shadowing the module-level statusClass() helper that
+  // colors the status column (a bare `statusClass` would no longer be callable).
+  const [statusClassFilter, setStatusClassFilter] = useState<string>(ALL);
+  const [principalType, setPrincipalType] = useState<string>(ALL);
+  const [direction, setDirection] = useState<string>(ALL);
+  const [roleKey, setRoleKey] = useState<string>(ALL);
+  const [range, setRange] = useState<TimeRange>(DEFAULT_RANGE);
+  const [advanced, setAdvanced] = useState<Predicate[]>([]);
+  const { from, to } = useResolvedRange(range);
+
+  // Option list + correlation base: never kind- nor filter-narrowed (see note).
   const unfiltered = useQuery(api.observability.listEvents, { limit }) as
     | TraceEventView[]
     | undefined;
   // Table source in the normal case. Map the synthetic "all" to undefined so we
   // never ask the backend to filter for a literal "all" kind (→ empty result).
+  // The new quick/time/advanced filters ride the `filter` arg here.
   const filtered = useQuery(api.observability.listEvents, {
     limit,
     kind: kind === ALL_KINDS ? undefined : kind,
+    filter: {
+      q: q || undefined,
+      from,
+      to,
+      statusClass:
+        statusClassFilter === ALL
+          ? undefined
+          : (statusClassFilter as "2xx" | "4xx" | "5xx"),
+      principalType: principalType === ALL ? undefined : principalType,
+      direction: direction === ALL ? undefined : direction,
+      roleKey: roleKey === ALL ? undefined : roleKey,
+      advanced: advanced.length > 0 ? advanced : undefined,
+    },
   }) as TraceEventView[] | undefined;
 
   // Distinct kinds present in the unfiltered window (stable; does not collapse
@@ -88,6 +145,32 @@ export function TracesTab() {
     for (const e of unfiltered ?? []) set.add(e.kind);
     return [...set].sort();
   }, [unfiltered]);
+
+  // Distinct roleKeys present in the unfiltered window (dynamic; like kinds).
+  const roleOptions = useMemo(() => {
+    const set = new Set<string>();
+    for (const e of unfiltered ?? []) if (e.roleKey) set.add(e.roleKey);
+    return [...set].sort();
+  }, [unfiltered]);
+
+  const filtersActive =
+    q !== "" ||
+    statusClassFilter !== ALL ||
+    principalType !== ALL ||
+    direction !== ALL ||
+    roleKey !== ALL ||
+    advanced.length > 0 ||
+    range.kind !== "relative" ||
+    range.from !== DEFAULT_RANGE.from;
+  function resetFilters() {
+    setQ("");
+    setStatusClassFilter(ALL);
+    setPrincipalType(ALL);
+    setDirection(ALL);
+    setRoleKey(ALL);
+    setRange(DEFAULT_RANGE);
+    setAdvanced([]);
+  }
 
   // Following a correlationId wins over the kind filter: it reads from the
   // unfiltered window so the WHOLE turn (across kinds) is shown. Otherwise the
@@ -102,56 +185,123 @@ export function TracesTab() {
         Événements récents (fenêtre bornée, plus récents d’abord). Toutes les
         traces sont des métadonnées <strong>expurgées</strong> : aucun contenu
         de message, pièce jointe ou jeton n’est stocké — uniquement des
-        longueurs, codes et indicateurs.
+        longueurs, codes et indicateurs.{" "}
+        <span className="oc-filter__window">
+          La plage temporelle filtre la fenêtre récente — une plage antérieure
+          peut être partielle.
+        </span>
       </p>
 
-      <div className="oc-traces__toolbar">
-        <div className="oc-traces__filters">
-          {followCorr ? (
-            <button
-              type="button"
-              className="oc-traces__chip"
-              onClick={() => setFollowCorr(null)}
-              title="Effacer le filtre de corrélation"
-            >
-              <span className="oc-traces__chip-label">
-                filtre: correlationId=
-                <code>{shortId(followCorr)}</code>
-              </span>
-              <X className="oc-traces__chip-x" aria-hidden />
-              <span className="sr-only">Effacer</span>
-            </button>
-          ) : null}
-          <Select value={kind} onValueChange={setKind}>
-            <SelectTrigger size="sm" className="w-44">
-              <SelectValue placeholder="Tous les kinds" />
-            </SelectTrigger>
-            <SelectContent>
-              <SelectItem value={ALL_KINDS}>tous les kinds</SelectItem>
-              {kindOptions.map((k) => (
-                <SelectItem key={k} value={k}>
-                  {k}
-                </SelectItem>
-              ))}
-            </SelectContent>
-          </Select>
-          <Select
-            value={String(limit)}
-            onValueChange={(v) => setLimit(Number(v) as LimitValue)}
+      <FilterBar
+        q={q}
+        onQChange={setQ}
+        searchPlaceholder="Rechercher (kind, principal, rôle, route, correlationId)"
+        timeRange={range}
+        onTimeRangeChange={setRange}
+        onReset={resetFilters}
+        canReset={filtersActive}
+      >
+        <Select value={statusClassFilter} onValueChange={setStatusClassFilter}>
+          <SelectTrigger size="sm" className="w-32">
+            <SelectValue placeholder="Statut" />
+          </SelectTrigger>
+          <SelectContent>
+            <SelectItem value={ALL}>Tous statuts</SelectItem>
+            {STATUS_CLASSES.map((c) => (
+              <SelectItem key={c} value={c}>
+                {c}
+              </SelectItem>
+            ))}
+          </SelectContent>
+        </Select>
+        <Select value={principalType} onValueChange={setPrincipalType}>
+          <SelectTrigger size="sm" className="w-32">
+            <SelectValue placeholder="Principal" />
+          </SelectTrigger>
+          <SelectContent>
+            <SelectItem value={ALL}>Tous principaux</SelectItem>
+            {PRINCIPAL_TYPES.map((p) => (
+              <SelectItem key={p} value={p}>
+                {p}
+              </SelectItem>
+            ))}
+          </SelectContent>
+        </Select>
+        <Select value={direction} onValueChange={setDirection}>
+          <SelectTrigger size="sm" className="w-32">
+            <SelectValue placeholder="Direction" />
+          </SelectTrigger>
+          <SelectContent>
+            <SelectItem value={ALL}>Toutes directions</SelectItem>
+            {DIRECTIONS.map((d) => (
+              <SelectItem key={d} value={d}>
+                {d}
+              </SelectItem>
+            ))}
+          </SelectContent>
+        </Select>
+        <Select value={roleKey} onValueChange={setRoleKey}>
+          <SelectTrigger size="sm" className="w-36">
+            <SelectValue placeholder="Rôle" />
+          </SelectTrigger>
+          <SelectContent>
+            <SelectItem value={ALL}>Tous les rôles</SelectItem>
+            {roleOptions.map((r) => (
+              <SelectItem key={r} value={r}>
+                {r}
+              </SelectItem>
+            ))}
+          </SelectContent>
+        </Select>
+        <Select value={kind} onValueChange={setKind}>
+          <SelectTrigger size="sm" className="w-44">
+            <SelectValue placeholder="Tous les kinds" />
+          </SelectTrigger>
+          <SelectContent>
+            <SelectItem value={ALL_KINDS}>tous les kinds</SelectItem>
+            {kindOptions.map((k) => (
+              <SelectItem key={k} value={k}>
+                {k}
+              </SelectItem>
+            ))}
+          </SelectContent>
+        </Select>
+        <Select
+          value={String(limit)}
+          onValueChange={(v) => setLimit(Number(v) as LimitValue)}
+        >
+          <SelectTrigger size="sm" className="w-28">
+            <SelectValue />
+          </SelectTrigger>
+          <SelectContent>
+            {LIMIT_OPTIONS.map((n) => (
+              <SelectItem key={n} value={String(n)}>
+                {n} lignes
+              </SelectItem>
+            ))}
+          </SelectContent>
+        </Select>
+      </FilterBar>
+
+      <AdvancedFilter fields={TRACES_ADV_FIELDS} onChange={setAdvanced} />
+
+      {followCorr ? (
+        <div className="oc-traces__followline">
+          <button
+            type="button"
+            className="oc-traces__chip"
+            onClick={() => setFollowCorr(null)}
+            title="Effacer le filtre de corrélation"
           >
-            <SelectTrigger size="sm" className="w-28">
-              <SelectValue />
-            </SelectTrigger>
-            <SelectContent>
-              {LIMIT_OPTIONS.map((n) => (
-                <SelectItem key={n} value={String(n)}>
-                  {n} lignes
-                </SelectItem>
-              ))}
-            </SelectContent>
-          </Select>
+            <span className="oc-traces__chip-label">
+              filtre: correlationId=
+              <code>{shortId(followCorr)}</code>
+            </span>
+            <X className="oc-traces__chip-x" aria-hidden />
+            <span className="sr-only">Effacer</span>
+          </button>
         </div>
-      </div>
+      ) : null}
 
       <DataTableShell
         title="Traces"

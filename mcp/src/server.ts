@@ -16,13 +16,15 @@
 
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
-import { z } from "zod";
 import { ApiError, resolveConfig } from "./config.js";
 import {
   getKpi,
+  getKpiInput,
   health,
   listAnomalies,
+  listAnomaliesInput,
   listTraces,
+  listTracesInput,
   queryOpenClaw,
   queryOpenClawInput,
   reportAnomaly,
@@ -88,14 +90,7 @@ function main(): void {
       title: "List recent traces",
       description:
         "Recent trace events (GET /traces). Key must have traces.read.",
-      inputSchema: {
-        limit: z.number().int().min(1).max(200).optional()
-          .describe("Max events to return (1-200)."),
-        kind: z.string().optional()
-          .describe("Filter by event kind (e.g. 'api.call')."),
-        correlationId: z.string().optional()
-          .describe("Filter to one correlation chain."),
-      },
+      inputSchema: listTracesInput,
     },
     async (args) => run(() => listTraces(config, args)),
   );
@@ -106,12 +101,7 @@ function main(): void {
       title: "Get KPI rollups",
       description:
         "KPI rollups (GET /kpi; increment 4). Key must have kpi.read.",
-      inputSchema: {
-        metric: z.string().optional()
-          .describe("Filter to a single metric name."),
-        since: z.string().optional()
-          .describe("ISO timestamp or bucket lower bound."),
-      },
+      inputSchema: getKpiInput,
     },
     async (args) => run(() => getKpi(config, args)),
   );
@@ -134,12 +124,7 @@ function main(): void {
       title: "List anomalies",
       description:
         "Detected anomalies (GET /anomalies; increment 6). Key must have anomalies.read.",
-      inputSchema: {
-        limit: z.number().int().min(1).max(200).optional()
-          .describe("Max anomalies to return (1-200)."),
-        since: z.string().optional().describe("ISO timestamp lower bound."),
-        status: z.string().optional().describe("Filter by status."),
-      },
+      inputSchema: listAnomaliesInput,
     },
     async (args) => run(() => listAnomalies(config, args)),
   );

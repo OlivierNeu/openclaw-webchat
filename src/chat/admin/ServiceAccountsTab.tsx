@@ -5,6 +5,7 @@ import { api } from "../convexApi";
 import type { Id } from "../convexApi";
 import { DataTableShell } from "./DataTableShell";
 import { EntitySheet } from "./EntitySheet";
+import { FilterBar } from "./filters/FilterBar";
 import { useConfirm } from "@/components/ConfirmDialog";
 import { useToast } from "@/components/ui/toast";
 import { Badge } from "@/components/ui/badge";
@@ -76,23 +77,44 @@ type ExpiryValue = (typeof EXPIRY_OPTIONS)[number]["value"];
 
 const STALE_MS = 30 * 24 * 60 * 60 * 1000; // ~30 days
 
+// "Select all" sentinel for the quick <Select>s (radix has no empty value).
+const ALL = "__all__";
+
 type AccountForm = { name: string; roleKey: string; description: string };
 const EMPTY_ACCOUNT: AccountForm = { name: "", roleKey: "", description: "" };
 
 export function ServiceAccountsTab() {
-  const accounts = useQuery(api.apiKeys.listServiceAccounts, {}) as
-    | ServiceAccountRow[]
-    | undefined;
+  const [q, setQ] = useState("");
+  const [roleFilter, setRoleFilter] = useState<string>(ALL);
+  const [statusFilter, setStatusFilter] = useState<string>(ALL);
+
+  const accounts = useQuery(api.apiKeys.listServiceAccounts, {
+    filter: {
+      q: q || undefined,
+      // The service-account role filter key is `role` (-> roleKey server-side).
+      role: roleFilter === ALL ? undefined : roleFilter,
+      // Status maps to the `disabled` bool (active = false, désactivé = true).
+      disabled: statusFilter === ALL ? undefined : statusFilter === "disabled",
+    },
+  }) as ServiceAccountRow[] | undefined;
   const allKeys = useQuery(api.apiKeys.listKeys, {}) as
     | ApiKeyRow[]
     | undefined;
   const roles = useQuery(api.apiKeys.listRoles, {});
 
   const createServiceAccount = useMutation(api.apiKeys.createServiceAccount);
+  const deleteServiceAccount = useMutation(api.apiKeys.deleteServiceAccount);
   const mintApiKey = useAction(api.apiKeys.mintApiKey);
   const revokeApiKey = useMutation(api.apiKeys.revokeApiKey);
   const confirm = useConfirm();
   const toast = useToast();
+
+  const filtersActive = q !== "" || roleFilter !== ALL || statusFilter !== ALL;
+  function resetFilters() {
+    setQ("");
+    setRoleFilter(ALL);
+    setStatusFilter(ALL);
+  }
 
   const [sheetOpen, setSheetOpen] = useState(false);
   const [form, setForm] = useState<AccountForm>(EMPTY_ACCOUNT);
@@ -177,6 +199,32 @@ export function ServiceAccountsTab() {
     }
   }
 
+  async function deleteAccount(account: ServiceAccountRow) {
+    // Irreversible cascade (the account + every key it owns). Type-to-confirm
+    // on the account name guards against an accidental destructive click.
+    const ok = await confirm({
+      title: "Supprimer ce compte de service ?",
+      description: (
+        <>
+          Le compte <span className="font-mono">{account.name}</span> et{" "}
+          <strong>toutes ses clés API</strong> seront supprimés
+          définitivement. Cette action est irréversible. Tapez le nom du compte
+          pour confirmer.
+        </>
+      ),
+      confirmWord: account.name,
+      confirmLabel: "Supprimer",
+      destructive: true,
+    });
+    if (!ok) return;
+    try {
+      await deleteServiceAccount({ serviceAccountId: account._id });
+      toast.success("Compte de service supprimé", account.name);
+    } catch (err) {
+      toast.error("Échec de la suppression du compte", err);
+    }
+  }
+
   async function revoke(key: ApiKeyRow) {
     const ok = await confirm({
       title: "Révoquer cette clé API ?",
@@ -219,6 +267,38 @@ export function ServiceAccountsTab() {
         n’est jamais stocké ni récupérable ensuite.
       </p>
 
+      <FilterBar
+        q={q}
+        onQChange={setQ}
+        searchPlaceholder="Rechercher un compte"
+        onReset={resetFilters}
+        canReset={filtersActive}
+      >
+        <Select value={roleFilter} onValueChange={setRoleFilter}>
+          <SelectTrigger size="sm" className="w-40">
+            <SelectValue placeholder="Rôle" />
+          </SelectTrigger>
+          <SelectContent>
+            <SelectItem value={ALL}>Tous les rôles</SelectItem>
+            {(roles ?? []).map((r) => (
+              <SelectItem key={r._id} value={r.key}>
+                {r.key}
+              </SelectItem>
+            ))}
+          </SelectContent>
+        </Select>
+        <Select value={statusFilter} onValueChange={setStatusFilter}>
+          <SelectTrigger size="sm" className="w-36">
+            <SelectValue />
+          </SelectTrigger>
+          <SelectContent>
+            <SelectItem value={ALL}>Tous les statuts</SelectItem>
+            <SelectItem value="active">actif</SelectItem>
+            <SelectItem value="disabled">désactivé</SelectItem>
+          </SelectContent>
+        </Select>
+      </FilterBar>
+
       <DataTableShell
         title="Comptes de service"
         rows={accounts}
@@ -228,6 +308,15 @@ export function ServiceAccountsTab() {
           setSheetOpen(true);
         }}
         emptyHint="Aucun compte de service."
+        isExpanded={(a) => expanded.has(a._id)}
+        renderExpanded={(a) => (
+          <AccountKeys
+            account={a}
+            keys={keysByAccount.get(a._id) ?? []}
+            onRevoke={revoke}
+            revoking={revoking}
+          />
+        )}
         rowActions={(a) => [
           {
             label: "Générer une clé API",
@@ -238,6 +327,11 @@ export function ServiceAccountsTab() {
               ? "Masquer les clés"
               : "Afficher les clés",
             onSelect: () => toggleExpanded(a._id),
+          },
+          {
+            label: "Supprimer le compte",
+            variant: "destructive",
+            onSelect: () => void deleteAccount(a),
           },
         ]}
         columns={[
@@ -308,20 +402,6 @@ export function ServiceAccountsTab() {
           },
         ]}
       />
-
-      {/* Expanded per-account key lists. Rendered below the table so each picks
-          up the same grouped keysByAccount data without nested hooks. */}
-      {(accounts ?? [])
-        .filter((a) => expanded.has(a._id))
-        .map((a) => (
-          <AccountKeys
-            key={a._id}
-            account={a}
-            keys={keysByAccount.get(a._id) ?? []}
-            onRevoke={revoke}
-            revoking={revoking}
-          />
-        ))}
 
       <EntitySheet
         open={sheetOpen}
@@ -531,8 +611,10 @@ function MintedKeyDialog({
   );
 }
 
+// "Créée" shows date + time (Image #15): a key's creation instant is more useful
+// with the time, and mirrors the toLocaleString used elsewhere (lastUsed, audit).
 function formatDate(ms: number): string {
-  return new Date(ms).toLocaleDateString("fr-FR");
+  return new Date(ms).toLocaleString("fr-FR");
 }
 
 function isStale(lastUsedAt: number | null): boolean {
