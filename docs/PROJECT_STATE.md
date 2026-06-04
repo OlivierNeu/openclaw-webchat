@@ -248,11 +248,58 @@ the bridge had none, so `npm test` was silently picking the root edge-runtime co
 run-manager = zero behavior change); tsc src+convex 0; root vitest 97; mcp 36; `core/`
 imports zero OpenClaw code. `git mv` preserved history (staged, NOT committed — user commits).
 
-**Next build step = Phase 2** (highest risk): `providers/openclaw/adapter.ts`
-implementing `BridgeProvider` + `core/registry.ts` keyed by INSTANCE (not chat) +
-one-connection-per-instance multiplex (`Map<sessionKey, ChatTurnState>`, fan-out by
-`payload.sessionKey`) + the consume-loop min-deadline generalization + the
-`verboseFullApplied` boolean→per-sessionKey Set fix. `BRIDGE_PROTOCOL.md`
+**Connection model RESEARCHED + SETTLED (2026-06-04) → Model A** (one operator WS
+per instance, multiplexed). See `docs/OPENCLAW_CONNECTION_MODEL.md` (primary-source,
+v2026.5.19 raw docs + adversarial verify). Native per protocol.md: "each client
+connection keeps its own per-client sequence number … scope-filtered subsets of the
+event stream"; `sessions.subscribe`/`sessions.messages.subscribe` are per-session on
+ONE WS client; `chat.send` addresses a conversation by an in-message `sessionId`
+param, not by socket. Pairing is durable per device (`~/.openclaw/nodes/paired.json`,
+token rotates on re-pair) → the device IS the connection identity (confirms the
+per-instance read). **Model A uses exactly ONE connection per instance, so it is
+correct regardless of the deciding unknown.**
+- **DECIDER UNKNOWN (live-only, T2):** whether two concurrent SAME-ROLE operator
+  connections may share one device identity is NOT documented (no "device already
+  connected"/displacement rule). Only CROSS-role (operator+node) coexistence is
+  verbatim. Doesn't block A; matters operationally (the bridge's device identity must
+  not contend with the user's existing operator clients → prefer a DEDICATED paired
+  bridge device).
+- **🔒 NEW LOAD-BEARING INVARIANT — the Gateway is NOT per-user isolation.** Session
+  content gates on the `operator.read` SCOPE, not per-user identity (operator-scopes.md:
+  "not hostile multi-tenant isolation … run separate Gateways under separate OS users
+  or hosts"). The bridge holds ONE operator connection seeing ALL sessions on that
+  gateway. Therefore the **BRIDGE is the trusted demux point and MUST enforce per-user
+  isolation** (sessionKey→chatId→owner routing + Convex ownership checks). A cross-user
+  routing bug = a PHI leak. (Note: Image #22 already separates groups by GATEWAY —
+  admin vs family — so isolation is needed BETWEEN users sharing one group's gateway.)
+- **sessionKey grammar residual (T4):** docs show `agent:<agentId>:<mainKey>`; the
+  bridge's fixture form `agent:<agentId>:webchat:chat:<canonical>:<chatId>`
+  (`session-keys.ts`) is **NOT FOUND** in v2026.5.19 docs — must be captured from a real
+  webchat session before/at first live send, or `chat.send` may target a wrong session.
+
+**DEV/PROD INSTANCE STRATEGY (user decision 2026-06-04):** the bridge gets a
+DEDICATED dev pairing on the **`olivier`** instance (`gateway.lacneu.com`, group
+`admin`, reachable from the LAN). This is the per-version empirical regression bench:
+on every new OpenClaw/Hermes version, run the full live feature suite against `olivier`
+FIRST to catch regressions BEFORE touching the **`jerome`** instance (group `family`,
+`ataraxis.lacneu.com` = the protected one). This is how multi-version support (out of
+the design workflow's scope) is handled operationally. Pairing is per-device (Q5):
+generate a fresh device keypair → `node.pair.request` → admin approval issues a token →
+reconnect with the token (signing the `connect.challenge` nonce).
+
+**Phase 2 IN PROGRESS (Model A).** DONE so far: `providers/openclaw/multiplex.ts`
+`SessionMultiplexer` — the risk core: one Normalizer per session, fan-out by
+`payload.sessionKey`, min-deadline tick, per-sessionKey verbose guard (fix #7), endAll.
+**The sessionKey routing IS the per-user isolation boundary** (Gateway gates by scope,
+not user). 5 offline tests (`test/multiplex.test.ts`): interleaved-no-cross-talk,
+unknown-session drop, min-deadline selectivity, verbose-per-sessionKey, endAll. Gate:
+bridge tsc 0, 36 bridge tests green. STILL TODO in P2: wrap the multiplexer in
+`providers/openclaw/adapter.ts` (`BridgeProvider`: connect ONE WS, sendMessage→sessionKey
++verbose guard+chat.send+ack runId+beginSession, the single-pending-read consume loop
+racing one frame-read vs `mux.minTimeout`, emit via `on(chatId,event)`, abort=local
+finalize) + `core/registry.ts` (instance-keyed, lazy connect/reuse/reconnect) + the
+core on()→TurnSink-per-chat wiring; the consume loop + sendMessage need a FakeConnection
+for offline tests, then the live T1–T4. Also: capture the real sessionKey grammar live (T4). `BRIDGE_PROTOCOL.md`
 normalized-events section = STILL the contract; its Firebase/browser-WS/signed-media
 sections are STALE (superseded by the Convex design).
 
