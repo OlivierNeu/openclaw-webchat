@@ -217,7 +217,18 @@ export default defineSchema({
     text: v.string(),
     error: v.optional(v.string()),
     updatedAt: v.number(),
-  }).index("by_chat", ["chatId"]),
+  })
+    .index("by_chat", ["chatId"])
+    // Full-text search over message bodies for the global conversation search
+    // (topbar palette). `userId` is a filter field so a single index serves the
+    // owner-scoped query directly: q.search("text", term).eq("userId", userId).
+    // This is THE access boundary for message hits — never search without it.
+    // Note: `text` is patched in place during streaming, so this index re-indexes
+    // on each token patch; acceptable at our scale (metadata-only platform).
+    .searchIndex("search_text", {
+      searchField: "text",
+      filterFields: ["userId"],
+    }),
 
   // Structured non-text content attached to a message, ordered for rendering.
   messageParts: defineTable({

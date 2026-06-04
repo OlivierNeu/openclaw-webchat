@@ -44,6 +44,7 @@ import type { ConvexId } from "./chat/convexTypes";
 import { ConvexChat } from "./chat/ConvexChat";
 import { ChatSidebar } from "./chat/ChatSidebar";
 import { UserMenu } from "./chat/UserMenu";
+import { GlobalSearch } from "./chat/GlobalSearch";
 import {
   TABS,
   TAB_LABELS,
@@ -273,6 +274,10 @@ function AppTopBar({
           {collapsed ? <PanelLeftOpen /> : <PanelLeftClose />}
         </Button>
         <span className="oc-topbar__brand">OpenClaw</span>
+      </div>
+      {/* Center zone: global conversation search (⌘K palette). */}
+      <div className="oc-topbar__search">
+        <GlobalSearch />
       </div>
       <div className="oc-topbar__actions">
         <UserMenu label={userLabel} mode={themeMode} />

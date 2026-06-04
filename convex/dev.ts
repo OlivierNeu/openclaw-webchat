@@ -3,7 +3,7 @@
 // auth provider). Never enabled in production.
 
 import { v } from "convex/values";
-import { action, internalMutation, mutation } from "./_generated/server";
+import { action, internalMutation, mutation, query } from "./_generated/server";
 import { internal } from "./_generated/api";
 import { Id } from "./_generated/dataModel";
 import { generateApiKey, hashKey } from "./lib/apikeys";
@@ -223,6 +223,44 @@ export const seedApiKey = action({
       plaintext: generated.plaintext,
       prefix: generated.prefix,
       lastFour: generated.lastFour,
+    };
+  },
+});
+
+/**
+ * LIVE-VERIFY HELPER for the global search index. The real path
+ * (search.searchConversations) is auth-gated, so a bare `npx convex run` can't
+ * exercise it. This dev-gated query runs the SAME raw `withSearchIndex` against
+ * the live deployment so the production search index can be confirmed to return
+ * hits (and that the `userId` filter scopes) from the CLI:
+ *
+ *   npx convex run dev:searchProbe '{"term":"drive"}'
+ *   npx convex run dev:searchProbe '{"term":"drive","userId":"<id>"}'
+ *
+ * When `userId` is omitted it scopes to the first message's owner so a single
+ * probe works without knowing an id.
+ */
+export const searchProbe = query({
+  args: { term: v.string(), userId: v.optional(v.id("users")) },
+  handler: async (ctx, { term, userId }) => {
+    assertDev();
+    let uid = userId;
+    if (!uid) {
+      const anyMsg = await ctx.db.query("messages").take(1);
+      uid = anyMsg[0]?.userId;
+    }
+    if (!uid) return { ok: false as const, reason: "no messages to scope" };
+    const hits = await ctx.db
+      .query("messages")
+      .withSearchIndex("search_text", (q) =>
+        q.search("text", term).eq("userId", uid),
+      )
+      .take(5);
+    return {
+      ok: true as const,
+      scopedUserId: uid,
+      count: hits.length,
+      chatIds: hits.map((m) => m.chatId),
     };
   },
 });
