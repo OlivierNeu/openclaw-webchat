@@ -19,7 +19,7 @@ import { createServer, type IncomingMessage, type Server, type ServerResponse } 
 import { timingSafeEqual } from "node:crypto";
 
 import type { BridgeConfig } from "./config.js";
-import { idempotencyKey } from "./openclaw-client.js";
+import { idempotencyKey } from "./providers/openclaw/openclaw-client.js";
 import type { SessionRegistry, BridgeSession } from "./session.js";
 
 interface SendBody {

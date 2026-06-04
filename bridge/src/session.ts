@@ -10,11 +10,11 @@
 // timeout fires is never dropped; on timeout we `tick()` the normalizer so an
 // armed grace always finalizes (never a hung "thinking" UI).
 
-import { OpenClawConnection } from "./openclaw-client.js";
-import { RunManager } from "./run-manager.js";
+import { OpenClawConnection } from "./providers/openclaw/openclaw-client.js";
+import { RunManager } from "./providers/openclaw/run-manager.js";
 import type { ConvexWriter } from "./convex-writer.js";
 import type { BridgeConfig } from "./config.js";
-import { buildSessionKey } from "./session-keys.js";
+import { buildSessionKey } from "./providers/openclaw/session-keys.js";
 
 /** A monotonic clock in SECONDS (matches the normalizer's time unit). */
 export type Clock = () => number;

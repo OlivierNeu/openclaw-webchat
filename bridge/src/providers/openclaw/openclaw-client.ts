@@ -20,7 +20,7 @@ import { randomUUID } from "node:crypto";
 import { URL } from "node:url";
 import WebSocket, { type RawData } from "ws";
 
-import type { DeviceIdentity } from "./config.js";
+import type { DeviceIdentity } from "../../config.js";
 
 const DEFAULT_SCOPES = [
   "operator.read",

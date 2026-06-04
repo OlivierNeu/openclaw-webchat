@@ -17,13 +17,13 @@ import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
 
-import { RunManager } from "../src/run-manager.js";
+import { RunManager } from "../src/providers/openclaw/run-manager.js";
 import type {
   ConvexWriter,
   FinalizeStatus,
   ToolPart,
 } from "../src/convex-writer.js";
-import { BASE_RECV_TIMEOUT } from "../src/normalizer.js";
+import { BASE_RECV_TIMEOUT } from "../src/providers/openclaw/normalizer.js";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 

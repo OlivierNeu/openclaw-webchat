@@ -1,30 +1,27 @@
-// Per-session run tracking: wires the proven Normalizer to a ConvexWriter.
+// TurnSink — the provider-AGNOSTIC half of the old RunManager: it consumes the
+// normalized event stream and translates it into ordered ConvexWriter calls. It
+// owns NO normalizer and imports NO vendor code, so both the OpenClaw driver and
+// (later) Hermes feed the same sink. This is the "core/run-manager.ts sink" of
+// docs/BRIDGE_ARCHITECTURE.md §2.1/§2.6.
 //
-// One RunManager instance handles one OpenClaw session (one chat). It owns a
-// Normalizer (begin_turn/feed/tick/next_timeout) and translates the stable
-// bridge events the normalizer emits into ordered ConvexWriter calls.
-//
-// Event -> writer mapping (see convex/stream.ts + normalizer event shapes):
-//   turn begin            -> startAssistant(chatId, ackRunId)  [once, returns messageId]
-//   message.delta {text}  -> appendDelta(messageId, text)
-//   message.snapshot{text}-> setSnapshot(messageId, text)
-//   tool.status {name,phase} -> addPart(kind:tool)
-//   media {items[]}       -> addMedia per item (writer stores bytes)
+// Event -> writer mapping (see convex/stream.ts + the normalized event shapes):
+//   beginTurn(ackRunId)      -> startAssistant(chatId, ackRunId)  [once, returns messageId]
+//   message.delta {text}     -> appendDelta(messageId, text)
+//   message.snapshot {text}  -> setSnapshot(messageId, text)
+//   tool.status {name,phase} -> addToolPart(kind:tool)
+//   media {items[]}          -> addMedia per item (writer stores bytes)
 //   message.final {text,error?} + paired run.status {status} -> finalize(...)
 //   intermediate run.status (working/running/compacting) -> dropped (no schema fit)
 //
-// finalize semantics (load-bearing): normalizer.finalize() emits the PAIR
+// finalize semantics (load-bearing): the normalizer emits the PAIR
 // [message.final{text,error?}, run.status{status}]. message.final alone cannot
-// distinguish complete vs aborted (aborted carries no error). So we BUFFER the
-// final text/error from message.final and emit the writer.finalize() only when
-// the paired terminal run.status arrives, mapping
-//   final  -> complete
-//   error  -> error
-//   aborted-> aborted
-// Every other run.status is intermediate and dropped.
+// distinguish complete vs aborted (aborted carries no error), so we BUFFER the
+// final text/error from message.final and emit writer.finalize() only when the
+// paired terminal run.status arrives (final->complete, error->error,
+// aborted->aborted). Every other run.status is intermediate and dropped.
 
-import { Normalizer, type BridgeEvent } from "./normalizer.js";
-import type { ConvexWriter, FinalizeStatus, ToolPart } from "./convex-writer.js";
+import type { NormalizedEvent } from "./events.js";
+import type { ConvexWriter, FinalizeStatus, ToolPart } from "../convex-writer.js";
 
 const TERMINAL_STATUS: Record<string, FinalizeStatus> = {
   final: "complete",
@@ -38,19 +35,8 @@ interface MediaItem {
   path: string;
 }
 
-/**
- * Drives one OpenClaw session's normalized stream into Convex.
- *
- * Lifecycle per user turn:
- *   1. beginTurn(): reset normalizer state, create the streaming assistant
- *      message (startAssistant), seed ownRunIds from the chat.send ack runId.
- *   2. feed each inbound gateway frame; tick on the normalizer's timeout.
- *   3. the normalizer emits the terminal [message.final, run.status] pair which
- *      we translate into a single writer.finalize().
- */
-export class RunManager {
+export class TurnSink {
   private readonly chatId: string;
-  private readonly normalizer: Normalizer;
   private readonly writer: ConvexWriter;
 
   private messageId: string | null = null;
@@ -60,69 +46,32 @@ export class RunManager {
   private pendingFinalError: string | null = null;
   private hasPendingFinal = false;
 
-  constructor(chatId: string, sessionKey: string, writer: ConvexWriter) {
+  constructor(chatId: string, writer: ConvexWriter) {
     this.chatId = chatId;
-    this.normalizer = new Normalizer(sessionKey);
     this.writer = writer;
   }
 
-  /** Seconds until the normalizer's nearest deadline (null = idle). */
-  nextTimeout(now: number): number | null {
-    return this.normalizer.nextTimeout(now);
-  }
-
-  get isFinalized(): boolean {
-    return this.normalizer.finalized;
+  /** True between beginTurn and the terminal flush; gates driving the provider. */
+  get active(): boolean {
+    return this.turnActive;
   }
 
   /**
-   * Start a new assistant turn. Creates the streaming message in Convex and
-   * seeds ownRunIds from the chat.send ack runId (foreign-run isolation). Call
-   * before feeding any frames for the turn.
+   * Start a new assistant turn: reset the finalize buffer and create the
+   * streaming assistant message up-front (run.status begin is not guaranteed
+   * before content; chat-final-content has none until the end). The provider
+   * driver calls this AFTER seeding its own per-turn state.
    */
-  async beginTurn(now: number, ackRunId: string | null): Promise<void> {
-    this.normalizer.beginTurn(now);
-    if (ackRunId) {
-      this.normalizer.noteRunStarted(ackRunId, now);
-    }
+  async beginTurn(ackRunId: string | null): Promise<void> {
     this.pendingFinalText = "";
     this.pendingFinalError = null;
     this.hasPendingFinal = false;
     this.turnActive = true;
-    // Create the streaming assistant message up-front (run.status begin is not
-    // guaranteed before content; chat-final-content has none until the end).
     this.messageId = await this.writer.startAssistant(this.chatId, ackRunId);
   }
 
-  /** Feed one raw gateway frame; apply the resulting events to Convex. */
-  async feed(frame: unknown, now: number): Promise<void> {
-    if (!this.turnActive) {
-      return;
-    }
-    await this.apply(this.normalizer.feed(frame, now));
-  }
-
-  /** Resolve expired normalizer deadlines; apply any emitted events. */
-  async tick(now: number): Promise<void> {
-    if (!this.turnActive) {
-      return;
-    }
-    await this.apply(this.normalizer.tick(now));
-  }
-
-  /**
-   * Force-finalize the active turn (e.g. on socket close or a send error). The
-   * normalizer emits its terminal pair; we flush it to Convex.
-   */
-  async endTurn(now: number, status = "final", error: string | null = null): Promise<void> {
-    if (!this.turnActive) {
-      return;
-    }
-    await this.apply(this.normalizer.endTurn(now, status, error));
-  }
-
-  /** Apply a batch of normalizer events to the writer, strictly in order. */
-  private async apply(events: BridgeEvent[]): Promise<void> {
+  /** Apply a batch of normalized events to the writer, strictly in order. */
+  async apply(events: NormalizedEvent[]): Promise<void> {
     const messageId = this.messageId;
     if (messageId === null) {
       return; // beginTurn not called: nothing to write to
@@ -193,8 +142,8 @@ export class RunManager {
       return;
     }
     this.turnActive = false;
-    // The error string (if any) was buffered from message.final; on a clean
-    // turn it is null. lifecycle:error finalizes with both partial text + error.
+    // The error string (if any) was buffered from message.final; on a clean turn
+    // it is null. lifecycle:error finalizes with both partial text + error.
     await this.writer.finalize(
       messageId,
       status,

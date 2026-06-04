@@ -181,15 +181,80 @@ tsc+build+tests-verified but NOT browser-confirmed. Verify, in dev (:5174):
 - Theme tab Filtres showcase renders in light+dark.
 - **Global search (topbar ⌘K)**: ⌘K/Ctrl-K opens; type ≥2 chars → results; ↑↓ moves highlight, Enter opens the chat, Esc closes; clicking a result deep-links `/chat/$chatId`; title-match rows tagged "Titre" vs message rows tagged "Message" with a snippet; seed a chat with known keywords (`convex/dev.ts` seedChat) and confirm a body-text term surfaces it; centered trigger doesn't overlap brand/UserMenu; renders light+dark; narrow width collapses the trigger to icon-only.
 
-### 5.2 THE major milestone — Bridge worker → OpenClaw gateway (NOT built)
-A Node/TS worker (`bridge/`, drafts + proven `bridge/src/normalizer.ts` = 23 tests)
-that: holds the OpenClaw operator WS; runs the normalizer (streaming transducer);
-consumes the Convex `outbox` (sends land as `failed` today — no live gateway);
-POSTs normalized events to `POST /bridge/ingest` (Bearer `BRIDGE_INGEST_SECRET`,
-constant-time compare → `internal.stream.*`); implements **`POST /query`** (for
-`/api/v1/openclaw/query`, env `BRIDGE_URL` + `BRIDGE_SHARED_SECRET`); and writes the
-OpenClaw **runId back onto the outbox row** to close M8 (end-to-end correlationId).
-`BRIDGE_PROTOCOL.md` = the normalized-events contract. This unblocks real chatting.
+### 5.2 THE major milestone — Bridge worker → modular multi-provider/multi-tenant
+**DESIGNED (2026-06-03), Phase-0 decisions CONFIRMED, NOT yet built.** The
+`bridge-design` dynamic workflow (16 agents) produced three authoritative docs —
+read these FIRST before any bridge work:
+- **`docs/BRIDGE_ARCHITECTURE.md`** — the `BridgeProvider` seam (OpenClaw + Hermes
+  adapters around the normalized vocabulary), one-connection-per-instance
+  multiplexing, the data model + secret-store reconciliation, streaming scope.
+- **`docs/OPENCLAW_RESEARCH.md`** — grounded research: OpenClaw IS real
+  (`github.com/openclaw/openclaw`, tag **v2026.5.19** verified, docs at
+  `docs.openclaw.ai` + in-repo `gateway/protocol.md` v4). HONESTY record: the
+  in-repo normalizer + 12 fixtures WIN over the public doc where they diverge
+  (the `agent` event family, the `state=delta|final` turn-end machine, the webchat
+  sessionKey grammar are fixture-only; the `agent:<id>:subagent:<uuid>` grammar is
+  **NOT FOUND** in primary sources → OpenClaw `capabilities.subagents=false` until confirmed).
+- **`docs/BRIDGE_IMPLEMENTATION_PLAN.md`** — phased build plan (P1 pure refactor →
+  P7 streaming), requirement→phase→gate map. **Phase 0 CONFIRMED: A2 / B1 / C1.**
+
+**Confirmed decisions (irreversible):**
+- **A2 streaming** — Convex stays the SOLE browser transport; decouple by making
+  persistence cheap: stream into an **un-indexed live field**, reconcile into the
+  searchable `messages.text` at finalize. Kills the per-flush amplifiers (O(n²)
+  text rewrite + **search-index reindex** + `listByChat` recompute) WITHOUT an
+  SSE-per-turn. NB: today the bridge ALREADY coalesces deltas (~50ms,
+  `convex-writer.ts`); the problem was display-path == persistence-path, not per-token.
+  **A2 was re-challenged (user asked: why not Vercel AI SDK?) and SETTLED — keep
+  A2 + assistant-ui, HIGH confidence** (`docs/AISDK_VS_A2_DECISION.md`, 22-agent
+  workflow + lead re-verification): AI SDK UI `ChatTransport` has exactly 2
+  client-trigger methods, **zero server-push** (verbatim `ai@6.0.196` + beta) →
+  structurally can't carry a post-turn-emitting gateway; transport vs render are
+  separable so "switch to AI SDK" is a false binary (the familiarity win is
+  reachable at the render layer via `@assistant-ui/react-ai-sdk` without ceding
+  transport = the documented "hybrid" escape valve). Flip condition: a future AI
+  SDK true server-initiated push/subscribe transport + a Convex-backed impl.
+- **B1 schema** — new `agents` + `userAgents` tables (M:N, shared, reverse lookup);
+  `profiles.allowedInstances` array; `profiles.defaultAgentId` **pointer** (one
+  default unrepresentable-to-break); `agents.subagents` array; instance/agent/subagent
+  **snapshot fields on `chats`** (pin-at-creation → new-chat instance picker when
+  `allowedInstances.length>1`); optional `instances.provider` (default "openclaw").
+  All EXISTING-table deltas OPTIONAL.
+- **C1 secret store** — mounted secrets file (e.g. `/etc/openclaw-bridge/secrets.json`,
+  0400) behind `SecretStore.getGroup(name)`; Image #22 JSON generalized per provider;
+  `groups.<name> == instances.name` is the ONLY non-secret token crossing to Convex;
+  fs.watch hot-reload; bootstrap secrets stay in env; vault = later loader swap.
+
+**Red-team must-fix carried into the build (do NOT regress):** (1) outbound media =
+bridge uploads bytes → Convex File Storage → `messageParts.storageId`; NO OpenClaw fs
+path crosses into Convex; (2) subagent sessionKey grammar = NOT FOUND → don't fabricate;
+(3) ONE agent-resolution precedence folded into `routing.ts` (don't duplicate
+override/group); (4) new-chat instance picker query projects ONLY `{name,displayName}`
+for non-admins (no `gatewayUrl`/`publicUrl` to the browser); (5) `verboseFullApplied`
+becomes per-sessionKey before one-connection-per-instance fan-out.
+
+**Phase 1 DONE (2026-06-04) — provider seam extracted, pure refactor.** New layout:
+`bridge/src/core/{events,provider,turn-sink}.ts` + `bridge/src/providers/openclaw/
+{openclaw-client,normalizer,sanitize,session-keys,run-manager}.ts`. The monolithic
+`RunManager` was split: the OpenClaw **driver** (`providers/openclaw/run-manager.ts`
+= Normalizer + TurnSink, unchanged public API used by `session.ts` + tests) and the
+provider-agnostic **`TurnSink`** (`core/turn-sink.ts` = the `apply()` switch +
+finalize buffer → ConvexWriter). The 7 `EVENT_*` constants + `NormalizedEvent`/
+`BridgeEvent` moved to `core/events.ts` (re-exported from the normalizer for
+back-compat). `core/provider.ts` = the `BridgeProvider` interface (P1 contract; the
+OpenClaw adapter implementing it = P2). Added `bridge/vitest.config.ts` (node env) —
+the bridge had none, so `npm test` was silently picking the root edge-runtime config.
+**Gate met:** bridge tsc 0; **31/31 bridge tests byte-green** (23 normalizer + 8
+run-manager = zero behavior change); tsc src+convex 0; root vitest 97; mcp 36; `core/`
+imports zero OpenClaw code. `git mv` preserved history (staged, NOT committed — user commits).
+
+**Next build step = Phase 2** (highest risk): `providers/openclaw/adapter.ts`
+implementing `BridgeProvider` + `core/registry.ts` keyed by INSTANCE (not chat) +
+one-connection-per-instance multiplex (`Map<sessionKey, ChatTurnState>`, fan-out by
+`payload.sessionKey`) + the consume-loop min-deadline generalization + the
+`verboseFullApplied` boolean→per-sessionKey Set fix. `BRIDGE_PROTOCOL.md`
+normalized-events section = STILL the contract; its Firebase/browser-WS/signed-media
+sections are STALE (superseded by the Convex design).
 
 ### 5.3 Documented deferrals (do when relevant)
 - **M8** end-to-end correlationId (outbox↔runId) — needs the bridge.

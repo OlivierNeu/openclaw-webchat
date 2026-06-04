@@ -23,7 +23,7 @@ import {
   PRIVATE_ACK_GRACE,
   Normalizer,
   type BridgeEvent,
-} from "../src/normalizer.js";
+} from "../src/providers/openclaw/normalizer.js";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 

@@ -33,15 +33,30 @@
  */
 
 import { MediaConfigurationError, sanitizeFrame, sanitizeText } from "./sanitize.js";
+import {
+  EVENT_OPENCLAW_FRAME,
+  EVENT_MESSAGE_DELTA,
+  EVENT_MESSAGE_SNAPSHOT,
+  EVENT_MESSAGE_FINAL,
+  EVENT_RUN_STATUS,
+  EVENT_TOOL_STATUS,
+  EVENT_MEDIA,
+  type BridgeEvent,
+} from "../../core/events.js";
 
-// --- Stable bridge event types (browser-facing contract) ---------------------
-export const EVENT_OPENCLAW_FRAME = "openclaw.frame"; // deprecated raw passthrough
-export const EVENT_MESSAGE_DELTA = "message.delta"; // append `text` to the streaming reply
-export const EVENT_MESSAGE_SNAPSHOT = "message.snapshot"; // replace the streaming reply with `text`
-export const EVENT_MESSAGE_FINAL = "message.final"; // the turn's authoritative final `text`
-export const EVENT_RUN_STATUS = "run.status"; // {status, runId}
-export const EVENT_TOOL_STATUS = "tool.status"; // {name, phase, runId}
-export const EVENT_MEDIA = "media"; // {items: [{filename, path}]}
+// The normalized event vocabulary now lives in core/events.ts (the shared
+// provider contract). Re-export it from the OpenClaw normalizer so existing
+// importers reading it off this module keep working unchanged.
+export {
+  EVENT_OPENCLAW_FRAME,
+  EVENT_MESSAGE_DELTA,
+  EVENT_MESSAGE_SNAPSHOT,
+  EVENT_MESSAGE_FINAL,
+  EVENT_RUN_STATUS,
+  EVENT_TOOL_STATUS,
+  EVENT_MEDIA,
+};
+export type { BridgeEvent };
 
 // --- Timing (seconds), absolute deadlines, mirror the OWUI pipe ---------------
 export const BASE_RECV_TIMEOUT = 180.0; // max gap between frames during an active turn
@@ -76,8 +91,7 @@ const PRIVATE_ACK_RE =
   /^\s*(?:envoy[éè]+|message\s+envoy[éè]+|r[éè]ponse\s+envoy[éè]+|done|ok|fait)(?:\s+dans\s+le\s+(?:canal|webchat)[^.\n]*)?[\s.!…]*$/iu;
 
 // --- Event & frame typing ----------------------------------------------------
-
-export type BridgeEvent = Record<string, unknown> & { type: string };
+// (BridgeEvent is imported from core/events.ts and re-exported above.)
 
 type Json = unknown;
 type JsonObject = Record<string, Json>;
