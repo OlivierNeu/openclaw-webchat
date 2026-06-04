@@ -1,7 +1,7 @@
 import { useMemo, useState } from "react";
 import { useMutation, useQuery } from "convex/react";
+import { useNavigate, useSearch } from "@tanstack/react-router";
 import { api } from "./convexApi";
-import { ThemeShowroom } from "./ThemeShowroom";
 import { Input } from "@/components/ui/input";
 import {
   Select,
@@ -12,23 +12,25 @@ import {
 } from "@/components/ui/select";
 import { DataTableShell } from "./admin/DataTableShell";
 import { EntitySheet } from "./admin/EntitySheet";
-import { ServiceAccountsTab } from "./admin/ServiceAccountsTab";
-import { RolesTab } from "./admin/RolesTab";
-import { TracesTab } from "./admin/TracesTab";
-import { KpiTab } from "./admin/KpiTab";
-import { AnomaliesTab } from "./admin/AnomaliesTab";
-import { IntegrationsTab } from "./admin/IntegrationsTab";
-import { ToastProvider, useToast } from "@/components/ui/toast";
+import { useToast } from "@/components/ui/toast";
 import { FilterBar } from "./admin/filters/FilterBar";
 import { AdvancedFilter } from "./admin/filters/AdvancedFilter";
 import { useResolvedRange } from "./admin/filters/TimeRangePicker";
 import type { Predicate, TimeRange } from "./admin/filters/types";
+import {
+  decodeRange,
+  encodeRange,
+  encodeAdv,
+  parseAdv,
+  DEFAULT_FROM,
+  DEFAULT_TO,
+} from "@/lib/routing/searchSchemas";
 
 // Default relative window for the time-ranged admin tabs (audit). Wide (30d) so
 // older/seeded rows surface on load — audit previously had NO time filter, so a
 // narrow default would hide rows older than it within the bounded window.
 // Re-resolves to NOW via useResolvedRange so the subscription stays current.
-const DEFAULT_RANGE: TimeRange = { kind: "relative", from: "now-30d", to: "now" };
+const DEFAULT_RANGE: TimeRange = { kind: "relative", from: DEFAULT_FROM, to: DEFAULT_TO };
 
 // A "select all" sentinel for the quick <Select>s (radix Select has no empty
 // value), mapped back to `undefined` (no filter) when building the query arg.
@@ -36,11 +38,16 @@ const ALL = "__all__";
 
 // Admin-only settings surface (rendered only when me.role === "admin"; every
 // underlying Convex function also enforces requireAdmin server-side, so this UI
-// is a convenience, not the security boundary). Tabs: Users (roles + approval +
-// per-user routing), Groups (valves), Instances (non-secret meta), Theme
-// (component showroom for the active design tokens).
+// is a convenience, not the security boundary). The shell (header + tab nav +
+// admin guard + ToastProvider) lives in the router's settings-layout route
+// (src/router.tsx); each tab below is mounted by its own route. `TABS` is the
+// single source of truth the router and the nav both read.
 
-const TABS = [
+// Tab order = nav order. The router declares one STATIC route per FILTERED tab
+// (its own typed search schema) and one shared `$tab` route for the paramless
+// tabs (roles/integrations/instances/theme) — but the user-facing URL is always
+// `/settings/<tab>`, and this tuple is what both sides validate against.
+export const TABS = [
   "users",
   "groups",
   "instances",
@@ -53,11 +60,16 @@ const TABS = [
   "theme",
   "audit",
 ] as const;
-type Tab = (typeof TABS)[number];
+export type Tab = (typeof TABS)[number];
+
+// The four tabs that carry NO search params — they ride the shared
+// `/settings/$tab` route in the router.
+export const PARAMLESS_TABS = ["roles", "integrations", "instances", "theme"] as const;
+export type ParamlessTab = (typeof PARAMLESS_TABS)[number];
 
 // FR labels for tabs whose raw key isn't a clean capitalized word. Tabs absent
 // from this map fall back to the CSS text-transform: capitalize on the raw key.
-const TAB_LABELS: Partial<Record<Tab, string>> = {
+export const TAB_LABELS: Partial<Record<Tab, string>> = {
   serviceAccounts: "Comptes de service",
   roles: "Rôles",
   traces: "Traces",
@@ -66,53 +78,17 @@ const TAB_LABELS: Partial<Record<Tab, string>> = {
   integrations: "Intégrations",
 };
 
-export function AdminSettings() {
-  const [tab, setTab] = useState<Tab>("users");
-  return (
-    // ToastProvider mounted here (not at App root, which is out of this pass's
-    // edit scope): every error-surfacing call site is a child of AdminSettings,
-    // so one provider here covers all admin-tab mutations.
-    <ToastProvider>
-    <div className="oc-admin">
-      <header className="oc-admin__header">
-        <h1>Settings</h1>
-        <nav className="oc-admin__tabs">
-          {TABS.map((t) => (
-            <button
-              key={t}
-              className={
-                "oc-admin__tab" +
-                (tab === t ? " is-active" : "") +
-                (TAB_LABELS[t] ? " oc-admin__tab--labeled" : "")
-              }
-              onClick={() => setTab(t)}
-            >
-              {TAB_LABELS[t] ?? t}
-            </button>
-          ))}
-        </nav>
-      </header>
-      <div className="oc-admin__body">
-        {tab === "users" ? <UsersTab /> : null}
-        {tab === "groups" ? <GroupsTab /> : null}
-        {tab === "instances" ? <InstancesTab /> : null}
-        {tab === "serviceAccounts" ? <ServiceAccountsTab /> : null}
-        {tab === "roles" ? <RolesTab /> : null}
-        {tab === "traces" ? <TracesTab /> : null}
-        {tab === "kpi" ? <KpiTab /> : null}
-        {tab === "anomalies" ? <AnomaliesTab /> : null}
-        {tab === "integrations" ? <IntegrationsTab /> : null}
-        {tab === "theme" ? <ThemeShowroom /> : null}
-        {tab === "audit" ? <AuditTab /> : null}
-      </div>
-    </div>
-    </ToastProvider>
-  );
-}
-
-function UsersTab() {
-  const [q, setQ] = useState("");
-  const [role, setRoleFilter] = useState<string>(ALL);
+export function UsersTab() {
+  const search = useSearch({ from: "/settings/users" });
+  const navigate = useNavigate({ from: "/settings/users" });
+  const q = search.q ?? "";
+  const role = search.role ?? ALL;
+  // `q` is debounced by FilterBar then committed here with replace (no history
+  // spam while typing); quick selects push (Back restores the prior filter).
+  const setQ = (v: string) =>
+    void navigate({ search: (p) => ({ ...p, q: v || undefined }), replace: true });
+  const setRoleFilter = (v: string) =>
+    void navigate({ search: (p) => ({ ...p, role: v === ALL ? undefined : v }) });
 
   const users = useQuery(api.admin.listUsers, {
     filter: {
@@ -138,8 +114,7 @@ function UsersTab() {
 
   const active = q !== "" || role !== ALL;
   function reset() {
-    setQ("");
-    setRoleFilter(ALL);
+    void navigate({ search: {}, replace: true });
   }
 
   // M5: setRole can be REFUSED server-side (e.g. "cannot demote the last
@@ -307,9 +282,18 @@ const EMPTY_GROUP: GroupForm = {
   sharedAgentId: "",
 };
 
-function GroupsTab() {
-  const [q, setQ] = useState("");
-  const [mode, setMode] = useState<string>(ALL);
+export function GroupsTab() {
+  const search = useSearch({ from: "/settings/groups" });
+  const navigate = useNavigate({ from: "/settings/groups" });
+  const q = search.q ?? "";
+  const mode = search.mode ?? ALL;
+  const setQ = (v: string) =>
+    void navigate({ search: (p) => ({ ...p, q: v || undefined }), replace: true });
+  const setMode = (v: string) =>
+    void navigate({
+      search: (p) => ({ ...p, mode: v === ALL ? undefined : (v as "per-user" | "shared") }),
+    });
+
   const groups = useQuery(api.admin.listGroups, {
     filter: {
       q: q || undefined,
@@ -324,8 +308,7 @@ function GroupsTab() {
 
   const active = q !== "" || mode !== ALL;
   function reset() {
-    setQ("");
-    setMode(ALL);
+    void navigate({ search: {}, replace: true });
   }
 
   async function submit() {
@@ -459,7 +442,7 @@ function GroupsTab() {
 type InstanceForm = { name: string; gatewayUrl: string; displayName: string };
 const EMPTY_INSTANCE: InstanceForm = { name: "", gatewayUrl: "", displayName: "" };
 
-function InstancesTab() {
+export function InstancesTab() {
   const instances = useQuery(api.admin.listInstances, {});
   const upsert = useMutation(api.admin.upsertInstance);
   const del = useMutation(api.admin.deleteInstance);
@@ -574,14 +557,36 @@ const AUDIT_ADV_FIELDS = [
   { value: "resourceId", label: "id ressource" },
 ];
 
-function AuditTab() {
-  const [q, setQ] = useState("");
-  const [action, setAction] = useState<string>(ALL);
-  const [impersonated, setImpersonated] = useState<string>(ALL);
-  const [resource, setResource] = useState<string>(ALL);
-  const [range, setRange] = useState<TimeRange>(DEFAULT_RANGE);
-  const [advanced, setAdvanced] = useState<Predicate[]>([]);
+export function AuditTab() {
+  const search = useSearch({ from: "/settings/audit" });
+  const navigate = useNavigate({ from: "/settings/audit" });
+
+  const q = search.q ?? "";
+  const action = search.action ?? ALL;
+  const impersonated = search.impersonated ?? ALL; // "yes" | "no" | ALL
+  const resource = search.resource ?? ALL;
+  // URL stores time-range TOKENS; resolve to live epoch ms at component level.
+  const range = decodeRange(search.from, search.to);
+  const advanced = useMemo(() => parseAdv(search.adv), [search.adv]);
   const { from, to } = useResolvedRange(range);
+
+  const setQ = (v: string) =>
+    void navigate({ search: (p) => ({ ...p, q: v || undefined }), replace: true });
+  const setAction = (v: string) =>
+    void navigate({ search: (p) => ({ ...p, action: v === ALL ? undefined : v }) });
+  const setImpersonated = (v: string) =>
+    void navigate({
+      search: (p) => ({ ...p, impersonated: v === ALL ? undefined : (v as "yes" | "no") }),
+    });
+  const setResource = (v: string) =>
+    void navigate({ search: (p) => ({ ...p, resource: v === ALL ? undefined : v }) });
+  const setRange = (r: TimeRange) =>
+    void navigate({ search: (p) => ({ ...p, ...encodeRange(r) }) });
+  // AdvancedFilter emits on EVERY keystroke → replace (no per-keystroke history
+  // / subscription spam). It does not emit on mount, so a loaded URL `adv` is
+  // not clobbered.
+  const setAdvanced = (preds: Predicate[]) =>
+    void navigate({ search: (p) => ({ ...p, adv: encodeAdv(preds) }), replace: true });
 
   const rows = useQuery(api.admin.listAudit, {
     filter: {
@@ -616,12 +621,7 @@ function AuditTab() {
     range.kind !== "relative" ||
     range.from !== DEFAULT_RANGE.from;
   function reset() {
-    setQ("");
-    setAction(ALL);
-    setImpersonated(ALL);
-    setResource(ALL);
-    setRange(DEFAULT_RANGE);
-    setAdvanced([]);
+    void navigate({ search: {}, replace: true });
   }
 
   return (
@@ -680,7 +680,11 @@ function AuditTab() {
           </SelectContent>
         </Select>
       </FilterBar>
-      <AdvancedFilter fields={AUDIT_ADV_FIELDS} onChange={setAdvanced} />
+      <AdvancedFilter
+        fields={AUDIT_ADV_FIELDS}
+        seed={advanced}
+        onChange={setAdvanced}
+      />
       <DataTableShell
         title="Audit"
         rows={rows}

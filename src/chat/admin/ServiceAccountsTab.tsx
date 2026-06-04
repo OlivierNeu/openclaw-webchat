@@ -1,5 +1,6 @@
 import { useMemo, useRef, useState } from "react";
 import { useAction, useMutation, useQuery } from "convex/react";
+import { useNavigate, useSearch } from "@tanstack/react-router";
 import { Check, ChevronDown, ChevronRight, Copy } from "lucide-react";
 import { api } from "../convexApi";
 import type { Id } from "../convexApi";
@@ -84,9 +85,20 @@ type AccountForm = { name: string; roleKey: string; description: string };
 const EMPTY_ACCOUNT: AccountForm = { name: "", roleKey: "", description: "" };
 
 export function ServiceAccountsTab() {
-  const [q, setQ] = useState("");
+  const search = useSearch({ from: "/settings/serviceAccounts" });
+  const navigate = useNavigate({ from: "/settings/serviceAccounts" });
+  const q = search.q ?? "";
+  const statusFilter = search.status ?? ALL;
+  // `roleFilter` is NOT in the URL contract (§3.4 table lists only q + status)
+  // — kept as a client-only ephemeral. Still passed to the query.
   const [roleFilter, setRoleFilter] = useState<string>(ALL);
-  const [statusFilter, setStatusFilter] = useState<string>(ALL);
+
+  const setQ = (v: string) =>
+    void navigate({ search: (p) => ({ ...p, q: v || undefined }), replace: true });
+  const setStatusFilter = (v: string) =>
+    void navigate({
+      search: (p) => ({ ...p, status: v === ALL ? undefined : (v as "active" | "disabled") }),
+    });
 
   const accounts = useQuery(api.apiKeys.listServiceAccounts, {
     filter: {
@@ -111,9 +123,8 @@ export function ServiceAccountsTab() {
 
   const filtersActive = q !== "" || roleFilter !== ALL || statusFilter !== ALL;
   function resetFilters() {
-    setQ("");
     setRoleFilter(ALL);
-    setStatusFilter(ALL);
+    void navigate({ search: {}, replace: true });
   }
 
   const [sheetOpen, setSheetOpen] = useState(false);

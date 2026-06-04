@@ -1,11 +1,13 @@
 import { useMemo, useState } from "react";
 import { useMutation, useQuery } from "convex/react";
+import { useNavigate, useSearch } from "@tanstack/react-router";
 import { api } from "../convexApi";
 import type { Id } from "../convexApi";
 import { DataTableShell } from "./DataTableShell";
 import { FilterBar } from "./filters/FilterBar";
 import { useResolvedRange } from "./filters/TimeRangePicker";
 import type { TimeRange } from "./filters/types";
+import { decodeRange, encodeRange } from "@/lib/routing/searchSchemas";
 import { useConfirm } from "@/components/ConfirmDialog";
 import { useToast } from "@/components/ui/toast";
 import { Badge } from "@/components/ui/badge";
@@ -63,15 +65,45 @@ const DEFAULT_RANGE: TimeRange = { kind: "relative", from: "now-30d", to: "now" 
 
 const LIST_LIMIT = 200;
 
+// The URL `status` token "all" displays as the ALL sentinel in the Select and
+// maps to NO `anomalyStatus` arg (all statuses). The default token is "open".
+const STATUS_ALL = "all";
+
 export function AnomaliesTab() {
-  const [q, setQ] = useState("");
-  // Default to "open" (mirrors the previous default view).
-  const [anomalyStatus, setAnomalyStatus] = useState<string>("open");
-  const [severity, setSeverity] = useState<string>(ALL);
+  const search = useSearch({ from: "/settings/anomalies" });
+  const navigate = useNavigate({ from: "/settings/anomalies" });
+
+  const q = search.q ?? "";
+  // URL token "all" → ALL sentinel for the Select; default "open".
+  const anomalyStatus = search.status === STATUS_ALL ? ALL : search.status;
+  const severity = search.severity ?? ALL;
+  const kind = search.kind ?? ALL;
+  // `source` is NOT in the URL contract (§3.4 table) — kept as a client-only
+  // ephemeral, like serviceAccounts' role filter. Still passed to the query.
   const [source, setSource] = useState<string>(ALL);
-  const [kind, setKind] = useState<string>(ALL);
-  const [range, setRange] = useState<TimeRange>(DEFAULT_RANGE);
+  // URL stores time-range TOKENS; resolve to live epoch ms at component level.
+  const range = decodeRange(search.from, search.to);
   const { from, to } = useResolvedRange(range);
+
+  const setQ = (v: string) =>
+    void navigate({ search: (p) => ({ ...p, q: v || undefined }), replace: true });
+  // The Select's ALL sentinel maps to the URL token "all" (explicit, so the
+  // default open-only view is preserved and degrades safely).
+  const setAnomalyStatus = (v: string) =>
+    void navigate({
+      search: (p) => ({
+        ...p,
+        status: v === ALL ? STATUS_ALL : (v as "open" | "acknowledged" | "resolved"),
+      }),
+    });
+  const setSeverity = (v: string) =>
+    void navigate({
+      search: (p) => ({ ...p, severity: v === ALL ? undefined : (v as "info" | "warn" | "critical") }),
+    });
+  const setKind = (v: string) =>
+    void navigate({ search: (p) => ({ ...p, kind: v === ALL ? undefined : v }) });
+  const setRange = (r: TimeRange) =>
+    void navigate({ search: (p) => ({ ...p, ...encodeRange(r) }) });
 
   const confirm = useConfirm();
   const toast = useToast();
@@ -83,7 +115,8 @@ export function AnomaliesTab() {
       q: q || undefined,
       from,
       to,
-      // The backend status filter key for anomalies is `anomalyStatus`.
+      // The backend status filter key for anomalies is `anomalyStatus`. The
+      // ALL sentinel (URL token "all") maps to undefined (all statuses).
       anomalyStatus: anomalyStatus === ALL ? undefined : anomalyStatus,
       severity: severity === ALL ? undefined : severity,
       source: source === ALL ? undefined : source,
@@ -107,12 +140,10 @@ export function AnomaliesTab() {
     range.kind !== "relative" ||
     range.from !== DEFAULT_RANGE.from;
   function resetFilters() {
-    setQ("");
-    setAnomalyStatus("open");
-    setSeverity(ALL);
+    // Reset to schema defaults. `status` has a non-optional output type (zod
+    // default "open"), so it must be set explicitly; the rest drop to undefined.
     setSource(ALL);
-    setKind(ALL);
-    setRange(DEFAULT_RANGE);
+    void navigate({ search: { status: "open" }, replace: true });
   }
 
   async function resolve(row: AnomalyView) {

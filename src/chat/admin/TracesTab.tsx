@@ -1,5 +1,6 @@
 import { useMemo, useState } from "react";
 import { useQuery } from "convex/react";
+import { useNavigate, useSearch } from "@tanstack/react-router";
 import { X } from "lucide-react";
 import { api } from "../convexApi";
 import type { Id } from "../convexApi";
@@ -8,6 +9,12 @@ import { FilterBar } from "./filters/FilterBar";
 import { AdvancedFilter } from "./filters/AdvancedFilter";
 import { useResolvedRange } from "./filters/TimeRangePicker";
 import type { Predicate, TimeRange } from "./filters/types";
+import {
+  decodeRange,
+  encodeRange,
+  encodeAdv,
+  parseAdv,
+} from "@/lib/routing/searchSchemas";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import {
@@ -91,27 +98,65 @@ const TRACES_ADV_FIELDS = [
 ];
 
 export function TracesTab() {
-  const [limit, setLimit] = useState<LimitValue>(100);
-  const [kind, setKind] = useState<string>(ALL_KINDS);
-  // Active "follow a turn" filter (client-side, over the unfiltered window).
-  const [followCorr, setFollowCorr] = useState<string | null>(null);
-  // The row whose `meta` JSON is open in the shared Dialog.
-  const [metaRow, setMetaRow] = useState<TraceEventView | null>(null);
+  const search = useSearch({ from: "/settings/traces" });
+  const navigate = useNavigate({ from: "/settings/traces" });
 
-  // New quick filters + time range + advanced predicates. These ride the
-  // `filter` arg passed ONLY to the `filtered` query (NOT the unfiltered one,
-  // which must stay filter-free so the kind/role option lists don't collapse
-  // and a followed correlationId turn still shows whole).
-  const [q, setQ] = useState("");
+  // `limit` + `kind` are TOP-LEVEL query args (not inside `filter`).
+  const limit = search.limit as LimitValue;
+  const kind = search.kind;
   // Named *Filter to avoid shadowing the module-level statusClass() helper that
   // colors the status column (a bare `statusClass` would no longer be callable).
-  const [statusClassFilter, setStatusClassFilter] = useState<string>(ALL);
-  const [principalType, setPrincipalType] = useState<string>(ALL);
-  const [direction, setDirection] = useState<string>(ALL);
-  const [roleKey, setRoleKey] = useState<string>(ALL);
-  const [range, setRange] = useState<TimeRange>(DEFAULT_RANGE);
-  const [advanced, setAdvanced] = useState<Predicate[]>([]);
+  const statusClassFilter = search.statusClass ?? ALL;
+  const principalType = search.principalType ?? ALL;
+  const direction = search.direction ?? ALL;
+  const roleKey = search.roleKey ?? ALL;
+  const q = search.q ?? "";
+  // URL stores time-range TOKENS; resolve to live epoch ms at component level.
+  const range = decodeRange(search.from, search.to);
+  const advanced = useMemo(() => parseAdv(search.adv), [search.adv]);
   const { from, to } = useResolvedRange(range);
+
+  // Active "follow a turn" filter (client-only ephemeral, over the unfiltered
+  // window). The open `meta` row is also client-only. Both intentionally STAY
+  // in useState (losing them on refresh is acceptable).
+  const [followCorr, setFollowCorr] = useState<string | null>(null);
+  const [metaRow, setMetaRow] = useState<TraceEventView | null>(null);
+
+  const setLimit = (v: LimitValue) =>
+    void navigate({ search: (p) => ({ ...p, limit: v }) });
+  const setKind = (v: string) =>
+    void navigate({ search: (p) => ({ ...p, kind: v }) });
+  const setQ = (v: string) =>
+    void navigate({ search: (p) => ({ ...p, q: v || undefined }), replace: true });
+  const setStatusClassFilter = (v: string) =>
+    void navigate({
+      search: (p) => ({
+        ...p,
+        statusClass: v === ALL ? undefined : (v as "2xx" | "4xx" | "5xx"),
+      }),
+    });
+  const setPrincipalType = (v: string) =>
+    void navigate({
+      search: (p) => ({
+        ...p,
+        principalType: v === ALL ? undefined : (v as "user" | "service" | "system"),
+      }),
+    });
+  const setDirection = (v: string) =>
+    void navigate({
+      search: (p) => ({
+        ...p,
+        direction: v === ALL ? undefined : (v as "inbound" | "outbound" | "internal"),
+      }),
+    });
+  const setRoleKey = (v: string) =>
+    void navigate({ search: (p) => ({ ...p, roleKey: v === ALL ? undefined : v }) });
+  const setRange = (r: TimeRange) =>
+    void navigate({ search: (p) => ({ ...p, ...encodeRange(r) }) });
+  // AdvancedFilter emits on EVERY keystroke → replace (no history/subscription
+  // spam). It does not emit on mount, so a loaded URL `adv` is not clobbered.
+  const setAdvanced = (preds: Predicate[]) =>
+    void navigate({ search: (p) => ({ ...p, adv: encodeAdv(preds) }), replace: true });
 
   // Option list + correlation base: never kind- nor filter-narrowed (see note).
   const unfiltered = useQuery(api.observability.listEvents, { limit }) as
@@ -163,13 +208,10 @@ export function TracesTab() {
     range.kind !== "relative" ||
     range.from !== DEFAULT_RANGE.from;
   function resetFilters() {
-    setQ("");
-    setStatusClassFilter(ALL);
-    setPrincipalType(ALL);
-    setDirection(ALL);
-    setRoleKey(ALL);
-    setRange(DEFAULT_RANGE);
-    setAdvanced([]);
+    // Reset to the schema defaults. `limit`/`kind` have non-optional output
+    // types (zod defaults), so they must be set explicitly here; every other
+    // field drops to undefined (its default).
+    void navigate({ search: { limit: 100, kind: "all" }, replace: true });
   }
 
   // Following a correlationId wins over the kind filter: it reads from the
@@ -283,7 +325,11 @@ export function TracesTab() {
         </Select>
       </FilterBar>
 
-      <AdvancedFilter fields={TRACES_ADV_FIELDS} onChange={setAdvanced} />
+      <AdvancedFilter
+        fields={TRACES_ADV_FIELDS}
+        seed={advanced}
+        onChange={setAdvanced}
+      />
 
       {followCorr ? (
         <div className="oc-traces__followline">

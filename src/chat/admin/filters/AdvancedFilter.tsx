@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useRef, useState } from "react";
 import { ChevronDown, Plus, X } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -41,16 +41,44 @@ function newRow(): DraftRow {
   return { id: nextId++, field: "", op: "eq", value: "" };
 }
 
+// Build the initial draft rows from a seed predicate list (e.g. restored from
+// the URL on refresh). The predicate `value` is already a typed primitive, so
+// stringify it for the value <Input>. An empty seed yields no rows.
+function seedRows(seed: Predicate[]): DraftRow[] {
+  return seed.map((p) => ({
+    id: nextId++,
+    field: p.field,
+    op: p.op,
+    value: String(p.value),
+  }));
+}
+
 export function AdvancedFilter({
   fields,
+  seed,
   onChange,
 }: {
   fields: AdvancedField[];
+  /**
+   * Optional initial predicate list (e.g. restored from the URL). Seeds the
+   * builder ONCE on mount so a deep-linked/refreshed advanced filter shows its
+   * rows. Subsequent edits are owned by local draft state — `seed` is not a
+   * controlled value (intentional: the builder keeps half-built rows the URL
+   * never sees).
+   */
+  seed?: Predicate[];
   /** Emits the coerced, ANDed predicate list (complete rows only). */
   onChange: (predicates: Predicate[]) => void;
 }) {
-  const [open, setOpen] = useState(false);
-  const [rows, setRows] = useState<DraftRow[]>([]);
+  // Seed only on the first render (ref guard) — never re-clobber local edits
+  // when the parent re-renders with the same (or echoed) predicate list.
+  const seedRef = useRef(seed);
+  const hasSeed = Boolean(seedRef.current && seedRef.current.length > 0);
+  // Auto-expand when seeded so a restored/deep-linked advanced filter is visible.
+  const [open, setOpen] = useState(hasSeed);
+  const [rows, setRows] = useState<DraftRow[]>(() =>
+    hasSeed ? seedRows(seedRef.current!) : [],
+  );
 
   function emit(next: DraftRow[]) {
     const predicates: Predicate[] = next

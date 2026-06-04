@@ -1,5 +1,6 @@
-import { useMemo, useState } from "react";
+import { useMemo } from "react";
 import { useQuery } from "convex/react";
+import { useNavigate, useSearch } from "@tanstack/react-router";
 import { api } from "../convexApi";
 import type { Id } from "../convexApi";
 import {
@@ -7,6 +8,12 @@ import {
   useResolvedRange,
 } from "./filters/TimeRangePicker";
 import type { TimeRange } from "./filters/types";
+import {
+  decodeRange,
+  encodeRange,
+  KPI_DEFAULT_FROM,
+  DEFAULT_TO,
+} from "@/lib/routing/searchSchemas";
 import {
   Card,
   CardContent,
@@ -89,8 +96,8 @@ const GROUP_ORDER: MetricGroup[] = ["API", "OpenClaw", "Chat", "Assistant"];
 const MAX_ROW_LIMIT = 1000;
 const MS_PER_HOUR = 3_600_000;
 
-// Default window: live "last 24h". Re-resolves to NOW via useResolvedRange.
-const DEFAULT_RANGE: TimeRange = { kind: "relative", from: "now-24h", to: "now" };
+// Default window: live "last 24h" (KPI_DEFAULT_FROM in searchSchemas).
+// Re-resolves to NOW via useResolvedRange.
 
 // Derive a backend ROW limit + a bucket count from a resolved ms range. The
 // number of hour buckets spanned drives the row limit (× metric count); both
@@ -111,7 +118,13 @@ function rangeToLimits(from: number, to: number): {
 type Point = { bucket: string; value: number };
 
 export function KpiTab() {
-  const [range, setRange] = useState<TimeRange>(DEFAULT_RANGE);
+  const search = useSearch({ from: "/settings/kpi" });
+  const navigate = useNavigate({ from: "/settings/kpi" });
+  // URL stores time-range TOKENS; resolve to live epoch ms at component level.
+  // KPI's default window is the tighter live "last 24h".
+  const range = decodeRange(search.from, search.to, KPI_DEFAULT_FROM, DEFAULT_TO);
+  const setRange = (r: TimeRange) =>
+    void navigate({ search: (p) => ({ ...p, ...encodeRange(r) }) });
   const { from, to } = useResolvedRange(range);
   const { rowLimit, buckets } = rangeToLimits(from, to);
 
