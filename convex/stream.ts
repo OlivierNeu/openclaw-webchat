@@ -117,8 +117,10 @@ export const startAssistant = internalMutation({
   },
 });
 
-// Append incremental text (message.delta). Patch is the reactive primitive:
-// the subscribed `listByChat` re-runs and assistant-ui re-renders.
+// Append incremental text (message.delta). A2: patch the UN-INDEXED `liveText`,
+// NOT `text` — the per-flush patch is still the reactive primitive (listByChat
+// re-runs, assistant-ui re-renders token-by-token) but it no longer re-indexes
+// the `text` search index every flush. `text` is written once at finalize.
 export const appendDelta = internalMutation({
   args: {
     messageId: v.id("messages"),
@@ -130,13 +132,13 @@ export const appendDelta = internalMutation({
       throw new Error("appendDelta: message not found");
     }
     await ctx.db.patch(messageId, {
-      text: message.text + text,
+      liveText: (message.liveText ?? "") + text,
       updatedAt: Date.now(),
     });
   },
 });
 
-// Replace the full text (message.snapshot).
+// Replace the full streaming text (message.snapshot). A2: into `liveText`.
 export const setSnapshot = internalMutation({
   args: {
     messageId: v.id("messages"),
@@ -147,7 +149,7 @@ export const setSnapshot = internalMutation({
     if (message === null) {
       throw new Error("setSnapshot: message not found");
     }
-    await ctx.db.patch(messageId, { text, updatedAt: Date.now() });
+    await ctx.db.patch(messageId, { liveText: text, updatedAt: Date.now() });
   },
 });
 
@@ -198,15 +200,21 @@ export const finalize = internalMutation({
     if (message === null) {
       throw new Error("finalize: message not found");
     }
+    // A2: write the authoritative final text into the searchable/indexed `text`
+    // ONCE here, and CLEAR `liveText` (so listByChat now reads `text`). Prefer the
+    // normalizer's final text; fall back to whatever streamed into `liveText` (so
+    // a final with no explicit text never wipes a streamed reply).
+    const finalText =
+      text !== undefined && text !== "" ? text : (message.liveText ?? message.text);
     await ctx.db.patch(messageId, {
       status,
-      ...(text !== undefined ? { text } : {}),
+      text: finalText,
+      liveText: undefined, // clear the live field (optional → field removed)
       ...(error !== undefined ? { error } : {}),
       updatedAt: Date.now(),
     });
-    // The finalized text length (final authoritative text if supplied, else the
-    // accumulated message text) — never the text itself.
-    const finalLen = (text ?? message.text).length;
+    // The finalized text length — never the text itself.
+    const finalLen = finalText.length;
     await traceStream(ctx, {
       phase: "finalize",
       chatId: message.chatId,

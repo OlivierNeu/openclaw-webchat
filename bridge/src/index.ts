@@ -8,6 +8,7 @@
 
 import { loadConfig } from "./config.js";
 import { HttpConvexWriter } from "./convex-writer.js";
+import { LocalDirMediaFetcher } from "./core/media-fetcher.js";
 import { SessionRegistry } from "./session.js";
 import { createBridgeServer } from "./server.js";
 
@@ -15,9 +16,17 @@ function main(): void {
   // Fail fast on missing/invalid env before opening any socket.
   const config = loadConfig();
 
+  // Outbound media is read from the gateway's `media/outbound` dir mounted into
+  // the bridge (`:ro` in prod, a synced/SSHFS dir in dev) — there is no remote
+  // media RPC on the gateway (see core/media-fetcher.ts).
+  const mediaFetcher = new LocalDirMediaFetcher({
+    baseDir: config.mediaOutboundDir,
+    maxBytes: config.mediaMaxBytes,
+  });
   const writer = new HttpConvexWriter({
     convexHttpActionsUrl: config.convexHttpActionsUrl,
     ingestSecret: config.convexIngestSecret,
+    mediaFetcher,
   });
   const registry = new SessionRegistry(config, writer);
   const server = createBridgeServer({ config, registry });

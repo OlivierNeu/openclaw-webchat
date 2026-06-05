@@ -13,6 +13,9 @@
 // records the calls. Keeping media resolution behind the interface means the
 // fake records `addMedia` without touching the filesystem or Convex storage.
 
+import { Readable } from "node:stream";
+import type { MediaFetcher } from "./core/media-fetcher.js";
+
 /** Mirrors convex/schema.ts messagePart `tool` variant. */
 export interface ToolPart {
   kind: "tool";
@@ -68,12 +71,18 @@ type IngestOp =
   | { op: "appendDelta"; messageId: string; text: string }
   | { op: "setSnapshot"; messageId: string; text: string }
   | { op: "addPart"; messageId: string; part: ToolPart }
+  // Outbound media is a 3-step, base64-free flow (Convex upload URL pattern):
+  //   1. getUploadUrl -> Convex `ctx.storage.generateUploadUrl()` (no size limit)
+  //   2. the bridge STREAMS the raw file bytes straight to that URL (not an ingest
+  //      op — a direct binary POST; the server-side fs path NEVER reaches Convex)
+  //   3. addMediaPart -> persist the returned storageId as a kind:media part
+  | { op: "getUploadUrl" }
   | {
-      op: "addMedia";
+      op: "addMediaPart";
       messageId: string;
+      storageId: string;
       filename: string;
-      path: string;
-      mimeType: string | null;
+      mimeType: string;
     }
   | {
       op: "finalize";
@@ -92,6 +101,13 @@ export interface HttpConvexWriterOptions {
   deltaFlushMs?: number;
   /** Injected fetch (defaults to global fetch); lets tests stub the network. */
   fetchImpl?: typeof fetch;
+  /**
+   * Resolves an outbound media path to bytes (see core/media-fetcher.ts). When
+   * absent, `addMedia` is a no-op: the turn still streams text/tools, but no
+   * attachment part is created (logged once). This is the OpenClaw/Hermes media
+   * seam — the writer never knows HOW bytes are obtained.
+   */
+  mediaFetcher?: MediaFetcher;
 }
 
 const INGEST_PATH = "/bridge/ingest";
@@ -109,6 +125,10 @@ export class HttpConvexWriter implements ConvexWriter {
   private readonly ingestSecret: string;
   private readonly deltaFlushMs: number;
   private readonly fetchImpl: typeof fetch;
+  private readonly mediaFetcher?: MediaFetcher;
+  // Warn once (not per attachment) when media arrives without a configured
+  // fetcher, so a misconfigured deployment is visible without log spam.
+  private warnedNoFetcher = false;
 
   // Per-message pending delta buffer + its flush timer.
   private pendingDelta = new Map<string, string>();
@@ -123,6 +143,7 @@ export class HttpConvexWriter implements ConvexWriter {
     this.ingestSecret = opts.ingestSecret;
     this.deltaFlushMs = opts.deltaFlushMs ?? 50;
     this.fetchImpl = opts.fetchImpl ?? fetch;
+    this.mediaFetcher = opts.mediaFetcher;
   }
 
   /** Enqueue an op on the serialization chain; resolves with its result. */
@@ -207,17 +228,81 @@ export class HttpConvexWriter implements ConvexWriter {
     messageId: string,
     media: { filename: string; path: string; mimeType?: string },
   ): Promise<void> {
-    await this.flushDelta(messageId);
-    // The ingest httpAction fetches the bytes for `path` and stores them in
-    // Convex storage (it holds the OpenClaw media credentials), then inserts a
-    // media part. The bridge never sees a signed URL.
-    await this.post({
-      op: "addMedia",
-      messageId,
-      filename: media.filename,
-      path: media.path,
-      mimeType: media.mimeType ?? null,
-    });
+    await this.flushDelta(messageId); // ordering: drain deltas before the part
+    if (!this.mediaFetcher) {
+      if (!this.warnedNoFetcher) {
+        this.warnedNoFetcher = true;
+        console.warn(
+          "[media] no MediaFetcher configured -> outbound attachments are dropped",
+        );
+      }
+      return;
+    }
+    // Best-effort: an attachment failure must NEVER abort the assistant turn —
+    // the text + tool parts still land; only the attachment is skipped (logged).
+    try {
+      // The bridge STREAMS the raw bytes (no base64, no full buffer) directly to
+      // a Convex upload URL — sidesteps the 20MB httpAction ceiling and the ~33%
+      // base64 inflation. The server-side fs path stays inside the bridge.
+      const opened = await this.mediaFetcher.open(media.path);
+      if (!opened) {
+        return; // missing/too-large/escaping — already logged by the fetcher
+      }
+      const mimeType = media.mimeType ?? opened.mimeType;
+      const { uploadUrl } = await this.post<{ uploadUrl: string }>({
+        op: "getUploadUrl",
+      });
+      const storageId = await this.streamToUploadUrl(
+        uploadUrl,
+        opened.stream,
+        mimeType,
+      );
+      await this.post({
+        op: "addMediaPart",
+        messageId,
+        storageId,
+        filename: media.filename,
+        mimeType,
+      });
+    } catch (err) {
+      // Structural only (never the bytes/content). Filename hints at content, so
+      // log just the failure class.
+      console.warn(
+        `[media] attachment skipped: ${err instanceof Error ? err.message : String(err)}`,
+      );
+    }
+  }
+
+  /**
+   * POST a raw byte stream to a Convex upload URL and return the storageId. The
+   * URL is pre-signed (generateUploadUrl) so no auth header is sent; the body is
+   * the file's web ReadableStream with `duplex: "half"` (required by undici for
+   * a streaming request body), so bytes flow disk -> network without buffering.
+   */
+  private async streamToUploadUrl(
+    uploadUrl: string,
+    stream: Readable,
+    mimeType: string,
+  ): Promise<string> {
+    const response = await this.fetchImpl(uploadUrl, {
+      method: "POST",
+      headers: { "Content-Type": mimeType },
+      body: Readable.toWeb(stream) as ReadableStream,
+      // `duplex` is not in the DOM RequestInit type but is required by undici
+      // for a streaming body; cast keeps the rest of the init type-checked.
+      duplex: "half",
+    } as RequestInit & { duplex: "half" });
+    if (!response.ok) {
+      const detail = await response.text().catch(() => "");
+      throw new Error(
+        `upload POST -> HTTP ${response.status}${detail ? `: ${detail}` : ""}`,
+      );
+    }
+    const body = (await response.json()) as { storageId?: string };
+    if (!body.storageId) {
+      throw new Error("upload POST returned no storageId");
+    }
+    return body.storageId;
   }
 
   async finalize(

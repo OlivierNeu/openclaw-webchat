@@ -7,19 +7,26 @@
 // playable inline. Images render inline; everything else becomes a download
 // link. assistant-ui routes `file` content parts to this component.
 
+// assistant-ui renders a `file` content part as `<File {...part} />` (the part
+// fields are SPREAD as props, NOT wrapped in `{part}` — same contract as
+// ToolCard). So we destructure the fields directly; reading `part.mimeType` off
+// a non-existent `part` prop is what crashed the message render before.
 interface FileContentPartProps {
-  part: {
-    type: "file";
-    mimeType?: string;
-    data: string; // resolved URL
-    filename?: string;
-  };
+  type?: "file";
+  mimeType?: string;
+  data?: string; // resolved Convex storage URL
+  filename?: string;
 }
 
-export function MediaPart({ part }: FileContentPartProps) {
-  const mime = part.mimeType ?? "";
-  const url = part.data;
-  const name = part.filename ?? "attachment";
+export function MediaPart({ mimeType, data, filename }: FileContentPartProps) {
+  const mime = mimeType ?? "";
+  const url = data ?? "";
+  const name = filename ?? "attachment";
+  // Defensive: a file part with no resolved URL renders nothing rather than a
+  // broken link (e.g. storage URL not yet available).
+  if (!url) {
+    return null;
+  }
 
   if (mime.startsWith("audio/")) {
     return (

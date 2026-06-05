@@ -1,5 +1,13 @@
 # Deployment
 
+> **ARCHITECTURE NOTE (2026-06):** Modes A/B and the original "Media Volume"
+> section below describe the **LEGACY** backend (Firebase frontend + FastAPI
+> signed-media `/api/media/outbound`). The project has since migrated to
+> **Convex (self-hosted) + the `bridge/` service**. For the CURRENT outbound-media
+> share (the bridge reads `media/outbound` from a `:ro` mount and STREAMS bytes to
+> Convex — no signed URLs, no base64), see **"Current architecture: media share"**
+> at the end of this doc + `bridge/docker-compose.yml` + `docs/MEDIA_TRANSFER_DESIGN.md`.
+
 The project supports two first-class deployment modes.
 
 ## Mode A: Firebase Frontend + Synology Backend
@@ -135,6 +143,64 @@ Caveats:
 
 If you cannot share a directory across instances, do not rely on local-FS media
 serving for a multi-instance deployment.
+
+## Current architecture: media share (bridge → Convex, streaming)
+
+The current bridge does NOT serve signed media URLs. For an outbound attachment
+it (1) reads the agent-produced file from a **read-only mount** of OpenClaw's
+`media/outbound`, and (2) **streams the raw bytes** to a Convex upload URL
+(`generateUploadUrl`), persisting the `storageId` as a `kind:media` part. No
+base64, no size ceiling (see `docs/MEDIA_TRANSFER_DESIGN.md`).
+
+So the only deployment requirement is: **the bridge and every OpenClaw container
+share the same `media/outbound` directory, mounted read-only into the bridge** at
+`OPENCLAW_MEDIA_OUTBOUND_DIR` (default `/home/node/.openclaw/media/outbound`).
+`bridge/docker-compose.yml` is the reference. OpenClaw's `<name>---<uuid>.<ext>`
+filenames are UUID-suffixed, so the single shared flat dir has no collisions.
+
+### NAS (production) — co-located, shared named volume
+OpenClaw, self-hosted Convex and the bridge run in the same compose. The OpenClaw
+service mounts the shared volume read-WRITE; the bridge mounts it read-only:
+
+```yaml
+# openclaw service:
+volumes: [ media-outbound:/home/node/.openclaw/media/outbound ]
+# bridge service (bridge/docker-compose.yml):
+volumes: [ media-outbound:/home/node/.openclaw/media/outbound:ro ]
+volumes: { media-outbound: {} }   # ONE volume shared by all OpenClaw instances
+```
+
+Validate on the NAS: ask the agent (via the webchat) to produce a file → it must
+render as a downloadable attachment whose bytes match. Re-run per OpenClaw
+version (the dev/regression bench is the **olivier** instance; **jerome** is
+protected).
+
+### Local dev — two options
+The bridge runs on the Mac (`npm start`) against a gateway. To read real agent
+files locally you need the gateway's `media/outbound` reachable as a local dir:
+
+- **(a) Co-located local OpenClaw** (matches NAS): run OpenClaw + bridge in a
+  local compose sharing the `media-outbound` volume (cleanest, faithful).
+- **(b) Mount the remote gateway dir** when using the remote olivier gateway from
+  the Mac bench:
+  ```bash
+  sshfs <user>@<gateway-host>:/home/node/.openclaw/media/outbound /tmp/oc-media
+  # then in bridge/.env:
+  OPENCLAW_MEDIA_OUTBOUND_DIR=/tmp/oc-media
+  ```
+  (rsync into a local dir on a timer also works.) Then trigger a real agent file
+  and confirm it renders byte-exact in the webchat.
+
+If neither is set up, the bridge logs `[media] skip <file>: not found` and the
+turn still streams text/tools — only the attachment is missing.
+
+> **Container → host gotcha (local docker only):** if you run the bridge *in a
+> container* against a Convex running on the host (`npx convex dev` on
+> 127.0.0.1:3213), set `CONVEX_HTTP_ACTIONS_URL=http://host.docker.internal:3213`
+> — inside a container `127.0.0.1` is the container itself. On the NAS, Convex is
+> a compose service reachable by name (e.g. `http://convex-backend:3211`), so this
+> only affects local docker testing. (Running the bridge as a plain `npm start`
+> node process on the Mac needs no change.)
 
 ## Production Checklist
 

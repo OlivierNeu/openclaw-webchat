@@ -4,6 +4,8 @@ import {
   MessagePrimitive,
   ThreadPrimitive,
 } from "@assistant-ui/react";
+import { useQuery, useMutation } from "convex/react";
+import { api } from "./convexApi";
 import type { ConvexId } from "./convexTypes";
 import { useConvexChatRuntime } from "./useConvexChatRuntime";
 import { RunStatus } from "./RunStatus";
@@ -21,12 +23,19 @@ export interface ConvexChatProps {
 
 export function ConvexChat({ chatId }: ConvexChatProps) {
   const runtime = useConvexChatRuntime({ chatId });
+  // Per-user "show tool cards" preference (reactive). Absent => shown.
+  const me = useQuery(api.me.getMe);
+  const showTools = me?.showTools ?? true;
+  const setShowTools = useMutation(api.me.setShowTools);
 
   return (
     <AssistantRuntimeProvider runtime={runtime}>
-      <div className="oc-chat">
+      <div className={`oc-chat${showTools ? "" : " oc-hide-tools"}`}>
         {chatId ? (
-          <ChatThread />
+          <ChatThread
+            showTools={showTools}
+            onToggleTools={() => void setShowTools({ show: !showTools })}
+          />
         ) : (
           <div className="oc-empty">Select or create a chat to begin.</div>
         )}
@@ -35,7 +44,13 @@ export function ConvexChat({ chatId }: ConvexChatProps) {
   );
 }
 
-function ChatThread() {
+function ChatThread({
+  showTools,
+  onToggleTools,
+}: {
+  showTools: boolean;
+  onToggleTools: () => void;
+}) {
   return (
     <ThreadPrimitive.Root className="oc-thread">
       <ThreadPrimitive.Viewport className="oc-thread__viewport">
@@ -47,7 +62,7 @@ function ChatThread() {
           }}
         />
       </ThreadPrimitive.Viewport>
-      <Composer />
+      <Composer showTools={showTools} onToggleTools={onToggleTools} />
     </ThreadPrimitive.Root>
   );
 }
@@ -114,9 +129,28 @@ function SystemMessage() {
   );
 }
 
-function Composer() {
+function Composer({
+  showTools,
+  onToggleTools,
+}: {
+  showTools: boolean;
+  onToggleTools: () => void;
+}) {
   return (
     <ComposerPrimitive.Root className="oc-composer">
+      <button
+        type="button"
+        className={`oc-composer__toolstoggle${showTools ? " is-on" : ""}`}
+        onClick={onToggleTools}
+        aria-pressed={showTools}
+        title={
+          showTools
+            ? "Masquer les outils exécutés par OpenClaw"
+            : "Afficher les outils exécutés par OpenClaw"
+        }
+      >
+        🔧 {showTools ? "Outils" : "Outils masqués"}
+      </button>
       <ComposerPrimitive.Attachments components={{}} />
       <ComposerPrimitive.AddAttachment className="oc-composer__attach">
         Attach

@@ -16,6 +16,21 @@ function assertDev() {
   }
 }
 
+// SAFETY (red-team must-fix): live tests hit ONLY the olivier DEV instance
+// ("admin"/gateway.lacneu.com) — NEVER jerome ("family"/ataraxis, the protected
+// instance). Code-enforced, not just prose: routeUser + testSend refuse any
+// instance outside this allowlist so no autonomous live test can reach prod.
+const DEV_LIVE_ALLOWED_INSTANCES = new Set(["admin"]);
+function assertDevInstance(instanceName: string): void {
+  if (!DEV_LIVE_ALLOWED_INSTANCES.has(instanceName)) {
+    throw new Error(
+      `dev live ops restricted to [${[...DEV_LIVE_ALLOWED_INSTANCES].join(
+        ", ",
+      )}] — refusing "${instanceName}" (never touch jerome/family)`,
+    );
+  }
+}
+
 // Wipe app data (NOT the @convex-dev/auth tables, except we clear profiles so
 // role bootstrap restarts cleanly). Used to reset local state between manual
 // tests so the next sign-in deterministically becomes the bootstrap admin.
@@ -291,6 +306,7 @@ export const routeUser = mutation({
   },
   handler: async (ctx, { instanceName, gatewayUrl, agentId, canonical, email }) => {
     assertDev();
+    assertDevInstance(instanceName); // never route a profile to jerome/family
 
     // Upsert the non-secret instance row (name == secret-store group key).
     const existing = await ctx.db
@@ -358,32 +374,40 @@ export const testSend = mutation({
   handler: async (ctx, { text, chatId }) => {
     assertDev();
 
-    // The live-test user = the routed profile (per-user override set by routeUser).
+    // Resolve the sending user: if a chatId is given, send as THAT chat's owner
+    // (so the harness can drive any conversation); otherwise pick a routed profile.
     const profiles = await ctx.db.query("profiles").take(500);
-    const owner =
-      profiles.find((p) => p.overrideInstance) ??
-      profiles.find((p) => p.role === "admin") ??
-      profiles[0];
+    let owner: (typeof profiles)[number] | undefined;
+    if (chatId) {
+      const chat = await ctx.db.get(chatId);
+      if (!chat) return { ok: false as const, reason: "chat not found" };
+      owner = profiles.find((p) => p.userId === chat.userId);
+      if (!owner) return { ok: false as const, reason: "chat owner has no profile" };
+    } else {
+      owner =
+        profiles.find((p) => p.overrideInstance) ??
+        profiles.find((p) => p.role === "admin") ??
+        profiles[0];
+    }
     if (!owner) return { ok: false as const, reason: "no routed profile" };
+    // SAFETY: only fire a live send for a user routed to an allowlisted dev
+    // instance — never let a stray routing reach jerome/family.
+    if (!owner.overrideInstance) {
+      return { ok: false as const, reason: "test user not routed (run dev.routeUser first)" };
+    }
+    assertDevInstance(owner.overrideInstance);
     const userId = owner.userId;
     const now = Date.now();
 
-    let cid: Id<"chats">;
-    if (chatId) {
-      const chat = await ctx.db.get(chatId);
-      if (!chat || chat.userId !== userId) {
-        return { ok: false as const, reason: "chat not owned by test user" };
-      }
-      cid = chatId;
-    } else {
-      cid = await ctx.db.insert("chats", {
+    const cid: Id<"chats"> =
+      chatId ??
+      (await ctx.db.insert("chats", {
         userId,
         title: "Live test",
         archived: false,
         sortKey: -1000,
         updatedAt: now,
-      });
-    }
+      }));
 
     // Mirror send.sendMessage: optimistic user message + outbox + dispatch.
     const messageId = await ctx.db.insert("messages", {
@@ -408,6 +432,118 @@ export const testSend = mutation({
     await ctx.scheduler.runAfter(0, internal.bridge.dispatch, { outboxId });
 
     return { ok: true as const, chatId: cid, messageId, outboxId };
+  },
+});
+
+/**
+ * LIVE-HARNESS ORACLE (dev-gated, read-only). Clean view of a chat's latest
+ * messages + their part kinds/names + A2 text/liveText lengths — the
+ * deterministic check the live matrix polls (avoids parsing `convex data` column
+ * output).
+ *
+ *   npx convex run dev:inspectChat '{"chatId":"<id>"}'
+ */
+export const inspectChat = query({
+  args: { chatId: v.id("chats") },
+  handler: async (ctx, { chatId }) => {
+    assertDev();
+    const msgs = await ctx.db
+      .query("messages")
+      .withIndex("by_chat", (q) => q.eq("chatId", chatId))
+      .order("desc")
+      .take(6);
+    const out = [];
+    for (const m of msgs) {
+      const parts = await ctx.db
+        .query("messageParts")
+        .withIndex("by_message", (q) => q.eq("messageId", m._id))
+        .collect();
+      out.push({
+        role: m.role,
+        status: m.status,
+        textLen: m.text.length,
+        liveTextLen: (m.liveText ?? "").length,
+        textPreview: m.text.slice(0, 80),
+        parts: parts.map((p) => ({
+          kind: p.part.kind,
+          name: "name" in p.part ? p.part.name : undefined,
+          phase: "phase" in p.part ? p.part.phase : undefined,
+        })),
+      });
+    }
+    return out.reverse();
+  },
+});
+
+/**
+ * Resolve the MOST RECENT media attachment in a chat to {filename, mimeType,
+ * url} + dedup signals. Used by the per-version file-exchange smoke test to
+ * byte-compare the served bytes against the source file and assert exactly one
+ * media part + no dead link. Dev-gated like the rest of this module.
+ *   npx convex run dev:lastMediaPart '{"chatId":"<id>"}'
+ */
+export const lastMediaPart = query({
+  args: { chatId: v.id("chats") },
+  handler: async (ctx, { chatId }) => {
+    assertDev();
+    const msgs = await ctx.db
+      .query("messages")
+      .withIndex("by_chat", (q) => q.eq("chatId", chatId))
+      .order("desc")
+      .take(8);
+    for (const m of msgs) {
+      const parts = await ctx.db
+        .query("messageParts")
+        .withIndex("by_message", (q) => q.eq("messageId", m._id))
+        .collect();
+      const media = [...parts].reverse().find((p) => p.part.kind === "media");
+      if (media && media.part.kind === "media") {
+        return {
+          filename: media.part.filename,
+          mimeType: media.part.mimeType,
+          url: await ctx.storage.getUrl(media.part.storageId),
+          // Terminal status of the turn that produced this attachment — used by
+          // the stability test to count complete vs error turns per version.
+          status: m.status,
+          // dedup check (must be 1) + dead-link check (must be false).
+          mediaCount: parts.filter((p) => p.part.kind === "media").length,
+          textHasDeadLink:
+            m.text.includes("](./media/") || m.text.includes("MEDIA:"),
+        };
+      }
+    }
+    return null;
+  },
+});
+
+/**
+ * Last message's role/status/creationTime — used by the stability test to detect
+ * a NEW assistant turn finalizing (complete/error) regardless of whether it
+ * produced an attachment, so it measures app-server stability (the
+ * "codex app-server client closed" irritation) rather than agent MEDIA: compliance.
+ *   npx convex run dev:chatStats '{"chatId":"<id>"}'
+ */
+export const chatStats = query({
+  args: { chatId: v.id("chats") },
+  handler: async (ctx, { chatId }) => {
+    assertDev();
+    const last = await ctx.db
+      .query("messages")
+      .withIndex("by_chat", (q) => q.eq("chatId", chatId))
+      .order("desc")
+      .take(1);
+    const m = last[0];
+    return m
+      ? {
+          lastRole: m.role,
+          lastStatus: m.status,
+          lastCreated: m._creationTime,
+          // System error string (e.g. "codex app-server client closed before
+          // turn completed") — non-PHI, lets the stability test classify the
+          // irritation. Truncated.
+          lastError: m.error ? m.error.slice(0, 100) : undefined,
+        }
+      : null;
   },
 });
 

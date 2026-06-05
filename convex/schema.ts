@@ -86,6 +86,10 @@ export default defineSchema({
     ),
     themeName: v.optional(v.string()),
 
+    // Per-user chat preference: show OpenClaw tool-execution cards in the thread.
+    // Toggled from the chat surface. OPTIONAL (additive); absent => shown (true).
+    showTools: v.optional(v.boolean()),
+
     // --- Routing (valves) ---------------------------------------------------
     // Group membership drives routing by default (see `groups`). A per-user
     // OVERRIDE wins over the group when set.
@@ -215,6 +219,14 @@ export default defineSchema({
       v.literal("aborted"),
     ),
     text: v.string(),
+    // A2 streaming (decision A2): during a turn, token deltas are patched into
+    // this UN-INDEXED live field — NOT into `text` — so each ~50ms flush does NOT
+    // re-index the search index (the per-flush reindex amplifier). At finalize the
+    // authoritative text is written ONCE into the searchable `text` and `liveText`
+    // is cleared. `listByChat` returns `liveText` while streaming, `text` when done,
+    // so the browser streams token-by-token with no frontend change and `text`
+    // stays the single searchable/durable copy. OPTIONAL (additive on existing rows).
+    liveText: v.optional(v.string()),
     error: v.optional(v.string()),
     updatedAt: v.number(),
   })

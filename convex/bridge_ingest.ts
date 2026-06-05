@@ -84,12 +84,17 @@ type IngestOp =
   | { op: "appendDelta"; messageId: string; text: string }
   | { op: "setSnapshot"; messageId: string; text: string }
   | { op: "addPart"; messageId: string; part: Record<string, unknown> }
+  // Outbound media (base64-free, no size ceiling): the bridge asks for an upload
+  // URL, STREAMS the raw bytes straight to it (a direct binary POST, NOT through
+  // this endpoint — the 20MB httpAction limit never applies), then persists the
+  // returned storageId. The server-side fs path is NEVER sent to Convex.
+  | { op: "getUploadUrl" }
   | {
-      op: "addMedia";
+      op: "addMediaPart";
       messageId: string;
+      storageId: string;
       filename: string;
-      path: string;
-      mimeType: string | null;
+      mimeType: string;
     }
   | {
       op: "finalize";
@@ -200,38 +205,29 @@ export const ingest = httpAction(async (ctx, request) => {
       });
       return json({ ok: true });
     }
-    case "addMedia": {
-      // Fetch the bytes from the OpenClaw media origin and store them in Convex
-      // storage, then insert the media part. OPENCLAW_MEDIA_BASE_URL is set on
-      // the deployment env; `path` is the outbound absolute path the normalizer
-      // surfaced (already validated against traversal).
-      const base = (process.env.OPENCLAW_MEDIA_BASE_URL ?? "").replace(/\/$/, "");
-      if (!base) {
-        await traceIngest(ctx, {
-          kind: "openclaw.ingest",
-          status: 500,
-          correlationId: body.messageId,
-          meta: { op: body.op, messageId: body.messageId, ok: false },
-        });
-        return json({ ok: false, error: "media not configured" }, 500);
-      }
-      const res = await fetch(`${base}${body.path}`);
-      if (!res.ok) {
-        await traceIngest(ctx, {
-          kind: "openclaw.ingest",
-          status: 502,
-          correlationId: body.messageId,
-          meta: { op: body.op, messageId: body.messageId, ok: false },
-        });
-        return json({ ok: false, error: `media fetch ${res.status}` }, 502);
-      }
-      const mimeType =
-        body.mimeType ?? res.headers.get("content-type") ?? "application/octet-stream";
-      const blob = await res.blob();
-      const storageId = await ctx.storage.store(blob);
+    case "getUploadUrl": {
+      // A short-lived URL the bridge POSTs raw file bytes to (no size limit,
+      // no base64). Returned to the bridge, never persisted.
+      const uploadUrl = await ctx.storage.generateUploadUrl();
+      await traceIngest(ctx, {
+        kind: "openclaw.ingest",
+        meta: { op: body.op, ok: true },
+      });
+      return json({ uploadUrl });
+    }
+    case "addMediaPart": {
+      // The bytes are already in storage (streamed straight to the upload URL);
+      // persist the storageId as a media part. mimeType is a content-type label
+      // (non-PHI); filename/content are NOT logged.
+      const mimeType = body.mimeType || "application/octet-stream";
       await ctx.runMutation(internal.stream.addPart, {
         messageId: body.messageId as Id<"messages">,
-        part: { kind: "media", storageId, filename: body.filename, mimeType },
+        part: {
+          kind: "media",
+          storageId: body.storageId as Id<"_storage">,
+          filename: body.filename,
+          mimeType,
+        },
       });
       await traceIngest(ctx, {
         kind: "openclaw.ingest",
@@ -240,8 +236,6 @@ export const ingest = httpAction(async (ctx, request) => {
           op: body.op,
           messageId: body.messageId,
           partKind: "media",
-          // mimeType is a content-type label (non-PHI). filename/path are NOT
-          // logged (a filename can hint at content).
           mimeType,
           ok: true,
         },

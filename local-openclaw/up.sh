@@ -1,0 +1,60 @@
+#!/usr/bin/env bash
+# Bring up the ephemeral local OpenClaw gateway, then auto-pair the bridge device.
+#   ./up.sh                 # default version (2026.5.19)
+#   OPENCLAW_VERSION=2026.6.1 ./up.sh
+# Idempotent-ish: re-running reuses the existing token (./.token).
+set -euo pipefail
+cd "$(dirname "$0")"
+
+# 1) Fresh token (reused across up/down of the same run; reset.sh clears it).
+if [[ ! -f .token ]]; then openssl rand -hex 32 > .token; fi
+export OPENCLAW_GATEWAY_TOKEN="$(cat .token)"
+
+# 2) local.env must exist (model keys / agent overrides — may be empty).
+[[ -f local.env ]] || cp local.env.example local.env
+
+# 3) Shared media dir (host bind read by a Mac bridge).
+mkdir -p media-outbound
+
+echo "▶ starting oc-local-gateway (OpenClaw ${OPENCLAW_VERSION:-2026.5.19}) …"
+docker compose up -d
+
+echo "▶ waiting for gateway health …"
+until [[ "$(curl -s -o /dev/null -w '%{http_code}' --max-time 3 http://127.0.0.1:${OPENCLAW_LOCAL_PORT:-18789}/health 2>/dev/null)" == "200" ]]; do
+  sleep 2
+done
+echo "✅ gateway healthy on :${OPENCLAW_LOCAL_PORT:-18789}"
+
+# 4) CODEX HARNESS MODE (optional): if you have a local codex login + the seed,
+# inject them so the agent runs on your ChatGPT subscription (no OpenAI API auth,
+# no pay-per-token). The reorder wrapper is already bind-mounted via compose.
+CODEX_AUTH="${CODEX_AUTH_FILE:-$HOME/.codex/auth.json}"
+if [[ -f "$CODEX_AUTH" && -f seed/openclaw.json ]]; then
+  echo "▶ enabling codex harness mode (reusing $CODEX_AUTH) …"
+  docker cp seed/openclaw.json oc-local-gateway:/home/node/.openclaw/openclaw.json
+  docker exec oc-local-gateway sh -c 'mkdir -p /home/node/.openclaw/.codex'
+  docker cp "$CODEX_AUTH" oc-local-gateway:/home/node/.openclaw/.codex/auth.json
+  docker exec -u root oc-local-gateway chown -R node:node \
+    /home/node/.openclaw/openclaw.json /home/node/.openclaw/.codex 2>/dev/null || true
+  docker restart oc-local-gateway >/dev/null
+  echo "▶ waiting for reconfigured gateway …"
+  until [[ "$(curl -s -o /dev/null -w '%{http_code}' --max-time 3 http://127.0.0.1:${OPENCLAW_LOCAL_PORT:-18789}/health 2>/dev/null)" == "200" ]]; do sleep 2; done
+  echo "✅ codex harness ready (agent: olivier, model: openai/gpt-5.5 on your subscription)"
+else
+  echo "ℹ codex auth or seed missing → gateway stays unconfigured (no agent turns; media-share still testable)."
+fi
+
+# 5) Auto-pair the bridge's device (token auth still needs device approval).
+./pair.sh
+
+cat <<EOF
+
+✅ Local OpenClaw ready. To run the bridge against it:
+   cd ../bridge && OPENCLAW_GATEWAY_URL=ws://127.0.0.1:${OPENCLAW_LOCAL_PORT:-18789} \\
+     OPENCLAW_TOKEN=$(cat .token) \\
+     OPENCLAW_MEDIA_OUTBOUND_DIR=$(pwd)/media-outbound \\
+     node dist/index.js
+   (or pass the same overrides to npm start)
+
+Token: ./.token   |   Shared media: ./media-outbound   |   Stop: ./down.sh   |   Wipe: ./reset.sh
+EOF

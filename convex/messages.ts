@@ -108,7 +108,14 @@ export const listByChat = query({
           role: message.role,
           status: message.status,
           runId: message.runId,
-          text: message.text,
+          // A2 streaming: while streaming, the live tokens are in the un-indexed
+          // `liveText`; at finalize the authoritative copy is in `text` and
+          // `liveText` is cleared. Surface one `text` the client renders verbatim
+          // (token-by-token live, then final) — no frontend change needed.
+          text:
+            message.status === "streaming"
+              ? (message.liveText ?? message.text)
+              : message.text,
           error: message.error,
           updatedAt: message.updatedAt,
           parts,

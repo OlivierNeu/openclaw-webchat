@@ -284,14 +284,74 @@ describe("media", () => {
     ]);
   });
 
-  it("media directive converted, no local path leaks", () => {
+  it("media directive: emits a media part + drops the directive line (no dead link)", () => {
     const { events } = drive("media-directive", { advanceToFinalize: true });
     const text = finalText(events);
     expect(text).not.toBeNull();
     // The raw /home/node path must never reach the browser.
     expect(text!).not.toContain("/home/node/.openclaw");
-    // The MEDIA: directive becomes a markdown link to the filename.
-    expect(text!).toContain("[r.pdf](");
+    // The MEDIA: directive line is DROPPED (no dead `./media/` markdown link —
+    // the attachment is the canonical media part); surrounding prose is kept.
+    expect(text!).not.toContain("MEDIA:");
+    expect(text!).not.toContain("](./media/");
+    expect(text!).toContain("voir");
+    expect(text!).toContain("fin");
+    // It IS surfaced as a real downloadable attachment.
+    expect(mediaItems(events).map((i) => i.filename)).toContain("r.pdf");
+  });
+
+  it("exec tool result: outbound path embedded in multi-line stdout emits a media item", () => {
+    // The write-md-file skill (and any `exec`-produced file) surfaces its path
+    // ONLY as a "MEDIA:/home/node/.../outbound/<f>" line inside the tool RESULT
+    // -- never as a `mediaUrls` array nor in the visible reply. Before the fix,
+    // collectMedia required each candidate to BE a bare path, so a path buried in
+    // multi-line stdout was dropped and the attachment never reached the webchat.
+    const normalizer = newNormalizer();
+    const clock = new Clock();
+    const events: BridgeEvent[] = [];
+    normalizer.beginTurn(clock.now);
+    normalizer.noteRunStarted(OWN_RUN, clock.now);
+    const result =
+      "+ ./write.sh fruits\nwrote 3 lines\n" +
+      "MEDIA:/home/node/.openclaw/media/outbound/fruits---f998f47f.md\n" +
+      // A traversal path and an inbound path in the same transcript must NOT leak:
+      "note /home/node/.openclaw/media/outbound/../secret.pdf\n" +
+      "src /home/node/.openclaw/media/inbound/x.pdf\nexit 0";
+    events.push(
+      ...normalizer.feed(
+        {
+          event: "agent",
+          payload: {
+            sessionKey: SESSION_KEY,
+            runId: OWN_RUN,
+            stream: "tool",
+            data: { name: "exec", phase: "result", toolCallId: "tc-exec-1", result },
+          },
+        },
+        clock.tick(),
+      ),
+    );
+    events.push(
+      ...normalizer.feed(
+        {
+          event: "agent",
+          payload: {
+            sessionKey: SESSION_KEY,
+            runId: OWN_RUN,
+            stream: "lifecycle",
+            data: { phase: "end" },
+          },
+        },
+        clock.tick(),
+      ),
+    );
+    // Only the valid outbound path is emitted; traversal + inbound are rejected.
+    expect(mediaItems(events)).toEqual([
+      {
+        filename: "fruits---f998f47f.md",
+        path: "/home/node/.openclaw/media/outbound/fruits---f998f47f.md",
+      },
+    ]);
   });
 });
 

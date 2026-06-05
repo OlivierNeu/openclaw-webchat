@@ -35,6 +35,13 @@ export interface BridgeConfig {
    * into Convex storage. Mirrors OPENCLAW_MEDIA_OUTBOUND_DIR in backend/app.
    */
   mediaOutboundDir: string;
+  /**
+   * Safety cap on a single outbound attachment. Bytes are STREAMED to a Convex
+   * upload URL (no base64, no full buffer, no 20MB httpAction ceiling), so this
+   * is just a guard against absurd files — raise OPENCLAW_MEDIA_MAX_MB freely.
+   * Files above it are skipped (logged) rather than shipped.
+   */
+  mediaMaxBytes: number;
 
   // --- Convex ----------------------------------------------------------------
   /**
@@ -145,6 +152,7 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): BridgeConfig {
         "OPENCLAW_MEDIA_OUTBOUND_DIR",
         "/home/node/.openclaw/media/outbound",
       ),
+      mediaMaxBytes: parseIntEnv("OPENCLAW_MEDIA_MAX_MB", 1024) * 1024 * 1024,
       convexHttpActionsUrl: requireEnv("CONVEX_HTTP_ACTIONS_URL"),
       convexIngestSecret: requireEnv("BRIDGE_INGEST_SECRET"),
       bridgeSharedSecret: requireEnv("BRIDGE_SHARED_SECRET"),

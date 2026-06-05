@@ -163,6 +163,25 @@ function isOutboundMediaPath(path: Json): path is string {
   return true;
 }
 
+// Global scanner for an outbound media path EMBEDDED anywhere inside a (possibly
+// multi-line) string -- e.g. exec stdout or a "MEDIA:/home/node/..." directive
+// line surfaced in a tool result. The tail stops at whitespace, backtick, quote,
+// paren or angle bracket (mirrors sanitize.ts OUTBOUND_PATH_RE), so a path inside
+// prose or a shell transcript is extracted without trailing junk. Each hit is
+// re-validated through isOutboundMediaPath, so the "..", inbound, scheme and
+// query filters still apply -- this widens DISCOVERY only, never the safety gate.
+const EMBEDDED_OUTBOUND_RE =
+  /\/home\/node\/\.openclaw\/media\/outbound\/[^\s`)>"']+/g;
+
+/** Every outbound media path occurrence embedded in a string (may be empty). */
+function extractOutboundPaths(text: string): string[] {
+  const out: string[] = [];
+  for (const match of text.matchAll(EMBEDDED_OUTBOUND_RE)) {
+    out.push(match[0]);
+  }
+  return out;
+}
+
 function isPrivateAck(text: string): boolean {
   if (!text) {
     return false;
@@ -243,6 +262,10 @@ export class Normalizer {
   pendingAckText: string;
   mediaPaths: string[];
   lastDedupKey: string | null;
+  // Buffered tool args by toolCallId: a real tool's start(args) + result(result)
+  // coalesce into ONE `completed` tool.status carrying input+output, so the UI
+  // shows a single clean card per tool instead of a start card + a result card.
+  private readonly toolArgs = new Map<string, unknown>();
 
   // Absolute deadlines: name -> time. "recv" is the silence budget; the others
   // are wall-clock graces armed from a specific event.
@@ -278,6 +301,7 @@ export class Normalizer {
     this.pendingAckText = "";
     this.mediaPaths = [];
     this.lastDedupKey = null;
+    this.toolArgs.clear();
     // A fresh turn invalidates the previous run ids: frames arriving before the
     // new ack are admitted on sessionKey alone (ownRunIds empty), then the ack
     // seeds the new run id for foreign-run filtering.
@@ -490,21 +514,59 @@ export class Normalizer {
   private handleTool(_payload: JsonObject, data: JsonObject, now: number, events: BridgeEvent[]): void {
     const name = data.name;
     const phase = data.phase;
-    events.push({
-      type: EVENT_TOOL_STATUS,
-      name: name ?? null,
-      phase: phase ?? null,
-      runId: this.currentRunId,
-    });
-    if (name === "message" && phase === "start") {
-      const visible = this.messageToolText(data.args);
-      if (visible) {
-        this.hasVisibleToolText = true;
-        this.applyVisible(visible, true, false, now, events);
+    const toolCallId = isString(data.toolCallId) ? data.toolCallId : undefined;
+
+    if (name === "message") {
+      // The message-tool is the VISIBLE-reply mechanism, not a UI tool card:
+      // emit on every phase (unchanged) and extract the visible text on start.
+      events.push({
+        type: EVENT_TOOL_STATUS,
+        name,
+        phase: phase ?? null,
+        runId: this.currentRunId,
+      });
+      if (phase === "start") {
+        const visible = this.messageToolText(data.args);
+        if (visible) {
+          this.hasVisibleToolText = true;
+          this.applyVisible(visible, true, false, now, events);
+        }
+      }
+    } else {
+      // Real tools (web_search, web_fetch, …): coalesce start(args)+result(result)
+      // into ONE `completed`/`error` event carrying input+output, so the thread
+      // renders a single clean card per tool. (Live v2026.5.19 emits these as
+      // `agent` `stream:"tool"` with phase start|result — see OPENCLAW fixtures.)
+      if (phase === "start") {
+        if (toolCallId) this.toolArgs.set(toolCallId, data.args);
+        // Do not emit yet — the card is emitted once on the result.
+      } else {
+        const input =
+          toolCallId && this.toolArgs.has(toolCallId)
+            ? this.toolArgs.get(toolCallId)
+            : data.args;
+        if (toolCallId) this.toolArgs.delete(toolCallId);
+        events.push({
+          type: EVENT_TOOL_STATUS,
+          name: name ?? null,
+          phase: data.isError === true ? "error" : "completed",
+          input: input ?? undefined,
+          output: data.result ?? undefined,
+          runId: this.currentRunId,
+        });
       }
     }
+
+    // Outbound media discovery from the tool RESULT. The result may be a bare
+    // string (exec stdout), or an object/array carrying stdout; flattenStrings
+    // yields every string either way. A file an agent produces via `exec` (e.g.
+    // the write-md-file skill) surfaces its path ONLY here -- as a
+    // "MEDIA:/home/node/.openclaw/media/outbound/<f>" line embedded in stdout --
+    // never as a `mediaUrls` array or in the visible reply. collectMedia scans
+    // each string for embedded outbound paths, so this is the load-bearing hook
+    // that makes exec-produced attachments reach the webchat.
     const result = data.result;
-    if (isObject(result) || Array.isArray(result)) {
+    if (result !== undefined && result !== null) {
       this.collectMedia(flattenStrings(result), events);
     }
   }
@@ -588,6 +650,12 @@ export class Normalizer {
     this.clearWait("empty_final");
     this.clearWait("private_ack");
     events.push({ type: eventType, text: this.safeSanitizeText(emitted) });
+    // A MEDIA: directive (or a bare outbound path) in the VISIBLE reply is a real
+    // attachment — emit a media event so it renders as a downloadable part. We
+    // scan the RAW `candidate` (the directive is dropped from the sanitized text).
+    // collectMedia dedups by path, so this is harmless when the same path also
+    // surfaced from a tool result.
+    this.collectMedia([candidate], events);
     if (isFinal) {
       events.push(...this.finalize(now));
     }
@@ -608,13 +676,28 @@ export class Normalizer {
       return;
     }
     const items: Array<{ filename: string; path: string }> = [];
-    for (const path of candidates) {
+    // Validate + dedupe a single resolved path, pushing a media item once.
+    const consider = (path: string): void => {
       if (!isOutboundMediaPath(path) || this.mediaPaths.includes(path)) {
-        continue;
+        return;
       }
       this.mediaPaths.push(path);
-      const filename = posixBasename(path);
-      items.push({ filename, path });
+      items.push({ filename: posixBasename(path), path });
+    };
+    for (const candidate of candidates) {
+      if (!isString(candidate)) {
+        continue;
+      }
+      if (isOutboundMediaPath(candidate)) {
+        // A bare path candidate (streamed `mediaUrls` list).
+        consider(candidate);
+      } else {
+        // A path embedded in free text (exec stdout / MEDIA: directive line):
+        // extract every occurrence; each is re-validated by `consider`.
+        for (const path of extractOutboundPaths(candidate)) {
+          consider(path);
+        }
+      }
     }
     if (items.length > 0) {
       events.push({ type: EVENT_MEDIA, items, runId: this.currentRunId });

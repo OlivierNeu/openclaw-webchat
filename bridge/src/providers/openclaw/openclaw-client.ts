@@ -37,7 +37,11 @@ const CLIENT_VERSION = "1.0.0";
 const CLIENT_PLATFORM = "linux";
 const CLIENT_ROLE = "operator";
 
-const CONNECT_TIMEOUT_MS = 10_000;
+// 30s (was 10s): a cold-start gateway — especially the emulated amd64 image on
+// arm64 finishing plugin/codex init — can take >10s to complete the WS device
+// handshake; 10s dropped the first message right after a (re)start. A real
+// production cold start benefits too.
+const CONNECT_TIMEOUT_MS = 30_000;
 const DEFAULT_REQUEST_TIMEOUT_MS = 30_000;
 
 export class OpenClawError extends Error {}
@@ -262,7 +266,7 @@ export class OpenClawConnection {
             "| role/scopes=",
             clip({ role: payload.role, scopes: payload.scopes }, 200),
           );
-          dbg("connect hello-ok (raw):", clip(frame, 1500));
+          dbg("connect hello-ok (raw):", clip(frame, 20000));
           settled = true;
           clearTimeout(connectTimer);
           connection = new OpenClawConnection(ws);

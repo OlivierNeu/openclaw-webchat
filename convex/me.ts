@@ -73,7 +73,22 @@ export const getMe = query({
       themeMode: userMode ?? null,
       resolvedThemeMode: resolveThemeMode(userMode, adminDefaultMode),
       defaultThemeMode: adminDefaultMode ?? null,
+      // Chat pref: show tool-execution cards (default true when unset).
+      showTools: profile?.showTools ?? true,
     };
+  },
+});
+
+// Toggle the per-user "show tool cards in chat" preference. Identity-level
+// (requireUserId, like setThemeMode) so it persists per user and drives the
+// chat's tool-card visibility reactively.
+export const setShowTools = mutation({
+  args: { show: v.boolean() },
+  handler: async (ctx, { show }) => {
+    const userId = await requireUserId(ctx);
+    const profile = await getProfile(ctx, userId);
+    if (profile === null) return; // pre-bootstrap: nothing to set yet
+    await ctx.db.patch(profile._id, { showTools: show });
   },
 });
 

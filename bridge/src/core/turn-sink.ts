@@ -94,6 +94,8 @@ export class TurnSink {
             kind: "tool",
             name: asString(event.name),
             phase: asString(event.phase),
+            ...(event.input !== undefined ? { input: event.input } : {}),
+            ...(event.output !== undefined ? { output: event.output } : {}),
           };
           await this.writer.addToolPart(messageId, part);
           break;

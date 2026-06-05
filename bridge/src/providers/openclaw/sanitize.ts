@@ -100,16 +100,18 @@ export function sanitizeText(text: string, _opts?: { mediaSessionKey?: string })
   const out: string[] = [];
   for (const line of lines) {
     if (line.startsWith("MEDIA:")) {
-      const match = MEDIA_DIRECTIVE_RE.exec(line);
-      if (match) {
-        // ADAPTATION: path-free link instead of a signed media_url().
-        const filename = posixBasename(match[2]!);
-        out.push(`[${filename}](${mediaHref(filename)})`);
-      } else {
-        // A MEDIA: line that is not a well-formed outbound directive: still
-        // strip any embedded server path to its basename.
-        out.push(stripPathsToBasename(line));
+      if (MEDIA_DIRECTIVE_RE.test(line)) {
+        // DROP a well-formed outbound MEDIA: directive from the VISIBLE text: the
+        // bridge emits it as a real `kind:media` attachment part (downloadable,
+        // Convex storage URL) via the normalizer. Rendering it ALSO as a markdown
+        // link here produced a DEAD `./media/<f>` link next to the working part
+        // (a confusing duplicate). The part is canonical; the directive is a
+        // machine marker, not user prose.
+        continue;
       }
+      // A MEDIA: line that is not a well-formed outbound directive: still strip
+      // any embedded server path to its basename.
+      out.push(stripPathsToBasename(line));
       continue;
     }
     if (PATH_LABEL_RE.test(line)) {

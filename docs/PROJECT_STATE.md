@@ -287,6 +287,315 @@ the design workflow's scope) is handled operationally. Pairing is per-device (Q5
 generate a fresh device keypair → `node.pair.request` → admin approval issues a token →
 reconnect with the token (signing the `connect.challenge` nonce).
 
+**🟢 FIRST LIVE ROUND-TRIP GREEN (2026-06-04) — F1 (text send → stream → final →
+persist) WORKS against the real gateway.** The full chain is proven live via the
+LEGACY single-chat path (`session.ts` SessionRegistry — untouched by P1): connect
+(device identity + token + `wss://gateway.lacneu.com`) → `sessions.patch{verboseLevel:full}`
+→ `chat.send` (ack ok) → the agent streams → normalizer → ConvexWriter → `messages`
+row status **complete** ("Bridge validé, je te reçois bien."). CAPTURED LIVE GROUND TRUTH:
+- **`server.version = "2026.5.19"`**, protocol 4 (the harness's VERSION ORACLE, in hello-ok
+  under `frame.payload.server`); hello-ok also lists the full `features.methods` RPC set.
+- **sessionKey `agent:olivier:webchat:chat:olivier:<convexChatId>` is ACCEPTED** → T4 RESOLVED;
+  `session-keys.ts` is correct (the "NOT FOUND in docs" was a doc gap, not a bug).
+- **Two inbound frame families confirmed**: `agent` (`stream:lifecycle|assistant`, `data.delta`)
+  AND `chat` (`state:delta|final`, `deltaText`, `message.content[].text`); the normalizer handles
+  both. `lifecycle:end` carries `livenessState` (saw "working"). The chat.send ack carries NO
+  runId — it arrives in the frames (`webchat-<hash>`); frames were admitted regardless.
+- The OWUI contention (T2) did NOT block the connect (one success; not conclusive).
+
+**AUTONOMOUS LIVE PROGRESS (2026-06-04, after the features+matrix workflow + its
+30-feature `docs/LIVE_TEST_MATRIX.md` + the 8 red-team must-fix blockers):**
+- ✅ **Guardrail (red-team #8): olivier-only is CODE-LOCKED** — `dev.routeUser`/`dev.testSend`
+  refuse any instance outside the allowlist `["admin"]` (never jerome/family).
+- ✅ **F-PARALLEL-CONVO GREEN live** — one user, two parallel chats ("ALPHA"/"BRAVO") each
+  finalized in its OWN conversation, zero cross-talk (legacy per-chat-socket path isolates,
+  as the red-team predicted; the multiplexer is for the multi-USER case, still unwired).
+- ✅ **F-COMPACT-MANUAL GREEN live** — `/compact` IS a real command → a NORMAL turn (3 `chat`
+  `state:final`, snapshot-replaces) → reply "⚙️ Compacted (58k/200k)" persisted correctly. NO
+  `livenessState`/abandon/`sessions.operation` frame. FINDING: the normalizer's discard key
+  `livenessState==='abandoned'` (red-team #2) is specific to AUTO-compaction mid-turn (context
+  overflow), NOT manual /compact — capturing it needs a deliberate ~200k-token overflow run
+  (DEFERRED, expensive; manual compaction already handled correctly).
+- ✅ **A2 streaming IMPLEMENTED + LIVE-VERIFIED (red-team #1 RESOLVED).** Schema: new OPTIONAL
+  un-indexed `messages.liveText`. `stream.ts`: `appendDelta`/`setSnapshot` patch `liveText`
+  (NOT `text`) during the turn; `finalize` writes the authoritative text into the searchable
+  `text` ONCE + clears `liveText`. `messages.listByChat` returns `liveText` while streaming,
+  `text` when done (no frontend change). Live: mid-stream `text=""`/`liveText` grows; final
+  `text="…Test validé."`, search still finds it. The per-flush search-reindex amplifier is gone.
+  Gates: tsc convex+src 0, vitest 97. **BROWSER-VERIFIED (chrome-devtools, 2026-06-04):**
+  sent a message from the real UI → the assistant reply **streamed and rendered**
+  ("Le flux s'affiche bien…") via the A2 liveText path; a **"Running" + runId processing
+  marker** shows during the turn (F-MARKER-PROCESSING base already present). Full stack
+  proven visually: UI → Convex → bridge → gateway → stream → A2 persist → reactive render.
+  Evidence: `docs/live-evidence-F1-A2-browser.png`. (chrome-devtools MCP reconnected; the
+  orphaned-Chrome-profile lock is cleared by killing the `chrome-devtools-mcp/chrome-profile`
+  procs. Test gotcha: the browser opens a FRESH anon user = "pending" → promote via
+  `dev.makeAdmin {canonical:"u-<id>"}` + `dev.routeUser`; UI `fill` doesn't trip React state,
+  use `type_text`+Enter or drive sends via `dev.testSend` and verify render in the browser.)
+- ✅ **F-TOOL-TOGGLE GREEN (browser-verified).** Tool cards render + a per-user "show tools"
+  preference toggled FROM THE CHAT (composer button) hides/shows them; the pref persists
+  reactively. New: `profiles.showTools` (optional) + `me.getMe.showTools` + `me.setShowTools`;
+  `ConvexChat` reads it, adds `.oc-hide-tools` (CSS hides `.oc-tool`), toggle in the Composer.
+  **LIVE TOOL-FRAME DIVERGENCE FOUND + FIXED** (the harness's whole point): v2026.5.19 emits
+  tool activity as `agent` `stream:"tool"` (phase start{args} / result{result,isError}) +
+  `stream:"item"` — NOT the fixture `session.tool` shape. `normalizer.handleTool` now COALESCES
+  a real tool's start(args)+result(result) into ONE `completed`/`error` `tool.status` carrying
+  input+output (buffered by `toolCallId` in a new `toolArgs` map; cleared per turn); the
+  message-tool visible-reply path + media-collection-from-result are unchanged. `turn-sink`
+  forwards input/output onto the `ToolPart`. Browser: ONE clean web_search card, phase
+  "completed", input+output disclosures (searxng results incl. the `EXTERNAL_UNTRUSTED_CONTENT`
+  wrapping). 36 bridge tests stay byte-green (fixtures only have message-tools).
+- NEW dev tooling: `dev.inspectChat({chatId})` (clean harness oracle: latest messages + part
+  kinds/names/phases + A2 text/liveText lengths); `dev.testSend` is now chat-aware (sends as the
+  chat's owner when a chatId is given). Two admin profiles now exist (kh74bs "olivier" + the
+  browser's kh77jp16fe), both routed to "admin".
+- 🔑 **FULL GATEWAY METHOD MAP CAPTURED (189 methods, from hello-ok features.methods; the
+  `dbg` hello-ok clip is bumped to 20000 to log it).** This UNBLOCKS the heavy features:
+  - **Media outbound is NOT topology-blocked**: `artifacts.list` / `artifacts.get` /
+    `artifacts.download` EXIST → the bridge fetches file BYTES over the WS (no need to read the
+    gateway's remote filesystem). Plan (F-FILEOUT-ARTIFACT): after a turn, `artifacts.list({sessionKey})`
+    → `artifacts.download` new ones → Convex File Storage (an ACTION: `ctx.storage.store`) →
+    `messageParts.storageId` → MediaPart render. FINDING: a file the agent writes via `exec` to
+    `/home/node/.openclaw/media/outbound/<name>---<uuid>.md` does NOT auto-emit a `media` event
+    (only `mediaUrls`/`MEDIA:` directives do), so the artifacts-poll path is the robust one.
+  - **Archived recovery**: `chat.history` exists (F-RECON). **Conversation list**: `sessions.list`,
+    `sessions.describe`, `sessions.preview`. **Compaction recovery**: `sessions.compact`,
+    `sessions.compaction.branch|get|list|restore` (the "OpenClaw context == webchat view" requirement).
+    Event families: `session.message|operation|tool`. Tools confirmed as `agent stream:"tool"` live.
+- 🛑 **MEDIA-OUTBOUND ROOT CAUSE TRAPPED (2026-06-05) — user-reported: file attaches in OpenWebUI
+  but is INVISIBLE in our webchat.** Precisely diagnosed live (probes `bridge/dev-probe-artifacts.mjs`
+  + `dev-probe-files.mjs`): an agent-produced file lands at `/home/node/.openclaw/media/outbound/
+  <name>---<uuid>.md` ON THE GATEWAY HOST and is (a) NOT pushed in the chat stream (no `media`/
+  `mediaUrls`/`MEDIA:` frame; the final `chat` content is text-only "Fichier créé et joint."),
+  (b) NOT a queryable artifact (`artifacts.list({sessionKey})`=`{artifacts:[]}`; `{runId}`="no
+  session"; artifacts need a LIVE session + explicit registration), (c) NOT served by `agents.files.*`
+  (that only serves the agent's CONFIG workspace: AGENTS.md/SOUL.md/MEMORY.md — `get` rejects the
+  outbound file: "unsupported file"). So the ONLY delivery is OpenClaw's LOCAL `media/outbound/`
+  filesystem convention, read by a CO-LOCATED client (the OWUI valve runs on the OpenClaw host).
+  Our bridge runs REMOTELY (Olivier's Mac) → it cannot read that dir → no attachment reaches the
+  webchat. Also a SECONDARY bug: `normalizer.collectMedia` only matches a candidate string that IS
+  itself an outbound path; a path EMBEDDED in multi-line `exec` output is missed. **RESOLUTION =
+  a DEPLOYMENT/topology DECISION (pending user):** (A) co-locate the bridge on the OpenClaw host
+  (reads `mediaOutboundDir` directly → `ctx.storage.store` → messagePart; the original design's
+  `OPENCLAW_MEDIA_OUTBOUND_DIR`), or (B) remote-fetch the bytes via `exec`/`node.invoke` base64 over
+  the WS (works from the Mac but uses exec → `exec.approval.*` gating + is a workaround). F-FILEIN
+  (user→agent) is separate and may work over `chat.send.attachments` (Convex storage → base64).
+  **Investigation C (user chose "find a clean native remote RPC") — DEFINITIVE VERDICT 2026-06-05:
+  NO native remote byte-fetch exists for outbound media on the OpenClaw gateway v2026.5.19.** Proof:
+  (1) `chat.history({sessionKey})` (durable JSONL) returns the file PATH (via the `MEDIA:` directive)
+  but NOT bytes. (2) `gateway.lacneu.com/{media,files,artifacts}/outbound/<f>` → 200 but it's the
+  **SPA catch-all** (body = "OpenClaw Control" HTML; a bogus name 200s too) — not a file route.
+  (3) `gateway.lacneu.com/api/media/outbound/<f>` → **404 even WITH `Authorization: Bearer`**; ALL
+  `/api/*` (incl. `/api/health`, `/api/version`) → 404 → the gateway has NO `/api/*` router. Its
+  HTTP surface = `/health` (JSON `{ok,status:live}`) + WS + SPA. (4) `artifacts.list` empty,
+  `agents.files.*` config-only. **The proven working mechanism (the OWUI valve = old bridge backend,
+  documented in OUR OWN `docs/BRIDGE_PROTOCOL.md` + `docs/DEPLOYMENT.md`):** the BRIDGE/backend mounts
+  the OpenClaw `media/outbound` dir **read-only** (`…/media/outbound:/home/node/.openclaw/media/
+  outbound:ro`), reads bytes from `OPENCLAW_MEDIA_OUTBOUND_DIR`, and serves them via a signed
+  `GET /api/media/outbound/{filename}` (HMAC `OPENCLAW_MEDIA_LINK_SECRET`). Path from the stream /
+  `chat.history` (`MEDIA:` directive); **bytes from the mounted FS, NOT the gateway.** => **Option A
+  (co-location / shared `:ro` volume) is REQUIRED for prod.** Chosen modular design: a pluggable
+  per-instance `MediaFetcher` with strategies `localDir` (prod, mount — matches our docs) + `exec`
+  (dev/fallback: WS exec runs server-side on the gateway host → `base64 media/outbound/<f>` → bytes
+  over the WS, works from the non-co-located Mac dev bridge, `exec.approval.*` auto-approved on
+  olivier). The normalizer already emits `media{items:[{filename,path}]}`; the writer's `addMedia`
+  already assumes a local `mediaOutboundDir` (= the mount). Wire: media event →
+  MediaFetcher(strategy).bytes(path) → `ctx.storage.store` → `messageParts{kind:media,storageId}` →
+  frontend render. Also fix the SECONDARY `collectMedia` bug (parse `MEDIA:`/paths from multi-line
+  exec output). Probes: `bridge/dev-probe-artifacts.mjs`, `dev-probe-files.mjs`.
+  **F-FILEOUT — IMPLEMENTED + PROVEN LIVE 2026-06-05.** Three bugs were in the chain; all fixed:
+  (1) EXTRACTION (`normalizer.ts`): the exec-produced path lives ONLY in the tool RESULT (a
+  `MEDIA:/home/node/.../outbound/<f>` line in stdout) — never in `mediaUrls` nor the visible reply.
+  `collectMedia` required each candidate to BE a bare path AND only ran for object/array results, so
+  a path buried in multi-line stdout was dropped → NO media event. Fixed: scan every result string
+  (incl. plain strings) for embedded outbound paths via `EMBEDDED_OUTBOUND_RE`, each re-validated by
+  `isOutboundMediaPath` (the `..`/inbound/scheme safety gate is preserved). New normalizer test +
+  inspectChat confirmed the live exec turn had only `read,exec,exec` parts and NO media before the
+  fix. (2) FETCH (Option B, no remote RPC exists): new `bridge/src/core/media-fetcher.ts`
+  (`MediaFetcher` interface + `LocalDirMediaFetcher`) reads bytes from `mediaOutboundDir`;
+  `HttpConvexWriter.addMedia` now fetches bytes + ships base64 via the new `addMediaBlob` ingest op
+  (the dead `OPENCLAW_MEDIA_BASE_URL` fetch in `convex/bridge_ingest.ts` is replaced —
+  decode→`ctx.storage.store`→`addPart{kind:media}`). The `ConvexWriter.addMedia` INTERFACE is
+  unchanged (fake + tests intact). 20MB cap (`OPENCLAW_MEDIA_MAX_MB`). (3) RENDER (`MediaPart.tsx`):
+  assistant-ui renders `<File {...part} />` (fields SPREAD, NOT `{part}` — same as ToolCard); the old
+  `{part}` destructure made `part.mimeType` throw and crashed the whole message ("Cannot read
+  properties of undefined (reading 'mimeType')"). Fixed to destructure spread fields. PROOF: 41
+  bridge tests + frontend/convex tsc green; live `bridge/dev-prove-media.mjs` drove the REAL
+  writer→fetcher→ingest→storage→part on chat jx7f3yr (fixture dir, NO gateway needed) → browser
+  rendered a downloadable `preuve-media---demo.md` link → its Convex storage URL returns the exact
+  294-byte markdown (screenshot docs/live-evidence-FILEOUT-mediapart.png).
+  **ONE INFRA STEP REMAINS for REAL agent files on the DEV bench:** the bridge runs on the Mac but
+  the gateway writes to gateway.lacneu.com's `media/outbound`; until that dir is mounted/synced into
+  the bridge (`OPENCLAW_MEDIA_OUTBOUND_DIR`), `LocalDirMediaFetcher` logs "skip <f>: not found" for
+  real agent files. Prod = the documented `:ro` volume mount; dev = SSHFS/rsync of the gateway dir.
+  Extraction (bug 1) + render (bug 3) work regardless; only the byte read needs the mount.
+  **LIVE-CONFIRMED 2026-06-05 (the advisor's decisive check):** drove a real `animaux.md` creation
+  turn on chat jx7f3yr with the new bridge + BRIDGE_DEBUG. The real `agent stream:"tool"` exec
+  RESULT frame carried the ABSOLUTE path `/home/node/.openclaw/media/outbound/animaux---2e463a80-…md`
+  (so `EMBEDDED_OUTBOUND_RE`'s `/home/node/.openclaw/media/outbound/` prefix DOES match real output —
+  not relative, directive not stripped), and the bridge logged `[media] skip animaux---2e463a80-…md:
+  not found` — which can ONLY appear if the normalizer extracted the path from the LIVE frame and
+  called the fetcher. => bug #1 fires on real frames; the `not found` is the unmounted dir, the sole
+  remaining gap. To finish on the dev bench: `sshfs <gateway>:/home/node/.openclaw/media/outbound
+  <local> && OPENCLAW_MEDIA_OUTBOUND_DIR=<local>` (or rsync), then real agent files render too.
+  **TRANSFER UPGRADE 2026-06-05 (base64 → streaming, see docs/MEDIA_TRANSFER_DESIGN.md):** the
+  bridge→Convex hop was base64-in-httpAction (`addMediaBlob`, capped at the 20MB httpAction body +
+  ~33% inflation). Replaced with the Convex upload-URL pattern: ops `getUploadUrl`
+  (`ctx.storage.generateUploadUrl()`) + `addMediaPart`; `HttpConvexWriter.addMedia` now STREAMS raw
+  bytes (`Readable.toWeb`, `duplex:"half"`) straight to the upload URL (no base64, no size ceiling,
+  no full buffer) then persists the storageId. `MediaFetcher.open()` returns a `{stream,mimeType,
+  size}` (was `{bytes}`). Cap raised to 1GiB (`OPENCLAW_MEDIA_MAX_MB`, just a guard now). Proven
+  live: a 5 MiB binary streamed byte-exact (5242880 bytes) past the old 20MB ceiling. Community
+  research (in MEDIA_TRANSFER_DESIGN.md) confirms this matches the declined upstream proposal #11769
+  + base64 DoS advisory GHSA-w2cg-vxx6-5xjg. The Leg-1 plugin (drop the mount) remains a user
+  decision pending a streaming/range/fs spike of `api.registerHttpRoute`.
+- **LOCAL EPHEMERAL OPENCLAW HARNESS — BUILT + #52 LOCAL VALIDATED 2026-06-05 (task #55).** User
+  refused SSHFS (NAS SSH port closed); chose a local volatile OpenClaw the agent starts/stops itself,
+  pristine each run, version-pinned, based on the NAS image. Built `local-openclaw/`:
+  `docker-compose.yml` (image `neuolivier/openclaw-docker:openclaw-${OPENCLAW_VERSION:-2026.5.19}`,
+  token auth, ephemeral `oc-state` volume, **host-bind `./media-outbound` shared with a Mac bridge**)
+  + `up.sh`/`down.sh`/`reset.sh`/`pair.sh` + README + `.gitignore`. KEY LEARNINGS: entrypoint =
+  `gateway --allow-unconfigured --bind=lan`; a LAN-bound container **refuses `--auth none`** (loopback
+  bind is incompatible with docker port-forward) → **token auth + device pairing required**; token
+  alone = `NOT_PAIRED`; `pair.sh` registers the bridge's Ed25519 device (throwaway connect) then
+  `devices approve <requestId> --token` (CLI: `devices list --json|approve|clear`). Gateway healthy
+  ~15s (amd64 image emulated on arm64). **#52 LOCAL PROVEN END-TO-END:** the gateway CONTAINER wrote
+  `rapport-local---<uuid>.md` → host bind saw it → bridge streamed it to Convex → rendered byte-exact
+  in the webchat (docs/live-evidence-52-local-gateway-share.png). **THE ONE INPUT STILL NEEDED for
+  model-driven agent turns:** a pristine gateway has NO agent/model (`defaultAgent:(none)`); the NAS
+  agent uses `openai-codex` via OAuth (creds not portable). Put a model key (`OPENROUTER_API_KEY`) in
+  `local-openclaw/local.env` + wire the agent (openclaw.json / `onboard`) to run real turns; until
+  then the media-share is validated via docker-exec-write (no model). Gateway currently STOPPED to
+  save resources during the user's absence (state+token kept; `cd local-openclaw && ./up.sh` restores
+  in ~20s; emulated amd64 image is heavy on arm64). PRISTINE CYCLE VERIFIED across
+  2× `reset→up` (fresh volume + new token + new pairing requestId each time → bridge reconnects).
+  KEY-READY SEED ATTEMPT: a minimal hand-written `seed/openclaw.json` was REJECTED at boot
+  (`<root>: Invalid input` — schema needs ~18 sections like the 12KB olivier seed), so the
+  `oc-seed` init is COMMENTED OUT in the compose and the file kept as `seed/openclaw.json.example`;
+  to wire an agent run `docker exec -it oc-local-gateway node /app/openclaw.mjs onboard` (writes a
+  valid config) + drop `OPENROUTER_API_KEY` in `local.env`. Agent id MUST be `olivier` (= bridge
+  `OPENCLAW_AGENT_ID`).
+  **CODEX HARNESS MODE — VALIDATED + CODIFIED 2026-06-05 (free local agent turns on the user's
+  ChatGPT Pro, no OpenAI API auth, no pay-per-token).** User clarified: NAS = codex API mode; LOCAL
+  should = codex HARNESS mode (OpenClaw spawns the local codex app-server reusing `~/.codex` login).
+  Validated: an agent turn responded "bonjour"/"harness ok" via the codex harness. The recipe (now
+  in `local-openclaw/`): (1) inject `~/.codex/auth.json` → volume `.openclaw/.codex/auth.json`
+  (node-owned COPY, not bind — a bind made `.codex` root-owned + broke the entrypoint's config.toml);
+  (2) seed `seed/openclaw.json` = the NAS olivier config STRIPPED of plugins/channels/mcp/bindings/
+  messages + personal identityLinks (the full seed fails: `plugins.slots.memory: hindsight-openclaw
+  not found`; a minimal hand-written one fails the schema) → agent `olivier`, model `openai/gpt-5.5`,
+  codex runtime; (3) env `OPENCLAW_CODEX_APP_SERVER_BIN=/usr/local/bin/codex-yolo-wrapper.sh` + a
+  bind-mounted `codex-yolo-wrapper.sh` that REORDERS `--dangerously-bypass-approvals-and-sandbox` to
+  a GLOBAL position (OpenClaw 2026.5.19 appends it AFTER `app-server`; codex 0.133 wants it BEFORE the
+  subcommand → "unexpected argument" otherwise; native fix expected >=2026.5.20). `up.sh` does (1)+(2)
+  conditionally after boot then restarts. NOTE: the local codex login is account `xavier@jodoin.me`
+  (Pro) — turns consume THAT account. NOT yet done: full bridge→webchat→codex→real-file end-to-end
+  (the ultimate #52 + live-test proof). **SECURITY SLIP this session:** a `~/.codex/auth.json` dump
+  leaked the OAuth tokens into the transcript (improper nested-dict redaction); advised the user to
+  `codex logout && codex login` to rotate if sensitive.
+  **FULL LIVE CHAIN VALIDATED 2026-06-05 (#52 CLOSED locally):** ran a 2nd bridge on :8787 against
+  the LOCAL gateway (`OPENCLAW_GATEWAY_URL=ws://127.0.0.1:18789`, local token, shared media dir;
+  NAS bridge stopped; `BRIDGE_URL` already :8787). `dev.testSend` a file-creation prompt → dispatch
+  → local bridge → local codex agent (user's ChatGPT Pro) → the agent wrote `fruits-codex.md` to
+  media/outbound + emitted `MEDIA:/home/node/.openclaw/media/outbound/fruits-codex.md` → the bridge
+  extracted the media event, read the file via the shared docker bind, streamed to Convex storage →
+  the attachment RENDERED + downloaded byte-exact (26B, text/markdown). Screenshot
+  docs/live-evidence-52-codex-fullchain.png. **KEY LEARNING (the precise dysfunction, trapped):** the
+  attachment renders ONLY when the agent emits a `MEDIA:` directive. With codex's default flow
+  (`apply_patch` to the workspace + "joint" in prose, NO directive) OpenClaw auto-copies the file to
+  media/outbound as `<name>---<uuid>.ext` but DOES NOT surface that path anywhere (not the operator
+  `agent`/`chat` stream, NOT `chat.history` — both only carry the bare "test-codex.md" text) → the
+  bridge cannot extract it → no attachment. So reliable attachments need the agent to emit `MEDIA:`
+  (the NAS `write-md-file` skill does this automatically; the stripped local seed lacks it → prompt
+  it or install the skill). This is an OpenClaw surfacing behavior, NOT a bridge bug — our extract→
+  read→stream→render path is proven byte-exact when `MEDIA:` is present. MINOR POLISH: the `MEDIA:`
+  line in the VISIBLE reply is also sanitized into a DEAD markdown link (`./media/<f>`) → a duplicate
+  next to the working media part; clean up in sanitize.ts (drop the MEDIA: line from visible text, or
+  point it at the storage part). CURRENT STATE: local gateway UP, local bridge on :8787, NAS bridge
+  stopped — to restore NAS, restart `bridge` (npm start) against the NAS env.
+  **OUTBOUND-MEDIA DEDUP FIX + VERSION-AWARE 2026.6.1 TEST 2026-06-05 (#57 cosmetic + #56):**
+  (1) DEDUP: the `MEDIA:` directive in the VISIBLE reply was sanitized into a DEAD `./media/<f>`
+  markdown link next to the working media part. Fixed: `sanitize.ts` now DROPS a well-formed `MEDIA:`
+  directive line (the media part is canonical), and `normalizer.applyVisible` now scans the RAW
+  candidate via `collectMedia([candidate])` so a `MEDIA:` in the visible reply STILL emits the
+  attachment (dedup'd). 41 bridge tests green (media-directive test updated). Live-verified:
+  `parts:[tool,tool,tool,media,tool,tool]` = ONE media part, text clean, no dead link.
+  (2) VERSION-AWARE (docs/OPENCLAW_VERSION_COMPAT.md): tested 2026.6.1 (codex 0.137 vs 5.19's 0.133).
+  The stripped seed VALIDATES on both; 6.1 has the NATIVE codex-flag fix (bare codex works) while
+  5.19 needs the reorder wrapper; crucially the **reorder wrapper is VERSION-AGNOSTIC** (turn
+  `wrapper-61-ok` on 6.1) → the harness applies it always, NO per-version branch. So
+  `OPENCLAW_VERSION=2026.6.1 ./local-openclaw/up.sh` works unchanged. Per-version replay checklist in
+  the doc. STILL OPEN for "all file-exchange complexity": the file-TYPE matrix (pdf/docx/pptx/xlsx/
+  images: byte-exact + mimeType + inline-image vs download) — #57; inbound (user→agent,
+  chat.send.attachments) — #57; and the NAS config guarantee (#58).
+  **PER-VERSION SMOKE TEST + INBOUND TRIAGE + NAS CHECKLIST 2026-06-05 (user: "all implementations
+  test BOTH versions"):** (1) `local-openclaw/test-fileexchange.sh <version>` is the per-version
+  deliverable — reset → `OPENCLAW_VERSION=<v> up.sh` → restart local bridge on :8787 → MEDIA: prompt
+  → asserts ONE media part + byte-exact download + no dead `./media` link (via new dev query
+  `dev.lastMediaPart`). Run it on each bump (5.19 + 6.1). (2) INBOUND (user→agent) is **HALF-BUILT =
+  a BUILD task, NOT a test task** (advisor triage): the frontend `attachmentAdapter` (upload →
+  `uploads.registerUpload` → `{storageId,filename,mimeType}`) + `send.sendMessage({attachments})` +
+  outbox `attachmentIds` + dispatch (`convex/bridge.ts` → `attachments: row.attachmentIds`) + bridge
+  `server.ts` (`params.attachments = body.attachments` → chat.send) ALL exist, BUT **nobody resolves
+  storageId → base64**: OpenClaw receives opaque Convex storage IDs it can't read. THE GAP: the
+  dispatch internalAction (has `ctx.storage`) must resolve each attachmentId → bytes → base64 → the
+  chat.send.attachment shape (dual: flat `{type,mimeType,fileName,content}` OR
+  `{source:{type:base64,media_type,data}}`; offload >2MB to `media://inbound/<id>`) before POSTing.
+  Surfaced, NOT built (avoid rabbit hole). (3) NAS = `docs/NAS_CONFIG_CHECKLIST.md` (artifacts +
+  commands, UNVERIFIED — can't drive the NAS; API-mode `MEDIA:` surfacing equivalence marked an
+  ASSUMPTION to confirm on the NAS). #58 NOT marked complete.
+  **SMOKE TEST PASSES ON BOTH VERSIONS + TYPE MATRIX 2026-06-05:** after bumping
+  `CONNECT_TIMEOUT_MS` 10s→30s (a cold-start/emulated-amd64 gateway needs >10s for the WS device
+  handshake; 10s dropped the first message after a restart) + a 20s settle in the script,
+  `test-fileexchange.sh` PASSES for BOTH 2026.5.19 AND 2026.6.1: `✅ 1 media part, no dead link,
+  byte-exact 23B, mime=text/markdown`. The 6.1 OUTBOUND gap is CLOSED. TYPE MATRIX: mimeType
+  inference unit-tested across md/txt/csv/json/pdf/png/jpg/gif/webp/svg/mp3/wav/mp4/webm/mov/docx/
+  pptx/xlsx/zip/unknown (`media-fetcher.test.ts`, 42 bridge tests green); render variants
+  live-verified (docs/live-evidence-57-typematrix-render.png): PNG→inline `<img>`, PDF→download link,
+  WAV→`<audio>` player. So OUTBOUND file exchange + cosmetic + type matrix = DONE on both versions.
+  REMAINING: inbound (build task #59). TRANSIENT NOTE: codex occasionally errors a turn AFTER
+  producing the attachment (`codex app-server client closed before turn completed`) — the media part
+  still renders; status goes `error`. A codex-runtime blip (emulated), not a bridge bug; worth a
+  reconnect/robustness pass if it recurs on the NAS.
+  **VERSION STABILITY LEDGER + REPEATED TEST 2026-06-05 (#60, docs/OPENCLAW_VERSION_STABILITY.md):**
+  the user wants per-version stability tracked as the basis for TRUSTING a version before promoting
+  it. Built `local-openclaw/test-stability.sh <version> <N>` + dev queries `dev.chatStats`
+  (last turn role/status/error/created) and `dev.lastMediaPart` (now also returns status). KEY
+  METHODOLOGY FIX: the first draft measured *attachment presence*, which CONFLATED app-server
+  stability with the agent's inconsistent `MEDIA:` emission (codex sometimes omits the directive even
+  when explicitly prompted — a separate reliability axis); switched to **turn terminal status** which
+  isolates app-server stability. RESULT (8 turns/version): **2026.5.19 → 8/8 complete, 0 error**;
+  **2026.6.1 → 8/8 complete, 0 error.** Both FULLY STABLE in this run → the earlier
+  `codex app-server client closed` on 5.19 was a SINGLE intermittent anomaly, NOT reproduced, NOT a
+  confirmed per-version defect (corrected the over-claim). Caveat: emulated amd64-on-arm64 — RELATIVE
+  comparison trustworthy, absolute may differ from the NAS. The ledger has a promotion-decision
+  checklist + an observations log to append per version. Separate reliability axis to track later:
+  codex `MEDIA:`-directive compliance (intermittent omission → intermittent attachment loss).
+- **CHAT UX + CONFIG-OPTIONS work QUEUED (tasks #53/#54, see docs/CHAT_UX_DESIGN.md):** research done
+  (eye-tracking/F-pattern/layer-cake, conversational design, streaming, composer, a11y) + the OpenClaw
+  feature inventory + the REVISED schema decision (knobs come from `sessions.describe`
+  self-describing enums — `thinkingLevels`/`verboseLevel`/`model`+`models.list` — NOT a generic
+  `config.schema` renderer; context meter = `totalTokens/contextTokens`, validated 22.9%≈23%).
+  Increment 1 (read-only context meter + model/reasoning chips) is next; RAPIDE/RAISONNEMENT +
+  `sessions.patch` write-params need a follow-up probe.
+- STILL OPEN (Tier 1/2 per the matrix): run-state channel for processing markers (#5), media
+  in/out, archived recovery / chat.history (#3), multi-user per-instance routing (#4), wire the
+  multiplexer (#6), the per-session-vs-per-agent isolation probe (#7), UI markers + tool-toggle
+  (needs chrome-devtools). New harness oracle helper still TODO (clean message-state read).
+
+NEW DEV/LIVE TOOLING (all dev-gated, `OPENCLAW_ENABLE_ANON_AUTH=1`): `dev.routeUser`
+(wire profile override → instance, makes dispatch resolve a non-null target — ran: olivier
+→ instance "admin"); `dev.testSend({text,chatId?})` (programmatic send = mirrors
+send.sendMessage → outbox → dispatch, the live-harness trigger, no browser needed);
+`openclaw-client.ts` debug instrumentation gated by **`BRIDGE_DEBUG=1`** (logs hello-ok +
+server.version, each req method+sessionKey [no PHI text], each res/ack, each raw inbound
+frame = fixture/diagnosis material). Build-config fixed: `bridge/tsconfig.build.json`
+(rootDir src) → `dist/index.js`; `npm start` = `node --env-file=.env dist/index.js`.
+**Run the bridge:** `cd bridge && npm run build && BRIDGE_DEBUG=1 node --env-file=.env dist/index.js`
+(listens :8787; gateway connect is LAZY = on first send). `.env` gotcha: `OPENCLAW_DEVICE_IDENTITY`
+must be UNQUOTED raw JSON (Node --env-file truncates a quoted value at the first inner `"`);
+fixed via `/tmp/fix-devid.mjs` (backup at `bridge/.env.bak`).
+
 **Phase 2 IN PROGRESS (Model A).** DONE so far: `providers/openclaw/multiplex.ts`
 `SessionMultiplexer` — the risk core: one Normalizer per session, fan-out by
 `payload.sessionKey`, min-deadline tick, per-sessionKey verbose guard (fix #7), endAll.
