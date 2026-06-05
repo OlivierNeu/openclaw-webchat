@@ -8,6 +8,7 @@ import { internal } from "./_generated/api";
 import { Id } from "./_generated/dataModel";
 import { generateApiKey, hashKey } from "./lib/apikeys";
 import { seedBuiltinRoles } from "./lib/rbac";
+import { resolveTargetForProfile } from "./routing";
 
 function assertDev() {
   if (process.env.OPENCLAW_ENABLE_ANON_AUTH !== "1") {
@@ -262,6 +263,151 @@ export const searchProbe = query({
       count: hits.length,
       chatIds: hits.map((m) => m.chatId),
     };
+  },
+});
+
+/**
+ * LIVE-BRIDGE ROUTING (dev-gated). Wire the test user(s) to one OpenClaw instance
+ * so `bridge.dispatch` resolves a non-null target and POSTs to the bridge instead
+ * of marking the outbox `failed` (the "unrouted" path). Upserts the non-secret
+ * `instances` row (the bridge maps name -> token/deviceIdentity from its OWN env;
+ * gatewayUrl here is display/metadata only) and sets a per-user OVERRIDE on the
+ * matching profile(s).
+ *
+ *   npx convex run dev:routeUser \
+ *     '{"instanceName":"admin","gatewayUrl":"wss://gateway.lacneu.com","agentId":"olivier","canonical":"olivier"}'
+ *
+ * With no `email`, routes EVERY active (user|admin) profile — foolproof on a
+ * single-operator dev box where several stale sessions may exist. Pass `email`
+ * to target one profile.
+ */
+export const routeUser = mutation({
+  args: {
+    instanceName: v.string(),
+    gatewayUrl: v.string(),
+    agentId: v.string(),
+    canonical: v.string(),
+    email: v.optional(v.string()),
+  },
+  handler: async (ctx, { instanceName, gatewayUrl, agentId, canonical, email }) => {
+    assertDev();
+
+    // Upsert the non-secret instance row (name == secret-store group key).
+    const existing = await ctx.db
+      .query("instances")
+      .withIndex("by_name", (q) => q.eq("name", instanceName))
+      .unique();
+    if (existing === null) {
+      await ctx.db.insert("instances", {
+        name: instanceName,
+        gatewayUrl,
+        displayName: instanceName,
+      });
+    } else {
+      await ctx.db.patch(existing._id, { gatewayUrl });
+    }
+
+    // Route the matching active profile(s) via a per-user override.
+    const profiles = await ctx.db.query("profiles").take(500);
+    const targets = profiles.filter(
+      (p) =>
+        (p.role === "admin" || p.role === "user") &&
+        (email ? p.email === email : true),
+    );
+    const routed: Array<{
+      userId: Id<"users">;
+      email: string | null;
+      role: string;
+      target: Awaited<ReturnType<typeof resolveTargetForProfile>>;
+    }> = [];
+    for (const p of targets) {
+      await ctx.db.patch(p._id, {
+        overrideInstance: instanceName,
+        overrideAgentId: agentId,
+        canonical,
+      });
+      const fresh = await ctx.db.get(p._id);
+      const target = await resolveTargetForProfile(ctx, fresh);
+      routed.push({
+        userId: p.userId,
+        email: p.email ?? null,
+        role: p.role as string,
+        target,
+      });
+    }
+
+    return { ok: true, instance: instanceName, gatewayUrl, routedCount: routed.length, routed };
+  },
+});
+
+/**
+ * LIVE-TEST TRIGGER (dev-gated). Programmatically enqueue a user turn for the
+ * routed test profile — the same path the browser's send.sendMessage takes
+ * (optimistic user message + outbox row + scheduled bridge.dispatch) — so the
+ * live harness can drive a round-trip WITHOUT a browser click. The scheduled
+ * dispatch resolves routing (overrideInstance) and POSTs to the bridge, which
+ * connects to the gateway and streams the reply back into Convex.
+ *
+ *   npx convex run dev:testSend '{"text":"hello from the live harness"}'
+ *
+ * Returns the chatId so a follow-up run can continue the same conversation, and
+ * so the harness can poll `messages` by chat for the assistant's final state.
+ */
+export const testSend = mutation({
+  args: { text: v.string(), chatId: v.optional(v.id("chats")) },
+  handler: async (ctx, { text, chatId }) => {
+    assertDev();
+
+    // The live-test user = the routed profile (per-user override set by routeUser).
+    const profiles = await ctx.db.query("profiles").take(500);
+    const owner =
+      profiles.find((p) => p.overrideInstance) ??
+      profiles.find((p) => p.role === "admin") ??
+      profiles[0];
+    if (!owner) return { ok: false as const, reason: "no routed profile" };
+    const userId = owner.userId;
+    const now = Date.now();
+
+    let cid: Id<"chats">;
+    if (chatId) {
+      const chat = await ctx.db.get(chatId);
+      if (!chat || chat.userId !== userId) {
+        return { ok: false as const, reason: "chat not owned by test user" };
+      }
+      cid = chatId;
+    } else {
+      cid = await ctx.db.insert("chats", {
+        userId,
+        title: "Live test",
+        archived: false,
+        sortKey: -1000,
+        updatedAt: now,
+      });
+    }
+
+    // Mirror send.sendMessage: optimistic user message + outbox + dispatch.
+    const messageId = await ctx.db.insert("messages", {
+      chatId: cid,
+      userId,
+      role: "user",
+      status: "complete",
+      text,
+      updatedAt: now,
+    });
+    await ctx.db.patch(cid, { updatedAt: now });
+
+    const outboxId = await ctx.db.insert("outbox", {
+      chatId: cid,
+      userId,
+      clientMessageId: `live-${messageId}`,
+      messageId,
+      text,
+      attachmentIds: [],
+      status: "pending",
+    });
+    await ctx.scheduler.runAfter(0, internal.bridge.dispatch, { outboxId });
+
+    return { ok: true as const, chatId: cid, messageId, outboxId };
   },
 });
 

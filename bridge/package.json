@@ -5,8 +5,9 @@
   "type": "module",
   "description": "Node/TS bridge for the OpenClaw webchat: holds the persistent operator WebSocket and runs the streaming normalizer that feeds Convex.",
   "scripts": {
-    "build": "tsc -p tsconfig.json",
+    "build": "tsc -p tsconfig.build.json",
     "typecheck": "tsc -p tsconfig.json --noEmit",
+    "start": "node --env-file=.env dist/index.js",
     "test": "vitest run",
     "test:watch": "vitest"
   },

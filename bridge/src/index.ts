@@ -2,7 +2,9 @@
 // server, then listen. Graceful shutdown closes every live OpenClaw socket and
 // the HTTP server so there are no zombie connections.
 //
-// Run with: node dist/index.js   (after `npm run build`)
+// Run with: npm start   (after `npm run build`) — `start` passes
+// `--env-file=.env`, so secrets load from bridge/.env. Equivalent to
+// `node --env-file=.env dist/index.js`.
 
 import { loadConfig } from "./config.js";
 import { HttpConvexWriter } from "./convex-writer.js";

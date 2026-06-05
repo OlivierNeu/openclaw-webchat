@@ -42,6 +42,30 @@ const DEFAULT_REQUEST_TIMEOUT_MS = 30_000;
 
 export class OpenClawError extends Error {}
 
+// Debug instrumentation, gated by BRIDGE_DEBUG=1. Logs the handshake (incl. the
+// gateway `server.version` — the version oracle the live harness keys on), every
+// outgoing request (method + sessionKey ONLY — never the message text, no PHI),
+// every correlated `res`/ack, and every raw inbound frame (the diagnosis +
+// fixture material for the auto-adjust loop). Off by default; verbose at our
+// scale only when explicitly enabled.
+function dbg(...args: unknown[]): void {
+  if (process.env.BRIDGE_DEBUG === "1") {
+    console.log("[oc]", ...args);
+  }
+}
+
+function clip(value: unknown, max = 1200): string {
+  if (value === undefined) return "undefined";
+  let s: string;
+  if (typeof value === "string") s = value;
+  else {
+    const j = JSON.stringify(value);
+    // JSON.stringify returns undefined for undefined/functions/symbols.
+    s = typeof j === "string" ? j : String(value);
+  }
+  return s.length > max ? s.slice(0, max) + `…(+${s.length - max})` : s;
+}
+
 /** A raw inbound gateway frame (anything that is not a request/response ack). */
 export type GatewayFrame = Record<string, unknown> & { type?: unknown };
 
@@ -226,6 +250,19 @@ export class OpenClawConnection {
           return; // ignore unrelated frames until our connect ack lands
         }
         if (frame.ok) {
+          // hello-ok: server info is under `payload` (verified live: frame.payload
+          // = {type:"hello-ok", protocol, server:{version,connId}, features,...}).
+          const payload = (frame.payload ?? frame.result ?? {}) as Record<string, unknown>;
+          const server = (payload.server ?? {}) as Record<string, unknown>;
+          dbg(
+            "connect hello-ok | server.version=",
+            server.version ?? "?",
+            "| connId=",
+            server.connId ?? "?",
+            "| role/scopes=",
+            clip({ role: payload.role, scopes: payload.scopes }, 200),
+          );
+          dbg("connect hello-ok (raw):", clip(frame, 1500));
           settled = true;
           clearTimeout(connectTimer);
           connection = new OpenClawConnection(ws);
@@ -234,6 +271,7 @@ export class OpenClawConnection {
           return;
         }
         const error = (frame.error ?? {}) as Record<string, unknown>;
+        dbg("connect FAILED (raw):", clip(frame, 1500));
         fail(
           new OpenClawError(
             `${(error.code as string) ?? "CONNECT_FAILED"}: ` +
@@ -269,6 +307,12 @@ export class OpenClawConnection {
     }
     if (frame.type === "res") {
       const id = String(frame.id);
+      dbg(
+        "res <-",
+        id,
+        frame.ok ? "ok" : "ERR " + clip(frame.error, 300),
+        frame.ok ? clip(frame.result, 400) : "",
+      );
       const pending = this.pending.get(id);
       if (pending) {
         this.pending.delete(id);
@@ -277,6 +321,8 @@ export class OpenClawConnection {
       }
       return; // acks are correlated, never forwarded to the inbound consumer
     }
+    // Raw inbound frame: the diagnosis + first-fixture material for the harness.
+    dbg("frame <-", clip(frame));
     this.push(frame as GatewayFrame);
   }
 
@@ -348,6 +394,8 @@ export class OpenClawConnection {
         this.closeError ?? new OpenClawError("connection is closed"),
       );
     }
+    // Log method + sessionKey ONLY — never params.message (the user text = PHI).
+    dbg("req ->", method, "| key=", clip(params.sessionKey ?? params.key ?? "", 90));
     return new Promise<ResponseFrame>((resolve, reject) => {
       const id = randomUUID();
       const timer = setTimeout(() => {
