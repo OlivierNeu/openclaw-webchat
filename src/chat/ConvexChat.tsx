@@ -44,6 +44,7 @@ import { RunStatus } from "./RunStatus";
 import { ToolCard } from "./ToolCard";
 import { MediaPart } from "./MediaPart";
 import { MarkdownText } from "./MarkdownText";
+import { FeedbackButton } from "./FeedbackDialog";
 
 // Top-level chat surface. Wires the reactive Convex-backed runtime into
 // assistant-ui and renders the thread with custom renderers for run status,
@@ -612,9 +613,31 @@ function MessageSource() {
   const raw = useMessage(
     (m) => (m.metadata?.custom as { rawText?: string } | undefined)?.rawText ?? "",
   );
+  const [copied, setCopied] = useState(false);
+  // Count CODE POINTS, not UTF-16 units (`.length`), so an emoji / non-BMP char
+  // does not inflate the count — the number must be trustworthy.
+  const codePoints = [...raw].length;
   return (
     <div className="oc-msg__source">
-      <div className="oc-msg__source-label">Source · texte brut exact</div>
+      <div className="oc-msg__source-head">
+        <span className="oc-msg__source-label">
+          Source · texte brut exact · {codePoints} caractère{codePoints > 1 ? "s" : ""}
+        </span>
+        <button
+          type="button"
+          className="oc-iconbtn"
+          title="Copier la source exacte"
+          aria-label="Copier la source exacte"
+          onClick={() => {
+            void navigator.clipboard?.writeText(raw).then(() => {
+              setCopied(true);
+              window.setTimeout(() => setCopied(false), 1200);
+            });
+          }}
+        >
+          {copied ? <IconCheck /> : <IconCopy />}
+        </button>
+      </div>
       <pre className="oc-msg__source-pre">{raw.length > 0 ? raw : "(aucun texte)"}</pre>
     </div>
   );
@@ -673,6 +696,7 @@ function UserMessage() {
             active={showSource}
             onToggle={() => setShowSource((s) => !s)}
           />
+          <FeedbackButton />
           <DeleteMessageButton kind="user" />
         </ActionBarPrimitive.Root>
       </div>
@@ -721,6 +745,7 @@ function AssistantMessage() {
             active={showSource}
             onToggle={() => setShowSource((s) => !s)}
           />
+          <FeedbackButton />
           <DeleteMessageButton kind="assistant" />
         </ActionBarPrimitive.Root>
       </div>

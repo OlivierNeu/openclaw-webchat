@@ -127,6 +127,9 @@ export function convertConvexMessage(
         // The Convex message _id — surfaced so per-message actions (delete) call
         // the mutation with the authoritative id, not assistant-ui's internal one.
         messageId: message._id,
+        // The owning chat id — surfaced so per-message actions (forensic feedback)
+        // can scope the mutation without threading chatId through React context.
+        chatId: message.chatId,
         status: message.status,
         runId: message.runId ?? null,
         error: message.error ?? null,

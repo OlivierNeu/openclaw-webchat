@@ -76,6 +76,7 @@ export type ConvexMessagePartView =
  */
 export interface ConvexMessageView {
   _id: ConvexId<"messages">;
+  chatId: ConvexId<"chats">;
   _creationTime: number;
   role: MessageRole;
   runId?: string;

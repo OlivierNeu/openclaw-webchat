@@ -377,11 +377,75 @@
   background: var(--muted);
 }
 
+/* ── Report Feedback dialog (UI-9) — category + comment, then the server's
+   browser-fidelity verdict. */
+.oc-feedback__form {
+  display: flex;
+  flex-direction: column;
+  gap: 0.4rem;
+}
+.oc-feedback__label {
+  font-size: 0.78rem;
+  font-weight: 600;
+  color: var(--foreground);
+  margin-top: 0.35rem;
+}
+.oc-feedback__textarea {
+  width: 100%;
+  min-height: 84px;
+  resize: vertical;
+  padding: 0.55rem 0.7rem;
+  background: var(--background);
+  color: var(--foreground);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  font: inherit;
+  font-size: 0.875rem;
+  line-height: 1.5;
+}
+.oc-feedback__textarea:focus-visible {
+  outline: none;
+  border-color: var(--ring, var(--foreground));
+  box-shadow: 0 0 0 3px color-mix(in oklch, var(--ring, var(--foreground)) 24%, transparent);
+}
+.oc-feedback__count {
+  align-self: flex-end;
+  font-size: 0.72rem;
+  color: var(--muted-foreground);
+}
+.oc-feedback__result {
+  padding: 0.2rem 0;
+}
+.oc-feedback__fidelity {
+  margin: 0;
+  padding: 0.6rem 0.75rem;
+  border-radius: var(--radius-md);
+  font-size: 0.85rem;
+  line-height: 1.5;
+  background: var(--muted);
+  color: var(--foreground);
+  border: 1px solid var(--border);
+}
+.oc-feedback__fidelity.is-ok {
+  background: color-mix(in oklch, var(--primary, green) 12%, var(--background));
+  border-color: color-mix(in oklch, var(--primary, green) 40%, var(--border));
+}
+.oc-feedback__fidelity.is-warn {
+  background: color-mix(in oklch, var(--destructive, orange) 14%, var(--background));
+  border-color: color-mix(in oklch, var(--destructive, orange) 45%, var(--border));
+}
+
 /* ── Raw "Source" view of a message — verbatim, convention-free (no markdown,
    no autocorrect): exactly the stored text, monospace + wrapping + selectable.
    The trust guarantee a user can rely on to confirm what was sent/received. */
-.oc-msg__source-label {
+.oc-msg__source-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.5rem;
   margin-bottom: 0.3rem;
+}
+.oc-msg__source-label {
   font-size: 0.68rem;
   font-weight: 600;
   letter-spacing: 0.04em;
@@ -401,6 +465,11 @@
   white-space: pre-wrap;
   word-break: break-word;
   user-select: text;
+  /* CRITICAL for a source-of-truth view: disable font ligatures / contextual
+     alternates so glyphs map 1:1 to code points — the font must never make "->"
+     look like an arrow or "!=" like "≠". The displayed glyph == the stored char. */
+  font-variant-ligatures: none;
+  font-feature-settings: "liga" 0, "clig" 0, "calt" 0, "dlig" 0;
 }
 /* Inside the user bubble (already a muted surface), drop the box — the bubble
    is the container; keep just the verbatim monospace text. */

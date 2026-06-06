@@ -17,6 +17,7 @@ import type * as bridge_ingest from "../bridge_ingest.js";
 import type * as chats from "../chats.js";
 import type * as crons from "../crons.js";
 import type * as dev from "../dev.js";
+import type * as feedback from "../feedback.js";
 import type * as http from "../http.js";
 import type * as integrations_config from "../integrations/config.js";
 import type * as integrations_langfuse from "../integrations/langfuse.js";
@@ -60,6 +61,7 @@ declare const fullApi: ApiFromModules<{
   chats: typeof chats;
   crons: typeof crons;
   dev: typeof dev;
+  feedback: typeof feedback;
   http: typeof http;
   "integrations/config": typeof integrations_config;
   "integrations/langfuse": typeof integrations_langfuse;

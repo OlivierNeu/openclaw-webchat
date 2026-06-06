@@ -5,6 +5,7 @@ import { ConvexAuthProvider } from "@convex-dev/auth/react";
 import { RouterProvider } from "@tanstack/react-router";
 import { router } from "./router";
 import { DialogsProvider } from "@/components/ConfirmDialog";
+import { FeedbackProvider } from "./chat/FeedbackDialog";
 import "./index.css";
 import "./chat/convexChat.css";
 
@@ -40,7 +41,9 @@ ReactDOM.createRoot(document.getElementById("root")!).render(
   <React.StrictMode>
     <ConvexAuthProvider client={convex}>
       <DialogsProvider>
-        <RouterProvider router={router} />
+        <FeedbackProvider>
+          <RouterProvider router={router} />
+        </FeedbackProvider>
         <React.Suspense fallback={null}>
           {/* Dev-only. Toggle button bottom-RIGHT so it doesn't overlap the
               sidebar's Settings button (default is bottom-left). */}

@@ -354,7 +354,94 @@ export default defineSchema({
     // Idempotency key scoped per user. (userId, clientMessageId) is effectively
     // unique because clientMessageId is a client-generated UUID; scoping by
     // userId keeps one user's id space from colliding with another's.
-    .index("by_client_message", ["userId", "clientMessageId"]),
+    .index("by_client_message", ["userId", "clientMessageId"])
+    // Reverse lookup message -> outbox row, used by forensic feedback to capture
+    // the dispatched payload best-effort (the row is transient, may be gone).
+    .index("by_message", ["messageId"]),
+
+  // On-demand FORENSIC feedback (OpenRouter-style "Report Feedback"). When a user
+  // flags a message (category + comment), we FREEZE a full forensic snapshot at
+  // that instant — so a later UI-7 delete/regenerate cannot erase the disputed
+  // evidence, and an admin can analyze "did the system alter words?" with the
+  // complete context. NEW table -> required fields are fine.
+  //
+  // Trust model (see convex/feedback.ts):
+  //   - Everything under `snapshot` EXCEPT `displayedText`/`clientInfo` is
+  //     SERVER-READ from the DB inside the mutation — never accepted from the
+  //     client (else the forensic proof would be forgeable).
+  //   - `displayedText` is the ONLY client-declared content: it is what the
+  //     BROWSER actually rendered (the byte-exact `.oc-msg__source-pre`
+  //     textContent / `rawText`), captured solely so the server can compare it to
+  //     the stored text (`displayedMatchesStored`) and prove browser fidelity.
+  //   - `realUserId`/`impersonated` give accountability when an admin reports
+  //     while impersonating. Reading feedback content back is an admin path that
+  //     must be audited + gated by `traces.read.content` (increment B).
+  feedback: defineTable({
+    userId: v.id("users"), // effective reporter
+    realUserId: v.id("users"), // who really clicked (impersonation-aware)
+    impersonated: v.boolean(),
+    chatId: v.id("chats"),
+    messageId: v.id("messages"),
+    at: v.number(),
+    category: v.string(), // incoherence|incorrect|altered_words|formatting|latency|api_error|other
+    comment: v.optional(v.string()),
+    snapshot: v.object({
+      // --- The reported message (SERVER-READ, authoritative) ---
+      messageRole: v.string(),
+      messageText: v.string(),
+      messageStatus: v.optional(v.string()),
+      messageError: v.optional(v.string()),
+      messageUpdatedAt: v.optional(v.number()),
+      runId: v.optional(v.string()),
+      isRegeneration: v.optional(v.boolean()), // derived from a regen-* outbox key
+      partsJson: v.optional(v.string()), // serialized messageParts (tools/reasoning/media)
+      partsCount: v.optional(v.number()),
+      // --- Generating context (SERVER-READ) ---
+      promptMessageId: v.optional(v.id("messages")),
+      promptText: v.optional(v.string()), // immediately preceding user turn
+      contextJson: v.optional(v.string()), // bounded [{role,text}] window, oldest->newest
+      contextCount: v.optional(v.number()),
+      contextWindowLimit: v.optional(v.number()), // the bound applied (no silent truncation)
+      contextTruncated: v.optional(v.boolean()),
+      // --- Session config that produced it (SERVER-READ) ---
+      sessionSettings: v.optional(
+        v.object({
+          thinkingLevel: v.optional(v.string()),
+          model: v.optional(v.string()),
+        }),
+      ),
+      sessionMetaJson: v.optional(v.string()), // full sessionMeta at report time
+      openclawModel: v.optional(v.string()),
+      openclawProvider: v.optional(v.string()),
+      openclawRuntime: v.optional(v.string()),
+      openclawVersion: v.optional(v.string()), // bridge-side; may be absent in Convex
+      // --- What was dispatched (SERVER-READ, best-effort; outbox is transient) ---
+      outboxText: v.optional(v.string()),
+      outboxStatus: v.optional(v.string()),
+      outboxClientMessageId: v.optional(v.string()),
+      outboxAttachmentsCount: v.optional(v.number()),
+      outboxAvailable: v.optional(v.boolean()),
+      // --- Integrity (optional; snapshot itself is already the frozen proof) ---
+      contentHash: v.optional(v.string()),
+      // --- CLIENT DECLARATIONS (browser-fidelity comparison ONLY, not trusted) ---
+      displayedText: v.optional(v.string()),
+      displayedMatchesStored: v.optional(v.boolean()), // server: displayedText === messageText
+      clientInfo: v.optional(
+        v.object({
+          userAgent: v.optional(v.string()),
+          language: v.optional(v.string()),
+          timezone: v.optional(v.string()),
+          appVersion: v.optional(v.string()),
+          theme: v.optional(v.string()),
+          sourceWasOpen: v.optional(v.boolean()),
+        }),
+      ),
+    }),
+  })
+    .index("by_chat", ["chatId"])
+    .index("by_message", ["messageId"])
+    .index("by_time", ["at"])
+    .index("by_real", ["realUserId"]),
 
   // ===========================================================================
   // Observability & RBAC spine (increment 1). All NEW tables -> required fields

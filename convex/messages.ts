@@ -106,6 +106,7 @@ export const listByChat = query({
 
         return {
           _id: message._id,
+          chatId: message.chatId,
           _creationTime: message._creationTime,
           role: message.role,
           status: message.status,

@@ -2,8 +2,8 @@
 
 **Purpose of this file:** the single, durable, detailed snapshot to RESUME from
 after a context compaction. Read this first. It is kept current as work lands.
-Last verified-green: **2026-06-03** — `tsc src` 0, `tsc convex` 0, `vitest` 87
-(convex+routing) + mcp 36, `vite build` OK.
+Last verified-green: **2026-06-06** — `tsc src` 0, `tsc convex` 0, `vitest` 127
+(convex+routing, incl. UI-9 feedback 4) + mcp 36, `vite build` OK.
 
 Companion docs (authoritative for their area): `OBSERVABILITY_PLATFORM_PLAN.md`
 (contract), `OBSERVABILITY_RESEARCH.md`, `OBSERVABILITY_REVIEW.md` (28-item
@@ -765,6 +765,58 @@ row status **complete** ("Bridge validé, je te reçois bien."). CAPTURED LIVE G
   SourceToggleButton), convertMessage.ts (rawText), convexChat.css. Gates: tsc src 0, vitest 123, vite
   build OK. NEVER committed. DEFERRED (separate feature): provenance of the INPUTS that fed a response
   (prompt/context/tool inputs) = observability/trace, not text fidelity.
+  **UI-8b SOURCE-VIEW HARDENING — DONE + LIVE-VERIFIED 2026-06-06:** answer to "can the BROWSER alter the
+  raw source view?". The ONLY display-layer risk is font ligatures/contextual alternates (`->`→`→`). Fixed:
+  `.oc-msg__source-pre { font-variant-ligatures: none; font-feature-settings: "liga"/"clig"/"calt"/"dlig" 0 }`
+  (verified live: computed `fontVariantLigatures: "none"`). Added a "Copier la source exacte" button (the
+  copy = the byte-exact bytes for external diff/hex) + a code-point counter (`[...str].length`, NOT `.length`
+  — an emoji must not inflate it). Files: ConvexChat.tsx (MessageSource head), convexChat.css.
+  **UI-9 #71 — REPORT FEEDBACK + ON-DEMAND FORENSIC SNAPSHOT — INCREMENT A DONE + LIVE-VERIFIED 2026-06-06:**
+  OpenRouter-style flag in the action bar (user + AI) → shadcn Dialog (category Select + comment 0/1000 →
+  Submit) → `feedback.submitFeedback` FREEZES a complete forensic snapshot. WHY a snapshot (not a reference):
+  UI-7 delete/regenerate would erase the disputed evidence; the snapshot preserves it at report time. WHY
+  on-demand (not per-message): the feedback IS the dispute signal — capture everything only when it matters.
+  TRUST MODEL (non-negotiable): `snapshot.messageText` + all authoritative fields are SERVER-READ from the
+  DB in the mutation, NEVER from the client; `displayedText` is the ONLY client-declared content (the
+  byte-exact `.oc-msg__source-pre` textContent / `rawText`) and exists solely so the server computes
+  `displayedMatchesStored` — the DATA-BACKED answer to "did the browser change the characters?". Captured
+  ("n'oublie rien"): message text/role/status/runId, isRegeneration (regen-* outbox key), parts (bounded),
+  prompt + bounded context window (limit RECORDED, contextTruncated flag — no silent truncation), sessionMeta
+  + sessionSettings + model/provider/runtime, dispatched outbox payload (best-effort via new outbox
+  `by_message` index — FOUND in the live row), clientInfo (UA/locale/tz/theme), realUserId + impersonated.
+  AUDIT: every submit → `recordAudit("feedback.submit")` with realUserId (a report filed while impersonating
+  is attributable). PRIVACY REFRAME (Olivier): admin has no privacy constraint (can already impersonate) —
+  storing content is OK; the rule is admin cross-user content ACCESS must be AUDITED (verified: the only
+  admin path to another user's content is impersonation, already audited at start/stop; listByChat + search
+  are owner-scoped to the effective id, no bypass). VERSION-INDEPENDENT by construction: the feedback path
+  has ZERO OpenClaw coupling (reads stored Convex rows) — the 5.19/6.1 matrix is moot here (live row captured
+  against the running instance). Files: schema.ts (feedback table + outbox by_message index), feedback.ts
+  (submitFeedback + myReportedMessageIds), feedback.test.ts (4: server-read truth survives a FORGED
+  displayedText, owner-scope, invalid category, impersonation audit), messages.ts/convexTypes.ts/
+  convertMessage.ts (chatId on the message view), FeedbackDialog.tsx, ConvexChat.tsx (FeedbackButton wired),
+  convexChat.css. Gates: tsc src 0, tsc convex 0, vitest 127 (feedback 4), vite build OK. Live: dialog opens,
+  full submit → row stored with the full snapshot above. NEVER committed. VERDICT HONESTY (advisor-caught,
+  fixed): the STRONG "le texte affiché correspond" claim is shown ONLY when the source view was open
+  (`sourceWasOpen` → displayedText = the hardened `.oc-msg__source-pre` textContent = a real DOM read);
+  with source CLOSED, displayedText falls back to `rawText` (client copy of message.text) so a match proves
+  transport consistency, NOT display fidelity → the dialog shows an actionable "open the source view and
+  re-flag" message instead of overclaiming. INCREMENT B (consciously deferred): (1) admin forensic READ view
+  of feedback + snapshot — gated by `traces.read.content` + audited on each cross-user content read ("admin
+  sees other users' info" → must be traced, per Olivier's rule); (2) `contentHash`/tamper-evidence — the
+  snapshot is a DB row an admin could edit; an append-only or hashed guarantee raises it to "cannot be
+  disputed" (the field exists in schema, unset for now — no deterministic sync hash in a mutation).
+  **UI-9 FIX (Olivier) — DONE + LIVE-VERIFIED 2026-06-06:** (1) the flag on USER messages opened the dialog
+  then it CLOSED on mouse-leave — root cause: the dialog was rendered INSIDE the action bar, and assistant-ui
+  `autohide` UNMOUNTS the bar's children on mouse-leave (the AI/last message stays shown so it worked there).
+  Fixed by lifting the dialog to an app-root `<FeedbackProvider>` + `useFeedback()` (mirrors useConfirm,
+  wired in main.tsx inside DialogsProvider); `FeedbackButton` now only CAPTURES the target + rendered text at
+  click and hands it to the root dialog → lifecycle independent of hover. Verified: user-message dialog opens
+  AND survives mouse-leave. (2) ROLE-BASED categories: AI report = 7 (Réponse incorrecte/Incohérence/Mots-
+  orthographe erronés/Formatage/Latence/Erreur API/Autre); USER report = 3 (Mots modifiés à l'envoi/
+  Caractères-mise en forme altérés/Autre) — all ids stay within the server FEEDBACK_CATEGORIES set (no
+  backend change). Live: AI shows 7, user shows 3, user submit stored with messageRole "user". Files:
+  FeedbackDialog.tsx (provider refactor + role categories), main.tsx (FeedbackProvider wiring). Gates: tsc
+  src 0, vite build OK.
   **#53 INCREMENT 3 — COMPOSER POLISH BUILT + LIVE-VERIFIED 2026-06-05 (pure frontend, no live agent):**
   via assistant-ui 0.14 primitives in `ConvexChat.tsx` + `convexChat.css`: (1) EMPTY STATE
   (`ThreadPrimitive.Empty`) — OC avatar + "Comment puis-je aider ?" + 4 suggestion cards
