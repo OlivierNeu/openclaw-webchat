@@ -154,6 +154,11 @@ export class SessionRegistry {
     private readonly clock: Clock = defaultClock,
   ) {}
 
+  /** The Convex writer (read seam for session re-hydration in performSend). */
+  getWriter(): ConvexWriter {
+    return this.writer;
+  }
+
   async acquire(chatId: string, openclawChatId: string | null): Promise<BridgeSession> {
     const existing = this.sessions.get(chatId);
     if (existing && !existing.connection.isClosed) {

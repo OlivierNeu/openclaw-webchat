@@ -621,9 +621,13 @@ row status **complete** ("Bridge validé, je te reçois bien."). CAPTURED LIVE G
   "héritée" badge shows only when thinkingLevel===thinkingDefault. (4) DEV SEED: `dev.seedSessionMeta`
   (realistic `sessions.describe` defaults: 62226/272000 ≈ 23%). (5) RECEIVING CONTRACT: ingest op
   `setSessionMeta` (`bridge_ingest.ts`) → `internal.stream.setSessionMeta` (patches chat.sessionMeta,
-  non-secret labels only). **NOTE for reviewers/diff-scan: this op has NO production caller yet** — it
-  is the documented receiving seam the bridge producer (below) will use; so far only the `curl` test
-  and `dev.seedSessionMeta` exercise it. Intentional, not an oversight. **LIVE-VERIFIED (3 ways):** seed 23% → green meter + "gpt-5.5" + "Réflexion :
+  non-secret labels only). **PRODUCTION CALLER LANDED (UI-2 #64, 2026-06-06):** the bridge now reports
+  live meta — `server.ts performSend` reuses the `sessions.describe` it already does (for re-hydration),
+  `parseSessionMeta` extracts the fields, `convex-writer.reportSessionMeta` POSTs `setSessionMeta`
+  (fire-and-forget, non-fatal). Live-verified on 6.1: the header strip now shows REAL gateway values
+  (gpt-5.5 · High héritée · 7% · 19.3k/272.0k) replacing the dev seed (`docs/live-evidence-ui2-sessionmeta-live.png`).
+  Known v1 lag: the describe is PRE-turn → the meter reflects the previous turn (v2: re-describe post-finalize).
+  **LIVE-VERIFIED (3 ways):** seed 23% → green meter + "gpt-5.5" + "Réflexion :
   High · héritée" (matches image #27 exactly: `23% · 62.2k/272.0k`); re-seed 92% + medium → RED meter +
   "Medium" with NO héritée badge (escalation + inheritance logic + Convex reactivity, no reload); and a
   raw `curl POST /bridge/ingest setSessionMeta` (gpt-5.4-mini/low/48%) → strip updated → proves the
@@ -636,6 +640,92 @@ row status **complete** ("Bridge validé, je te reçois bien."). CAPTURED LIVE G
   RPC can't be live-verified while the harness send-path is broken (#61) — wiring it blind would give
   false confidence. Field mapping = the `sessions.describe` shape in CHAT_UX_DESIGN §2.1. **Write-back
   (`sessions.patch`) increment stays gated on the off-hours param probe (also needs a working gateway).**
+  **UI-3 #65 — WRITE-BACK "Avancé ▾" PANEL — DONE + LIVE-VERIFIED 2026-06-06 (6.1 end-to-end, 5.19
+  linchpin):** the header strip now lets the user CHANGE the OpenClaw reasoning level + model for this
+  chat, applied IMMEDIATELY (not next-send — that earlier design FAILED the acceptance test + trust
+  rule; corrected after advisor). Flow: `chats.setSessionKnob` (owner-scoped) persists
+  `chats.sessionSettings {thinkingLevel?,model?}` + schedules `internal.bridge.dispatchPatch` →
+  `POST /patch` (NEW bridge endpoint) → `applySessionSettings` (sessions.patch) → describe →
+  `reportSessionMeta`. The chip reads LIVE `sessionMeta` (honest, NO optimism). `performSend`
+  RE-APPLIES `sessionSettings` before its describe (survives session reset, 1-turn convergence).
+  Model list mirrored from `models.list` (fetched once/connection, deduped by id) →
+  `sessionMeta.availableModels`. **Verbose EXCLUDED** (verboseLevel=full is load-bearing for streaming)
+  — decision SURFACED (a muted note in the menu + code comments), not silently dropped. LINCHPIN
+  (`describe` reflects `sessions.patch` IMMEDIATELY) confirmed on BOTH 6.1 and 5.19; the reasoning enum
+  `[off,minimal,low,medium,high,xhigh]` + `models.list {models:[{id,name,provider}]}` are IDENTICAL
+  across versions. Browser-verified on 6.1 (chat jx7f3yr): Avancé → reasoning radio (6 levels + "défaut"
+  marker), High→Low (gateway=low confirmed by probe, chip honest "Low"), "Hériter de l'agent (High)" →
+  gateway=high + chip "High héritée", model gpt-5.5→gpt-5.4-mini (gateway confirmed, chip follows) →
+  restored. Files: schema.ts, chats.ts (setSessionKnob), bridge.ts (dispatchPatch + openclaw.patch trace),
+  server.ts (PatchBody, applySessionSettings, ensureAvailableModels, performPatch, /patch route,
+  performSend re-apply), convex-writer/bridge_ingest/stream (availableModels), messages.getSessionMeta,
+  ConvexChat.tsx (SessionKnobsMenu) + convexChat.css. Gates: tsc(src+convex) 0, vitest 103, build bridge
+  + 42 tests. NEVER committed.
+  **UI-4 #66 — TRANSCRIPT/STREAMING "EXCEPTIONAL" PASS — DONE + LIVE-VERIFIED 2026-06-06 (pure
+  frontend, no bridge/version dependency):** elevate WITHOUT redoing the solid OWUI/increment-3 work.
+  (1) STREAMING STATES — calm French chips driven by a PURE function `runStatusView(status, hasText)`
+  (extracted + unit-tested because the states are transient/un-screenshottable): `thinking` (streaming,
+  no text) = animated 3-dots + "Réflexion…" (the typing indicator); `generating` (streaming + text) =
+  soft pulse + "Génération…"; `error` = Lucide CircleAlert + "Erreur" + message; `aborted` = Square +
+  "Interrompu"; complete = no chip. (2) a11y — kept `role="status"` (live polite) on the STATUS chip
+  ONLY, NOT the streaming body (advisor: a body live-region would re-announce every token). (3)
+  MICRO-INTERACTION — fade+rise-in scoped to `.oc-thread__viewport > .oc-msg:last-child` ONLY (so
+  opening/switching to a populated chat shows it SETTLED — only the newest turn animates; the prior 70
+  render at full opacity). SAFE on finalize because the message id is the stable Convex `_id` (no remount
+  streaming→complete). Deterministically verified: of 71 msgs, first/mid `animationName==="none"`, last
+  `==="oc-msg-in"` (caught + fixed an advisor-flagged regression where the whole transcript faded in at once).
+  (4) prefers-reduced-motion GLOBAL guard disables msg-in/dots/pulse. (5) Composer no-emoji fix: 🔧 →
+  Lucide Wrench + focus-visible. Files: src/chat/runStatusView.ts (+.test.ts, 10 tests), RunStatus.tsx
+  (rewrite), ConvexChat.tsx (Wrench), convexChat.css. Live-captured on 6.1 (chat jx7f3yr): "Réflexion…"
+  dots animating during a web-search turn, then complete → markdown intact (no chip); "Erreur" chip
+  rendered on a real failed turn ("codex app-server client closed"). generating/aborted = unit-test
+  covered (codex harness produces a snapshot, not token deltas, so the no-text window is <200ms and
+  cancel is not wired). Gates: tsc src 0, vitest 116 (+10). NEVER committed. DEFERRED to UI-5: retry-on-
+  error (needs an onReload re-dispatch + gateway), the in-text streaming caret, final a11y/contrast/44px
+  sweep, export transcript.
+  **UI-5 #67 — EXPORT + a11y FINALE — DONE + LIVE-VERIFIED 2026-06-06 (final increment, pure frontend):**
+  (a) EXPORT TRANSCRIPT (md + json) — an "Exporter ▾" menu (Lucide Download) in the ChatHeader reads the
+  owner-scoped `listByChat` (bounded 200) imperatively on click → PURE unit-tested serializers
+  `transcriptToMarkdown`/`transcriptToJson` (src/chat/transcriptExport.ts, 7 tests) → Blob + `<a download>`
+  (slugified filename, accents stripped). CLEAN shape (role/text/timestamp/attachments — no `_id`/`runId`/
+  `status` leaked). When the 200 window is hit, the file carries an EXPLICIT truncation marker (advisor: a
+  silent drop betrays "the transcript"); file parts → `[fichier : name]`, tool/reasoning omitted.
+  Live-captured deterministically (hooked `URL.createObjectURL`): 11,274 chars of real markdown (title +
+  export date + `## Utilisateur`/`## OpenClaw` headers). (b) SR FINAL-ANSWER ANNOUNCE (`ThreadAnnouncer`)
+  — a PERSISTENT visually-hidden `aria-live="polite"` region, EMPTY before completion (mounting it WITH
+  text suppresses many SRs), populated with a SHORT cue "Réponse reçue." (NOT the full answer — a polite
+  region reads it all) once per completed assistant turn; `useEffect` keyed on the completed-message id +
+  a last-announced ref (silent baseline on open/switch, so history is not announced); a trailing-space
+  TOGGLE forces re-announcement (a second identical cue is otherwise mute). Verified deterministically:
+  region "" on load → "Réponse reçue." after a turn → "Réponse reçue. " (space) after a 2nd. (c) a11y:
+  focus-visible on composer send/attach/cancel + `.oc-iconbtn` (copy); a 2.5rem (40px) hit-area — NOT a
+  forced 44px (advisor: avoid clunky on a dense desktop composer); `.oc-sr-only` standard clip;
+  reduced-motion guard (from UI-4). (d) FLAGGED for the human checkpoint: the Attach DRAG-DROP test (CDP
+  cannot drive assistant-ui's file picker). Files: transcriptExport.ts (+.test.ts), ConvexChat.tsx
+  (ExportMenu + ThreadAnnouncer + downloadText), convexChat.css. Gates: tsc src+convex 0, vite build OK,
+  vitest 123 (+7). NEVER committed. STILL DEFERRED: retry-on-error (onReload + gateway), in-text streaming
+  caret. **→ The UI program (UI-1..UI-5) is COMPLETE; the remaining open item is the NAS sign-off (#62).**
+  **UI-6 #68 — UX FIXES (Olivier feedback) — DONE + LIVE-VERIFIED 2026-06-06:** (1) HOVER SHIFT — the
+  per-message copy ActionBar was hover-revealed IN FLOW, pushing the transcript down; fixed by reserving
+  space (`.oc-msg__col` padding-bottom 1.9rem) + `.oc-msg__actions { position:absolute; bottom:0 }`
+  (overlay). (2) NO SUGGESTIONS on a new chat (empty state = avatar + "Comment puis-je aider ?" only;
+  SUGGESTED_PROMPTS + CSS removed). (3) "Derniers messages" PILL — assistant-ui DISABLES (not unmounts)
+  it at the bottom; our CSS still showed it → `.oc-scrolldown:disabled { opacity:0; visibility:hidden }`
+  (already position:absolute, so no flow impact) → appears ONLY when scrolled up. (4) COMPOSER REDESIGN —
+  a single unified card (ChatGPT-style): input on top (borderless), one action bar below (+ attach /
+  Outils on the left, a circular Send/▲ — Stop/■ while running — on the right); the CARD owns the border
+  + `:focus-within` ring (zero focus shift). Voice mic OMITTED (talk.* not wired — a dead control would
+  mislead). Verified deterministically: actions position=absolute, pill hidden-at-bottom/visible-scrolled,
+  composer focusShift=none, Send enables on text. Files: src/chat/ConvexChat.tsx + convexChat.css. Gates:
+  tsc src 0, vite build OK, vitest 123. NEVER committed.
+  **UI-6b — VOICE MIC AS A SETTINGS FLAG (Olivier's choice) — DONE + LIVE-VERIFIED:** the composer mic is
+  gated by a per-user feature flag `voiceInput` (schema `profiles.voiceInput` optional, default false; new
+  `me.setVoiceInput` mutation; `me.getMe` returns it). Toggle "Saisie vocale (micro)" lives in the account
+  ("Compte ▾") menu next to the theme prefs (UserMenu reads voiceInput via getMe directly, no prop-drill).
+  The composer shows the mic ONLY when the flag is on; while talk.* is unwired the mic is a placeholder
+  (tooltip "Dictée vocale — bientôt disponible"). Verified live: flag off → no mic; toggle on → mic
+  appears (right group, before Send), matching Olivier's reference. Files: convex/{schema,me}.ts,
+  src/chat/{UserMenu,ConvexChat}.tsx. When the voice phase lands, wire the mic onClick + the recording.
   **#53 INCREMENT 3 — COMPOSER POLISH BUILT + LIVE-VERIFIED 2026-06-05 (pure frontend, no live agent):**
   via assistant-ui 0.14 primitives in `ConvexChat.tsx` + `convexChat.css`: (1) EMPTY STATE
   (`ThreadPrimitive.Empty`) — OC avatar + "Comment puis-je aider ?" + 4 suggestion cards

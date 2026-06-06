@@ -8,6 +8,7 @@ import { v } from "convex/values";
 import { mutation } from "./_generated/server";
 import type { MutationCtx } from "./_generated/server";
 import type { Id } from "./_generated/dataModel";
+import { internal } from "./_generated/api";
 import { requireActive, requireOwnedChat } from "./lib/access";
 import { auditImpersonated } from "./lib/audit";
 
@@ -92,6 +93,59 @@ export const renameChat = mutation({
     await requireOwnedChat(ctx, userId, chatId);
     await ctx.db.patch(chatId, { title, updatedAt: Date.now() });
     await auditImpersonated(ctx, actor, "chat.rename", {
+      resource: "chat",
+      resourceId: chatId,
+    });
+  },
+});
+
+// Write-back of a per-chat OpenClaw knob (reasoning level / model) from the chat
+// header's "Advanced" panel. Persists the INTENT (sessionSettings) and schedules
+// an IMMEDIATE bridge patch so the gateway applies it now and the live
+// `sessionMeta` (the chip's source of truth) refreshes — the user can rely on
+// what the header shows, not an optimistic guess. Owner-scoped. The bridge ALSO
+// re-applies these before every turn so they survive a session reset/roll.
+//
+// NOTE: `verboseLevel` is intentionally NOT exposed here — the bridge pins it to
+// "full" per connection to receive complete streaming frames; letting the user
+// lower it would silently degrade streaming. (Documented in docs/CHAT_UX_DESIGN.md.)
+export const setSessionKnob = mutation({
+  args: {
+    chatId: v.id("chats"),
+    thinkingLevel: v.optional(v.string()),
+    model: v.optional(v.string()),
+  },
+  handler: async (ctx, { chatId, thinkingLevel, model }) => {
+    const { userId, actor } = await requireActive(ctx);
+    const chat = await requireOwnedChat(ctx, userId, chatId);
+
+    // Defensive bound: enum ids are short. The gateway is the real validator, but
+    // we cap length so a malformed value can never bloat a patch payload.
+    if (thinkingLevel !== undefined && thinkingLevel.length > 64) {
+      throw new Error("Invalid thinkingLevel");
+    }
+    if (model !== undefined && model.length > 128) {
+      throw new Error("Invalid model");
+    }
+
+    // Merge onto existing intent so changing one knob never drops the other.
+    const next: { thinkingLevel?: string; model?: string } = {
+      ...(chat.sessionSettings ?? {}),
+    };
+    if (thinkingLevel !== undefined) next.thinkingLevel = thinkingLevel;
+    if (model !== undefined) next.model = model;
+    await ctx.db.patch(chatId, { sessionSettings: next });
+
+    // Immediate apply: the bridge patches the gateway, re-describes, and reports
+    // the CONFIRMED live meta back (chip stays honest). Cannot fetch from a
+    // mutation, hence the scheduled internalAction. `userId` (== chat owner,
+    // enforced above) routes the patch to the same instance/agent as sends.
+    await ctx.scheduler.runAfter(0, internal.bridge.dispatchPatch, {
+      chatId,
+      userId,
+    });
+
+    await auditImpersonated(ctx, actor, "chat.session_knob", {
       resource: "chat",
       resourceId: chatId,
     });

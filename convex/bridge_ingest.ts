@@ -117,11 +117,21 @@ type IngestOp =
         thinkingLevel?: string;
         thinkingDefault?: string;
         thinkingLevels?: { id: string; label: string }[];
+        availableModels?: { id: string; label: string }[];
         verboseLevel?: string;
         totalTokens?: number;
         contextTokens?: number;
         estimatedCostUsd?: number;
       };
+    }
+  // Session re-hydration READ (see docs/SESSION_CONTINUITY_DESIGN.md). The bridge
+  // asks for a bounded block of this chat's prior turns when it detects a fresh/
+  // rolled OpenClaw session, then prepends it to chat.send. `excludeMessageId` is
+  // the current turn's user message (so it is not duplicated into the context).
+  | {
+      op: "getRehydrationContext";
+      chatId: string;
+      excludeMessageId?: string | null;
     };
 
 export const ingest = httpAction(async (ctx, request) => {
@@ -309,6 +319,28 @@ export const ingest = httpAction(async (ctx, request) => {
         },
       });
       return json({ ok: true });
+    }
+    case "getRehydrationContext": {
+      const result = await ctx.runQuery(internal.stream.rehydrationContext, {
+        chatId: body.chatId as Id<"chats">,
+        excludeMessageId: body.excludeMessageId
+          ? (body.excludeMessageId as Id<"messages">)
+          : undefined,
+      });
+      // Metadata only — NEVER the history text (PHI). Just whether we re-hydrated
+      // and how many prior turns were included.
+      await traceIngest(ctx, {
+        kind: "openclaw.ingest",
+        chatId: body.chatId,
+        correlationId: body.chatId,
+        meta: {
+          op: body.op,
+          rehydrated: result.history !== null,
+          turnCount: result.turnCount,
+          ok: true,
+        },
+      });
+      return json(result);
     }
     default:
       return json({ ok: false, error: "unknown op" }, 400);

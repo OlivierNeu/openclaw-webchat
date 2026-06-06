@@ -1,11 +1,18 @@
 import { useMessage } from "@assistant-ui/react";
+import { CircleAlert, Square } from "lucide-react";
 import type { MessageStatus } from "./convexTypes";
+import { runStatusView, messageHasText } from "./runStatusView";
 
 // Renders the run lifecycle for an assistant message, driven by the normalizer's
 // `run.status {status, runId}` events which the bridge materialises into the
 // Convex message's `status` / `runId` fields. Reactive: when the bridge patches
 // status from "streaming" -> "complete" | "error" | "aborted", useQuery re-runs
 // and this re-renders without any HTTP turn.
+//
+// a11y: the chip carries `role="status"` (an implicit aria-live="polite" region)
+// so a screen reader announces the STATE change ("Réflexion…", "Erreur"). We do
+// NOT wrap the streaming message BODY in a live region — that would re-announce
+// the answer on every token delta (spam). The body is read once it settles.
 
 interface RunMeta {
   status?: MessageStatus;
@@ -13,31 +20,42 @@ interface RunMeta {
   error?: string | null;
 }
 
-const LABEL: Record<MessageStatus, string> = {
-  streaming: "Running",
-  complete: "Done",
-  error: "Error",
-  aborted: "Stopped",
-};
-
 export function RunStatus() {
-  const meta = useMessage(
-    (m) => (m.metadata?.custom ?? {}) as RunMeta,
+  const status = useMessage((m) => (m.metadata?.custom as RunMeta | undefined)?.status);
+  const runId = useMessage((m) => (m.metadata?.custom as RunMeta | undefined)?.runId);
+  const error = useMessage((m) => (m.metadata?.custom as RunMeta | undefined)?.error);
+  // Boolean selector -> this only re-renders on the empty<->non-empty crossing,
+  // not on every streamed token. Drives the thinking (no text) vs generating
+  // (has text) distinction.
+  const hasText = useMessage((m) =>
+    messageHasText(m.content as ReadonlyArray<{ type?: string; text?: unknown }>),
   );
-  const status = meta.status;
-  if (!status || status === "complete") return null;
+
+  const view = runStatusView(status, hasText);
+  if (!view) return null;
 
   return (
-    <div className={`oc-run-status oc-run-status--${status}`} role="status">
-      <span className="oc-run-status__dot" aria-hidden />
-      <span className="oc-run-status__label">{LABEL[status]}</span>
-      {meta.runId ? (
-        <span className="oc-run-status__run" title={`run ${meta.runId}`}>
-          {meta.runId.slice(0, 8)}
+    <div
+      className={`oc-run-status oc-run-status--${view.kind}`}
+      role="status"
+      title={runId ? `run ${runId}` : undefined}
+    >
+      {view.kind === "thinking" ? (
+        <span className="oc-dots" aria-hidden>
+          <span />
+          <span />
+          <span />
         </span>
-      ) : null}
-      {status === "error" && meta.error ? (
-        <span className="oc-run-status__error">{meta.error}</span>
+      ) : view.kind === "generating" ? (
+        <span className="oc-run-status__pulse" aria-hidden />
+      ) : view.kind === "aborted" ? (
+        <Square size={13} aria-hidden />
+      ) : (
+        <CircleAlert size={14} aria-hidden />
+      )}
+      <span className="oc-run-status__label">{view.label}</span>
+      {view.kind === "error" && error ? (
+        <span className="oc-run-status__error">{error}</span>
       ) : null}
     </div>
   );

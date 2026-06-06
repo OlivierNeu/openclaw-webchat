@@ -9,6 +9,19 @@
   color: var(--muted-foreground);
 }
 
+/* Visually hidden but exposed to assistive tech (the standard SR-only clip). */
+.oc-sr-only {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  white-space: nowrap;
+  border: 0;
+}
+
 .oc-signin {
   display: grid;
   place-items: center;
@@ -168,6 +181,42 @@
   background: var(--secondary);
   color: var(--secondary-foreground);
 }
+/* Clickable chip variant (the "Avancé" write-back trigger). */
+.oc-chip--btn {
+  cursor: pointer;
+  font-family: inherit;
+  transition:
+    color 0.15s ease,
+    background 0.15s ease,
+    border-color 0.15s ease;
+}
+.oc-chip--btn:hover {
+  color: var(--foreground);
+  background: var(--accent);
+  border-color: var(--ring);
+}
+.oc-chip--btn:focus-visible {
+  outline: 2px solid var(--ring);
+  outline-offset: 2px;
+}
+.oc-chip__chev {
+  opacity: 0.55;
+}
+/* "défaut" marker inside the reasoning radio list. */
+.oc-menu__hint {
+  margin-left: auto;
+  padding-left: 0.5rem;
+  font-size: 0.68rem;
+  font-weight: 600;
+  color: var(--muted-foreground);
+}
+/* Muted footnote (e.g. the deliberate verbosity exclusion). */
+.oc-menu__note {
+  padding: 0.3rem 0.5rem 0.15rem;
+  font-size: 0.68rem;
+  line-height: 1.3;
+  color: var(--muted-foreground);
+}
 .oc-meter {
   display: inline-flex;
   align-items: center;
@@ -250,40 +299,6 @@
   font-weight: 600;
   color: var(--foreground);
 }
-.oc-emptystate__subtitle {
-  margin: 0 0 1rem;
-  font-size: 0.95rem;
-  color: var(--muted-foreground);
-}
-.oc-emptystate__suggestions {
-  width: 100%;
-  display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
-  gap: 0.6rem;
-}
-.oc-suggestion {
-  text-align: left;
-  padding: 0.75rem 0.9rem;
-  font-size: 0.875rem;
-  line-height: 1.35;
-  color: var(--foreground);
-  background: var(--card);
-  border: 1px solid var(--border);
-  border-radius: var(--radius-lg);
-  cursor: pointer;
-  transition:
-    background 150ms ease,
-    border-color 150ms ease;
-}
-.oc-suggestion:hover {
-  background: var(--muted);
-  border-color: var(--ring);
-}
-@media (max-width: 560px) {
-  .oc-emptystate__suggestions {
-    grid-template-columns: 1fr;
-  }
-}
 
 /* ── Scroll-to-bottom pill (auto-hidden when already at the bottom) ───────── */
 .oc-scrolldown {
@@ -309,13 +324,25 @@
 .oc-scrolldown:hover {
   background: var(--muted);
 }
+/* assistant-ui DISABLES (does not unmount) this pill when the viewport is at the
+   bottom — so hide the disabled state. It is already position:absolute (out of
+   flow), so showing/hiding it never shifts the transcript. Net effect: the pill
+   appears ONLY when the user has scrolled up (Olivier's request). */
+.oc-scrolldown:disabled {
+  opacity: 0;
+  visibility: hidden;
+  pointer-events: none;
+}
 
-/* ── Per-message action bar (copy / regenerate), hover-revealed ──────────── */
+/* ── Per-message action bar (copy / regenerate), hover-revealed ──────────────
+   Positioned ABSOLUTELY into the column's reserved padding-bottom so toggling it
+   on hover never reflows the transcript (Olivier's "décalage au survol" fix). */
 .oc-msg__actions {
+  position: absolute;
+  bottom: 0;
+  left: -0.35rem;
   display: flex;
   gap: 0.15rem;
-  margin-top: 0.35rem;
-  margin-left: -0.35rem;
 }
 .oc-iconbtn {
   display: inline-grid;
@@ -335,11 +362,35 @@
   background: var(--muted);
   color: var(--foreground);
 }
+.oc-iconbtn:focus-visible {
+  outline: 2px solid var(--ring);
+  outline-offset: 2px;
+}
 
 .oc-msg {
   display: flex;
   width: 100%;
   max-width: var(--oc-thread-w);
+}
+/* Micro-interaction: ONLY the last message fades + rises in. Scoping to
+   :last-child means opening/switching to a populated chat shows it SETTLED (the
+   prior turns are at rest) — only the newest turn animates, and each new arrival
+   becomes :last-child so it animates once on mount. The message id is the stable
+   Convex _id (unchanged streaming->complete), so a finalize never remounts the
+   node and the animation never re-fires mid-turn. Disabled under
+   prefers-reduced-motion (see the global guard at the end of the file). */
+.oc-thread__viewport > .oc-msg:last-child {
+  animation: oc-msg-in 0.22s ease-out both;
+}
+@keyframes oc-msg-in {
+  from {
+    opacity: 0;
+    transform: translateY(6px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
 }
 
 /* User turn: subtle low-contrast bubble, right-aligned (Open WebUI style). */
@@ -384,6 +435,11 @@
   display: flex;
   flex-direction: column;
   gap: 0.25rem;
+  /* Reserve the per-message action-bar row so REVEALING it on hover never pushes
+     the rest of the conversation down (the bar itself is positioned absolutely
+     into this reserved space — see .oc-msg__actions). */
+  position: relative;
+  padding-bottom: 1.9rem;
 }
 .oc-msg__name {
   font-size: 0.9rem;
@@ -540,41 +596,80 @@
   margin-right: 0.4em;
 }
 
-/* Run status */
+/* ── Run status (calm state chips, CHAT_UX_DESIGN Part 3 "streaming/processing")
+   thinking = animated dots (the typing indicator while no text has arrived);
+   generating = a soft pulse + "Génération…"; error/aborted = Lucide icon +
+   legible French label. Driven by the pure `runStatusView` mapping. ─────────── */
 .oc-run-status {
   display: inline-flex;
   align-items: center;
-  gap: 0.4rem;
-  margin-top: 0.4rem;
+  gap: 0.45rem;
+  margin-top: 0.45rem;
   font-size: 0.8rem;
+  line-height: 1.3;
   color: var(--muted-foreground);
 }
-.oc-run-status__dot {
-  width: 8px;
-  height: 8px;
+.oc-run-status__label {
+  font-variant-numeric: tabular-nums;
+}
+/* "Réflexion…" — three dots bouncing in sequence (the typing indicator). */
+.oc-dots {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+}
+.oc-dots > span {
+  width: 5px;
+  height: 5px;
   border-radius: 50%;
-  background: var(--muted-foreground);
-}
-.oc-run-status--streaming .oc-run-status__dot {
   background: var(--primary);
-  animation: oc-pulse 1s infinite;
+  animation: oc-bounce 1.2s ease-in-out infinite;
 }
-.oc-run-status--error .oc-run-status__dot {
-  background: var(--destructive);
+.oc-dots > span:nth-child(2) {
+  animation-delay: 0.18s;
 }
-.oc-run-status--aborted .oc-run-status__dot {
-  background: color-mix(in srgb, var(--destructive) 60%, #d97706);
+.oc-dots > span:nth-child(3) {
+  animation-delay: 0.36s;
+}
+/* "Génération…" — a single soft pulse (text is already flowing). */
+.oc-run-status__pulse {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: var(--primary);
+  animation: oc-pulse 1.1s ease-in-out infinite;
+}
+.oc-run-status--error {
+  color: var(--destructive);
+}
+.oc-run-status--aborted {
+  color: color-mix(in srgb, var(--destructive) 55%, #d97706);
 }
 .oc-run-status__error {
   color: var(--destructive);
+  font-size: 0.78rem;
 }
 @keyframes oc-pulse {
   0%,
   100% {
     opacity: 1;
+    transform: scale(1);
   }
   50% {
-    opacity: 0.3;
+    opacity: 0.35;
+    transform: scale(0.82);
+  }
+}
+@keyframes oc-bounce {
+  0%,
+  80%,
+  100% {
+    opacity: 0.35;
+    transform: translateY(0);
+  }
+  40% {
+    opacity: 1;
+    transform: translateY(-3px);
   }
 }
 
@@ -590,8 +685,8 @@
   display: inline-flex;
   align-items: center;
   gap: 0.3rem;
-  height: 2rem;
-  padding: 0 0.6rem;
+  height: 2.5rem;
+  padding: 0 0.75rem;
   border: 1px solid var(--border);
   border-radius: var(--radius-md, 0.5rem);
   background: var(--muted);
@@ -603,6 +698,13 @@
 .oc-composer__toolstoggle.is-on {
   color: var(--foreground);
   border-color: var(--ring, var(--border));
+}
+.oc-composer__toolstoggle:hover {
+  color: var(--foreground);
+}
+.oc-composer__toolstoggle:focus-visible {
+  outline: 2px solid var(--ring, var(--primary));
+  outline-offset: 2px;
 }
 
 .oc-tool {
@@ -677,46 +779,124 @@
   color: var(--foreground);
 }
 
-/* Composer (assistant-ui primitives styled via className -> shadcn tokens).
-   Centered on the same readable column as the messages; a single rounded
-   surface that floats above the page (Open WebUI style), no full-width divider. */
+/* ── Unified composer card (Olivier's reference) ──────────────────────────────
+   ONE rounded surface centered on the readable column: the input sits on top, a
+   single action bar below it (+ / Outils on the left, circular Send on the
+   right). The CARD owns the border + focus ring (:focus-within) so focusing the
+   textarea never reflows anything. */
 .oc-composer {
   align-self: center;
-  width: 100%;
+  width: calc(100% - 2rem);
   max-width: var(--oc-thread-w);
+  margin: 0 auto 1rem;
   display: flex;
-  align-items: flex-end;
-  gap: 0.5rem;
-  margin: 0 auto;
-  padding: 0.5rem 0.5rem 1rem;
+  flex-direction: column;
+  gap: 0.4rem;
+  padding: 0.6rem 0.65rem 0.5rem;
+  border: 1px solid var(--input);
+  border-radius: 1.5rem;
+  background: var(--card);
+  box-shadow: 0 1px 3px rgb(0 0 0 / 0.06);
+  transition:
+    border-color 150ms ease,
+    box-shadow 150ms ease;
+}
+.oc-composer:focus-within {
+  border-color: var(--ring);
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--ring) 22%, transparent);
 }
 .oc-composer__input {
-  flex: 1;
+  width: 100%;
   resize: none;
-  min-height: 2.75rem;
+  min-height: 1.5rem;
   max-height: 12rem;
-  border: 1px solid var(--input);
-  border-radius: var(--radius-xl);
-  padding: 0.75rem 1rem;
+  border: none;
+  background: transparent;
+  box-shadow: none;
+  outline: none;
+  padding: 0.4rem 0.55rem 0;
   font: inherit;
   line-height: 1.5;
-  background: var(--card);
   color: var(--foreground);
-  box-shadow: 0 1px 2px rgb(0 0 0 / 0.04);
 }
-.oc-composer__input:focus-visible {
-  outline: none;
-  border-color: var(--ring);
-  box-shadow: 0 0 0 3px color-mix(in srgb, var(--ring) 30%, transparent);
+.oc-composer__bar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
 }
-.oc-composer__send,
-.oc-composer__cancel,
-.oc-composer__attach {
-  padding: 0.5rem 0.9rem;
-  border-radius: var(--radius-lg);
-  border: 1px solid transparent;
+.oc-composer__group {
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+}
+/* Round icon button (the "+" attach). */
+.oc-composer__icon {
+  display: inline-grid;
+  place-items: center;
+  width: 2rem;
+  height: 2rem;
+  border: none;
+  border-radius: 999px;
+  background: transparent;
+  color: var(--muted-foreground);
   cursor: pointer;
+  transition:
+    background 150ms ease,
+    color 150ms ease;
+}
+.oc-composer__icon:hover {
+  background: var(--muted);
+  color: var(--foreground);
+}
+.oc-composer__icon:focus-visible {
+  outline: 2px solid var(--ring);
+  outline-offset: 2px;
+}
+/* Pill toggle (Outils). */
+.oc-composer__tools {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+  height: 2rem;
+  padding: 0 0.7rem;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  background: transparent;
+  color: var(--muted-foreground);
   font: inherit;
+  font-size: 0.85rem;
+  cursor: pointer;
+  transition:
+    background 150ms ease,
+    color 150ms ease,
+    border-color 150ms ease;
+}
+.oc-composer__tools:hover {
+  color: var(--foreground);
+  background: var(--muted);
+}
+.oc-composer__tools.is-on {
+  color: var(--foreground);
+  border-color: var(--ring);
+  background: var(--accent);
+}
+.oc-composer__tools:focus-visible {
+  outline: 2px solid var(--ring);
+  outline-offset: 2px;
+}
+/* Circular send / stop. */
+.oc-composer__send,
+.oc-composer__stop {
+  display: inline-grid;
+  place-items: center;
+  width: 2.25rem;
+  height: 2.25rem;
+  border: none;
+  border-radius: 999px;
+  cursor: pointer;
+  transition:
+    background 150ms ease,
+    opacity 150ms ease;
 }
 .oc-composer__send {
   background: var(--primary);
@@ -725,18 +905,18 @@
 .oc-composer__send:hover {
   background: color-mix(in srgb, var(--primary) 88%, var(--foreground));
 }
-.oc-composer__attach {
-  background: transparent;
-  color: var(--muted-foreground);
-  border-color: var(--border);
+.oc-composer__send:disabled {
+  opacity: 0.4;
+  cursor: default;
 }
-.oc-composer__attach:hover {
-  background: var(--muted);
-  color: var(--foreground);
+.oc-composer__stop {
+  background: var(--foreground);
+  color: var(--background);
 }
-.oc-composer__cancel {
-  background: color-mix(in srgb, var(--destructive) 12%, transparent);
-  color: var(--destructive);
+.oc-composer__send:focus-visible,
+.oc-composer__stop:focus-visible {
+  outline: 2px solid var(--ring);
+  outline-offset: 2px;
 }
 
 /* --- Pending screen ----------------------------------------------------- */
@@ -1447,3 +1627,19 @@
 }
 .oc-advfilter__value { flex: 1 1 10rem; min-width: 8rem; max-width: 18rem; }
 .oc-advfilter__add { align-self: flex-start; }
+
+/* ── Accessibility: honor prefers-reduced-motion (CHAT_UX_DESIGN Part 1) ───────
+   Disable the decorative chat motion (message enter, thinking dots, pulse) for
+   users who request reduced motion. The states stay LEGIBLE (the dots/pulse are
+   simply static, the message appears at rest) — only the animation is removed. */
+@media (prefers-reduced-motion: reduce) {
+  .oc-thread__viewport > .oc-msg:last-child {
+    animation: none;
+    opacity: 1;
+    transform: none;
+  }
+  .oc-dots > span,
+  .oc-run-status__pulse {
+    animation: none;
+  }
+}

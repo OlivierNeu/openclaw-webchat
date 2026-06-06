@@ -122,6 +122,10 @@ export const getChatRouting = internalQuery({
       // null target => the user is unrouted (no override, no group); the
       // dispatch will mark the row failed rather than send to a wrong agent.
       target,
+      // The user's per-chat OpenClaw knob intent (reasoning/model). The bridge
+      // re-applies these via sessions.patch before each turn so they survive a
+      // session reset. Non-secret labels only.
+      sessionSettings: chat.sessionSettings ?? null,
     };
   },
 });
@@ -241,6 +245,13 @@ export const dispatch = internalAction({
           canonical: routing.target.canonical,
           text: row.text,
           clientMessageId: row.clientMessageId,
+          // The user message id for THIS turn — the bridge excludes it when it
+          // fetches prior history for session re-hydration (so the current
+          // message is not duplicated into the injected context).
+          messageId: row.messageId ?? null,
+          // Per-chat knob intent: the bridge re-applies these (sessions.patch)
+          // before chat.send so a reset session keeps the user's reasoning/model.
+          sessionSettings: routing.sessionSettings,
           attachments: resolvedAttachments,
         }),
       });
@@ -268,5 +279,90 @@ export const dispatch = internalAction({
         agentId: routing.target.agentId,
       },
     });
+  },
+});
+
+/**
+ * Immediate write-back of a per-chat OpenClaw knob (reasoning level / model).
+ * Scheduled by `chats.setSessionKnob` after it persists `sessionSettings`. POSTs
+ * the current intent to the bridge's `POST /patch`, which calls `sessions.patch`
+ * then re-describes + reports the CONFIRMED live `sessionMeta` back (so the chip
+ * is honest, never optimistic). Best-effort: a missing config / unrouted user /
+ * bridge error is logged and traced but never throws (a thrown action is retried
+ * by Convex). The chip simply does not move if the patch did not land.
+ */
+export const dispatchPatch = internalAction({
+  args: { chatId: v.id("chats"), userId: v.id("users") },
+  handler: async (ctx, { chatId, userId }) => {
+    const bridgeUrl = process.env.BRIDGE_URL;
+    const sharedSecret = process.env.BRIDGE_SHARED_SECRET;
+    if (!bridgeUrl || !sharedSecret) {
+      console.error(
+        "bridge.dispatchPatch: BRIDGE_URL / BRIDGE_SHARED_SECRET not configured",
+      );
+      return;
+    }
+
+    const routing = await ctx.runQuery(internal.bridge.getChatRouting, {
+      chatId,
+      userId,
+    });
+    if (!routing || routing.target === null) {
+      console.error("bridge.dispatchPatch: user is unrouted (no valve target)");
+      return;
+    }
+    const settings = routing.sessionSettings;
+    if (!settings || (settings.thinkingLevel == null && settings.model == null)) {
+      return; // nothing to apply
+    }
+
+    let ok = false;
+    try {
+      const response = await fetch(`${bridgeUrl.replace(/\/$/, "")}/patch`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: sharedSecret,
+        },
+        body: JSON.stringify({
+          chatId,
+          openclawChatId: routing.openclawChatId,
+          instanceName: routing.target.instanceName,
+          agentId: routing.target.agentId,
+          canonical: routing.target.canonical,
+          thinkingLevel: settings.thinkingLevel ?? null,
+          model: settings.model ?? null,
+        }),
+      });
+      ok = response.ok;
+      if (!ok) {
+        console.error(`bridge POST /patch -> HTTP ${response.status}`);
+      }
+    } catch (err) {
+      console.error("bridge POST /patch failed:", err);
+      ok = false;
+    }
+
+    // Trace the knob write-back (metadata only — knob NAMES are non-secret; never
+    // tokens). Wrapped so a trace failure can never affect the outcome.
+    try {
+      await ctx.runMutation(internal.observability.recordEvent, {
+        kind: "openclaw.patch",
+        direction: "outbound",
+        principalType: "user",
+        principalId: userId,
+        chatId,
+        correlationId: `${chatId}:patch`,
+        meta: JSON.stringify({
+          patchStatus: ok ? "sent" : "failed",
+          thinkingLevel: settings.thinkingLevel,
+          model: settings.model,
+          instanceName: routing.target.instanceName,
+          agentId: routing.target.agentId,
+        }),
+      });
+    } catch {
+      // best-effort
+    }
   },
 });

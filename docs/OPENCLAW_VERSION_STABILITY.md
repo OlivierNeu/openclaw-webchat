@@ -37,6 +37,53 @@ fixes, and irritations. Append on every version bump.
 > these numbers until a clean bring-up can send again.
 
 ## Observations log (newest first)
+- **2026-06-05 (eve) — INBOUND VISION: a per-version codex difference, NOT a bridge bug.**
+  After the #61 harness fix, the #59 inbound round-trip (upload a 96×96 red square →
+  "what colour dominates?") was re-run on both versions. **6.1 (codex 0.137): agent
+  replies "rouge"** ✓. **5.19 (codex 0.133): the attachment IS delivered + offloaded
+  by the gateway** (`/home/node/.openclaw/media/inbound/<uuid>.png`, 221 B, byte-size
+  matches) **but the agent replies "Sent." — it does not surface the image to its
+  vision**. So the bridge→gateway inbound DELIVERY works on BOTH (storageId→base64→
+  chat.send.attachments→media/inbound is version-agnostic, proven); the inbound
+  VISION (agent actually seeing the image) works on **6.1 only** in this harness —
+  a codex-0.133-vs-0.137 / gateway-surfacing difference on the emulated codex-harness.
+  Implication for the trust ledger: prefer 6.1 for any image-understanding workflow;
+  for 5.19, treat inbound image vision as UNRELIABLE pending a check on the NAS
+  (native, codex API mode — may differ from the emulated harness). Text + outbound +
+  inbound delivery are fine on both.
+- **2026-06-05 (eve) — ✅ RESOLVED (#61): root cause = TRANSPORT TRUST, not a
+  version/seed/scope/regression issue. Authoritative, fixed, in/out re-validated.**
+  The `gateway token mismatch (set gateway.remote.token …)` prose was MISLEADING;
+  `BRIDGE_DEBUG=1` revealed the machine-readable detail: the failure is at the WS
+  **connect**, with `error.details = {code: AUTH_TOKEN_MISMATCH, canRetryWithDeviceToken:
+  true, recommendedNextStep: "retry_with_device_token"}`. Per docs.openclaw.ai/gateway/protocol:
+  a paired device must auth over a **TRUSTED transport** (loopback, or wss with a
+  pinned tlsFingerprint); the shared-token→device-token auto-promotion is gated to
+  trusted transports and **there is no CIDR allowlist**. Our local bridge runs on the
+  Mac HOST over plain `ws://`, so the containerised gateway sees a NON-loopback peer
+  (172.x) = UNTRUSTED → rejects EVERY connect (shared OR device token; proven both).
+  This also explains the "before": the pre-session bridge worked because it used a
+  setup that was effectively trusted; a `reset` invalidates issued device tokens
+  (cf. GitHub #22866). FIX (local, version-independent): an **`oc-loopback` socat
+  sidecar** (docker-compose.yml) that shares the gateway's netns and forwards
+  `:18790 → 127.0.0.1:18789`, so the host bridge (now `OPENCLAW_GATEWAY_URL=
+  ws://127.0.0.1:18790`) is seen as LOOPBACK = trusted; the shared token + full
+  operator scopes then authenticate. `up.sh` restarts the sidecar after the codex
+  `docker restart` (which orphans the shared netns) and waits for `:18790`. The NAS
+  is UNAFFECTED — it uses wss (also trusted). Two follow-on bugs found + fixed while
+  validating: (a) the bridge requested only `[read,write]` (an over-eager
+  least-privilege edit) but `sessions.patch` needs `operator.admin` ("missing scope")
+  → restored the full operator scope set; (b) `bridge/.env`'s
+  `OPENCLAW_MEDIA_OUTBOUND_DIR` held the CONTAINER path `/home/node/.openclaw/media/
+  outbound` instead of the HOST bind path → the bridge couldn't find outbound files
+  ("[media] skip …: not found") → corrected to the host path (up.sh's printed
+  instruction was already right). **RE-VALIDATED end-to-end on 6.1: text send → agent
+  replied "bonjour" (outbox sent); INBOUND red-square → agent replied "rouge" (user
+  msg carries a `file` part); OUTBOUND agent file + `MEDIA:` → assistant turn carries
+  a `media` part.** So the file in/out chain was never broken — only the local bridge
+  AUTH was, by my own reset+overwrite. The entries below (token-hash, scope-upgrade,
+  device-token, seed, image) were investigation steps toward this; their conclusions
+  are SUPERSEDED by this one.
 - **2026-06-05 (pm) — ⚠️ 5.19 SENDS BROKEN on a freshly reset container; root cause
   NOT isolated; CONTRADICTS the earlier same-day 5.19 PASS.** While re-running the
   #59 inbound round-trip on 5.19 (reset → `OPENCLAW_VERSION=2026.5.19 up.sh` →

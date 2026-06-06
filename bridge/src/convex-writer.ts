@@ -63,9 +63,47 @@ export interface ConvexWriter {
     text: string,
     error: string | null,
   ): Promise<void>;
+  /**
+   * Session re-hydration: a bounded block of this chat's prior turns (excluding
+   * `excludeMessageId`), or null when there is nothing to inject. The bridge
+   * prepends it to chat.send when it detects a fresh/rolled OpenClaw session, so
+   * the model regains the conversation the webchat displays. Read-only; behind
+   * the interface so the fake can stub it without I/O.
+   */
+  getRehydrationContext(
+    chatId: string,
+    excludeMessageId?: string | null,
+  ): Promise<{ history: string | null; turnCount: number }>;
+  /**
+   * Mirror the gateway session meta onto the chat (LIVE model/reasoning/context
+   * for the header strip). Fire-and-forget at the call site: never block or fail
+   * a turn on a meta write.
+   */
+  reportSessionMeta(chatId: string, meta: SessionMetaReport): Promise<void>;
 }
 
 /** Operations the Convex ingest httpAction understands (its JSON `op` field). */
+/**
+ * OpenClaw `sessions.describe` meta the bridge mirrors to Convex (non-secret knob
+ * labels + token counts) so the chat header can render the model/reasoning chips
+ * + context meter from LIVE gateway state. Every field optional (a fresh session
+ * omits the token counts). Matches the `setSessionMeta` ingest op shape.
+ */
+export interface SessionMetaReport {
+  model?: string;
+  modelProvider?: string;
+  agentRuntime?: string;
+  thinkingLevel?: string;
+  thinkingDefault?: string;
+  thinkingLevels?: { id: string; label: string }[];
+  // Available models for the write-back picker (deduped by id from models.list).
+  availableModels?: { id: string; label: string }[];
+  verboseLevel?: string;
+  totalTokens?: number;
+  contextTokens?: number;
+  estimatedCostUsd?: number;
+}
+
 type IngestOp =
   | { op: "startAssistant"; chatId: string; runId: string | null }
   | { op: "appendDelta"; messageId: string; text: string }
@@ -90,7 +128,17 @@ type IngestOp =
       status: FinalizeStatus;
       text: string;
       error: string | null;
-    };
+    }
+  // Session re-hydration READ: fetch a bounded block of this chat's prior turns
+  // (excluding the current message) to prepend when the OpenClaw session is fresh.
+  | {
+      op: "getRehydrationContext";
+      chatId: string;
+      excludeMessageId?: string | null;
+    }
+  // Mirror the gateway's `sessions.describe` meta onto the chat so the header
+  // strip (model + reasoning chips + context meter) shows LIVE values.
+  | { op: "setSessionMeta"; chatId: string; meta: SessionMetaReport };
 
 export interface HttpConvexWriterOptions {
   /** Convex httpActions base URL (the `.site` origin). */
@@ -313,5 +361,20 @@ export class HttpConvexWriter implements ConvexWriter {
   ): Promise<void> {
     await this.flushDelta(messageId); // never strand buffered deltas behind final
     await this.post({ op: "finalize", messageId, status, text, error });
+  }
+
+  async getRehydrationContext(
+    chatId: string,
+    excludeMessageId?: string | null,
+  ): Promise<{ history: string | null; turnCount: number }> {
+    return this.post<{ history: string | null; turnCount: number }>({
+      op: "getRehydrationContext",
+      chatId,
+      excludeMessageId: excludeMessageId ?? null,
+    });
+  }
+
+  async reportSessionMeta(chatId: string, meta: SessionMetaReport): Promise<void> {
+    await this.post({ op: "setSessionMeta", chatId, meta });
   }
 }

@@ -90,6 +90,12 @@ export default defineSchema({
     // Toggled from the chat surface. OPTIONAL (additive); absent => shown (true).
     showTools: v.optional(v.boolean()),
 
+    // Per-user preference: surface the voice-input (mic) button in the composer.
+    // OPTIONAL (additive); absent => OFF (the mic is hidden by default — the
+    // talk.* voice pipeline is not wired yet, so the control only appears when a
+    // user explicitly opts in). Feature-flag for the composer mic.
+    voiceInput: v.optional(v.boolean()),
+
     // --- Routing (valves) ---------------------------------------------------
     // Group membership drives routing by default (see `groups`). A per-user
     // OVERRIDE wins over the group when set.
@@ -215,11 +221,27 @@ export default defineSchema({
         thinkingLevels: v.optional(
           v.array(v.object({ id: v.string(), label: v.string() })),
         ),
+        // Available models for the write-back picker, mirrored once from the
+        // gateway's `models.list` (deduped by id). Non-secret labels only.
+        availableModels: v.optional(
+          v.array(v.object({ id: v.string(), label: v.string() })),
+        ),
         verboseLevel: v.optional(v.string()), // e.g. "full"
         totalTokens: v.optional(v.number()), // used context tokens
         contextTokens: v.optional(v.number()), // context window size
         estimatedCostUsd: v.optional(v.number()),
         updatedAt: v.optional(v.number()),
+      }),
+    ),
+    // User-chosen per-chat OpenClaw overrides (write-back via `sessions.patch`).
+    // INTENT, distinct from `sessionMeta` (the gateway's confirmed live TRUTH):
+    // the bridge applies these immediately when changed AND re-applies them
+    // before each turn so they survive a session reset/roll. Optional + additive
+    // + every inner field optional → forward-compatible. NEVER holds secrets.
+    sessionSettings: v.optional(
+      v.object({
+        thinkingLevel: v.optional(v.string()), // reasoning level id
+        model: v.optional(v.string()), // model id
       }),
     ),
   })

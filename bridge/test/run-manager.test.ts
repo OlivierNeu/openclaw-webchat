@@ -90,6 +90,16 @@ class FakeWriter implements ConvexWriter {
   ): Promise<void> {
     this.calls.push(["finalize", messageId, status, text, error]);
   }
+  async getRehydrationContext(): Promise<{
+    history: string | null;
+    turnCount: number;
+  }> {
+    // Read-only seam; the RunManager tests never re-hydrate.
+    return { history: null, turnCount: 0 };
+  }
+  async reportSessionMeta(): Promise<void> {
+    // Fire-and-forget seam; the RunManager tests don't assert session meta.
+  }
 }
 
 class Clock {

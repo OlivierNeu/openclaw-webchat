@@ -17,7 +17,7 @@
 // streamed message.
 
 import { v } from "convex/values";
-import { internalMutation, MutationCtx } from "./_generated/server";
+import { internalMutation, internalQuery, MutationCtx } from "./_generated/server";
 import { Id } from "./_generated/dataModel";
 import { messagePart } from "./schema";
 import { writeTraceEvent } from "./observability";
@@ -243,6 +243,9 @@ export const setSessionMeta = internalMutation({
       thinkingLevels: v.optional(
         v.array(v.object({ id: v.string(), label: v.string() })),
       ),
+      availableModels: v.optional(
+        v.array(v.object({ id: v.string(), label: v.string() })),
+      ),
       verboseLevel: v.optional(v.string()),
       totalTokens: v.optional(v.number()),
       contextTokens: v.optional(v.number()),
@@ -255,5 +258,79 @@ export const setSessionMeta = internalMutation({
     await ctx.db.patch(chatId, {
       sessionMeta: { ...meta, updatedAt: Date.now() },
     });
+  },
+});
+
+// SESSION RE-HYDRATION (see docs/SESSION_CONTINUITY_DESIGN.md + #61 follow-up).
+// OpenClaw sessions are ephemeral (daily/idle reset, compaction); our webchat
+// displays the FULL conversation. When the bridge detects a FRESH/rolled OpenClaw
+// session (`sessions.describe.session.systemSent === false`) it asks for this
+// bounded, display-of-prior-turns block and PREPENDS it to the new `chat.send`
+// message — so the model's context matches what the user sees. We are the source
+// of truth for the conversation; this re-grounds the gateway from it.
+//
+// V1 is TEXT-ONLY: earlier image/file turns survive only as their text trace
+// (filenames/captions), not re-uploaded media — an accepted v1 cut.
+//
+// Budget: bounded by the chat's known context window (`sessionMeta.contextTokens`)
+// minus a reserve, keeping the MOST RECENT turns (older turns dropped with a
+// notice). Only `complete` user/assistant turns with text are included; the
+// current turn (`excludeMessageId`) and streaming/empty rows are skipped.
+export const rehydrationContext = internalQuery({
+  args: {
+    chatId: v.id("chats"),
+    excludeMessageId: v.optional(v.id("messages")),
+  },
+  handler: async (
+    ctx,
+    { chatId, excludeMessageId },
+  ): Promise<{ history: string | null; turnCount: number }> => {
+    const chat = await ctx.db.get(chatId);
+    if (chat === null) return { history: null, turnCount: 0 };
+
+    // Budget: reserve ~50% of the window for the system prompt, the new user
+    // message, and the reply. ~3 chars/token (conservative). Fallback window
+    // when we have not yet learned the real one from a prior turn's meta.
+    const windowTokens = chat.sessionMeta?.contextTokens ?? 32_000;
+    const budgetChars = Math.max(2_000, Math.floor(windowTokens * 0.5) * 3);
+
+    // Bounded tail read (newest first), then keep usable turns within budget.
+    const recentDesc = await ctx.db
+      .query("messages")
+      .withIndex("by_chat", (q) => q.eq("chatId", chatId))
+      .order("desc")
+      .take(80);
+
+    const lines: string[] = [];
+    let chars = 0;
+    let truncated = false;
+    for (const m of recentDesc) {
+      if (excludeMessageId && m._id === excludeMessageId) continue;
+      if (m.status !== "complete") continue; // skip streaming/incomplete
+      if (m.role !== "user" && m.role !== "assistant") continue;
+      const text = m.text.trim();
+      if (text.length === 0) continue;
+      const label = m.role === "user" ? "Utilisateur" : "Assistant";
+      const line = `${label} : ${text}`;
+      if (lines.length > 0 && chars + line.length > budgetChars) {
+        truncated = true;
+        break;
+      }
+      lines.push(line);
+      chars += line.length + 1;
+    }
+    if (lines.length === 0) return { history: null, turnCount: 0 };
+
+    lines.reverse(); // chronological (oldest -> newest)
+    const header =
+      "[Reprise d’une conversation antérieure de ce même fil. Pour continuité, " +
+      "voici l’historique des messages précédents de cette conversation :]";
+    const opener = truncated ? "[…début de la conversation plus ancien, omis…]\n" : "";
+    const footer =
+      "[Fin de l’historique. Le nouveau message de l’utilisateur suit ci-dessous.]";
+    return {
+      history: `${header}\n${opener}${lines.join("\n")}\n${footer}`,
+      turnCount: lines.length,
+    };
   },
 });

@@ -51,17 +51,34 @@ docker exec -u root oc-local-gateway sh -c \
   'mkdir -p /home/node/.openclaw/media/inbound && chown -R node:node /home/node/.openclaw/media' \
   >/dev/null 2>&1 || true
 
+# 4c) Re-attach the loopback sidecar (#61). The codex setup above did
+# `docker restart oc-local-gateway`, which recreates the gateway's network
+# namespace — orphaning oc-loopback (network_mode: service:openclaw). Restart it
+# so socat re-binds inside the CURRENT netns; otherwise :18790 forwards nowhere
+# and the bridge's "trusted loopback" connect path is dead.
+if docker ps -a --format '{{.Names}}' | grep -q '^oc-local-loopback$'; then
+  docker restart oc-local-loopback >/dev/null 2>&1 || true
+  echo "▶ waiting for loopback forwarder (:${OPENCLAW_LOOPBACK_PORT:-18790}) …"
+  until [[ "$(curl -s -o /dev/null -w '%{http_code}' --max-time 3 http://127.0.0.1:${OPENCLAW_LOOPBACK_PORT:-18790}/health 2>/dev/null)" == "200" ]]; do sleep 1; done
+  echo "✅ loopback forwarder ready (trusted-transport path for the host bridge)"
+fi
+
 # 5) Auto-pair the bridge's device (token auth still needs device approval).
 ./pair.sh
 
 cat <<EOF
 
 ✅ Local OpenClaw ready. To run the bridge against it:
-   cd ../bridge && OPENCLAW_GATEWAY_URL=ws://127.0.0.1:${OPENCLAW_LOCAL_PORT:-18789} \\
+   cd ../bridge && OPENCLAW_GATEWAY_URL=ws://127.0.0.1:${OPENCLAW_LOOPBACK_PORT:-18790} \\
      OPENCLAW_TOKEN=$(cat .token) \\
      OPENCLAW_MEDIA_OUTBOUND_DIR=$(pwd)/media-outbound \\
      node dist/index.js
    (or pass the same overrides to npm start)
+
+NOTE (#61): connect over :${OPENCLAW_LOOPBACK_PORT:-18790} (the oc-loopback sidecar), NOT :18789.
+The gateway only admits the shared token from a TRUSTED transport; :18790 forwards
+to the gateway's loopback so the host bridge is seen as loopback. The NAS uses wss
+(also trusted) and does not need this.
 
 Token: ./.token   |   Shared media: ./media-outbound   |   Stop: ./down.sh   |   Wipe: ./reset.sh
 EOF

@@ -41,6 +41,9 @@ services:
     #     condition: service_completed_successfully
     ports:
       - "${OPENCLAW_LOCAL_PORT:-18789}:18789"
+      # Loopback-forward port for the host bridge (#61) — published on THIS netns
+      # owner so the oc-loopback sidecar (which shares this netns) is reachable.
+      - "${OPENCLAW_LOOPBACK_PORT:-18790}:18790"
     environment:
       HOME: /home/node
       TZ: America/Toronto
@@ -76,6 +79,26 @@ services:
       timeout: 5s
       retries: 30
       start_period: 5s
+
+  # LOOPBACK FORWARDER (#61). The local bridge runs on the Mac HOST and reaches
+  # the gateway over plain ws://, so the containerised gateway sees a NON-loopback
+  # peer (172.x) and rejects the connect as an UNTRUSTED transport
+  # (`AUTH_TOKEN_MISMATCH` — device-token auth is gated to trusted transports:
+  # loopback or wss-with-pinned-fingerprint; see docs.openclaw.ai/gateway/protocol).
+  # This socat sidecar SHARES the gateway's network namespace and forwards
+  # :18790 → 127.0.0.1:18789, so the gateway sees the bridge's connection as
+  # LOOPBACK (trusted) and the shared token authenticates. The host bridge sets
+  # OPENCLAW_GATEWAY_URL=ws://127.0.0.1:18790. (Production/NAS uses wss instead —
+  # also a trusted transport — so it does NOT need this sidecar.)
+  oc-loopback:
+    image: alpine/socat:latest
+    container_name: oc-local-loopback
+    restart: "no"
+    network_mode: "service:openclaw"
+    command: ["TCP-LISTEN:18790,fork,reuseaddr", "TCP:127.0.0.1:18789"]
+    depends_on:
+      openclaw:
+        condition: service_healthy
 
 volumes:
   oc-state:

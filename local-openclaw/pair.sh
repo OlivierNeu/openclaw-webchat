@@ -7,7 +7,11 @@ set -euo pipefail
 cd "$(dirname "$0")"
 
 TOKEN="$(cat .token)"
-PORT="${OPENCLAW_LOCAL_PORT:-18789}"
+# Connect over the LOOPBACK-forward port (#61): the gateway admits the shared
+# token only from a TRUSTED transport, and the oc-loopback sidecar makes :18790
+# appear as loopback to the gateway (plain :18789 from the host is untrusted →
+# AUTH_TOKEN_MISMATCH).
+PORT="${OPENCLAW_LOOPBACK_PORT:-18790}"
 CID=oc-local-gateway
 
 # 1) Register a pending pairing by connecting once with the bridge's identity.

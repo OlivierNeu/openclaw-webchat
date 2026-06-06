@@ -755,6 +755,20 @@ export const seedSessionMeta = mutation({
   },
 });
 
+/**
+ * Read a chat's live `sessionMeta` (dev-gated) — to verify the bridge's
+ * sessionMeta producer (UI-2) populated it from the gateway's `sessions.describe`.
+ *   npx convex run dev:peekSessionMeta '{"chatId":"<id>"}'
+ */
+export const peekSessionMeta = query({
+  args: { chatId: v.id("chats") },
+  handler: async (ctx, { chatId }) => {
+    assertDev();
+    const chat = await ctx.db.get(chatId);
+    return chat?.sessionMeta ?? null;
+  },
+});
+
 export const reset = mutation({
   args: {},
   handler: async (ctx) => {

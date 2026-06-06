@@ -22,6 +22,15 @@ import WebSocket, { type RawData } from "ws";
 
 import type { DeviceIdentity } from "../../config.js";
 
+// Operator scopes the bridge requests at connect. `operator.admin` IS required:
+// the bridge calls `sessions.patch` (to set verboseLevel=full) which the gateway
+// gates behind `operator.admin` ("missing scope: operator.admin" otherwise).
+// `read`/`write` cover chat.send + event streaming. NOTE (#61): the auth model is
+// transport-trust based, NOT scope based — requesting admin only fails over an
+// UNTRUSTED transport (plain ws from a non-loopback peer), which is why the local
+// harness routes the host bridge through the oc-loopback socat sidecar
+// (loopback = trusted) and the NAS uses wss (also trusted). Over a trusted
+// transport the gateway grants admin to the paired device normally.
 const DEFAULT_SCOPES = [
   "operator.read",
   "operator.write",
@@ -155,6 +164,11 @@ export class OpenClawConnection {
   // The gateway applies verboseLevel=full once per connection (sticky); we
   // track it so chat.send does not re-patch every turn.
   verboseFullApplied = false;
+
+  // Cached `models.list` (deduped {id,label}), fetched once per connection and
+  // mirrored into sessionMeta so the header's model picker has a stable list.
+  // `null` = not yet fetched; `[]` = fetched, none available.
+  availableModels: { id: string; label: string }[] | null = null;
 
   private constructor(ws: WebSocket) {
     this.ws = ws;

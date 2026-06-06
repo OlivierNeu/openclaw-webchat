@@ -144,6 +144,10 @@ export const getSessionMeta = query({
     return {
       title: chat.title ?? null,
       sessionMeta: chat.sessionMeta ?? null,
+      // The user's explicit write-back intent (reasoning/model). The panel uses
+      // it to mark which knob is an override vs inherited; the chip itself reads
+      // sessionMeta (live truth).
+      sessionSettings: chat.sessionSettings ?? null,
     };
   },
 });

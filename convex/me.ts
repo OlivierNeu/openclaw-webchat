@@ -75,6 +75,9 @@ export const getMe = query({
       defaultThemeMode: adminDefaultMode ?? null,
       // Chat pref: show tool-execution cards (default true when unset).
       showTools: profile?.showTools ?? true,
+      // Composer pref: show the voice-input (mic) button (default false — the
+      // voice pipeline is not wired yet; opt-in feature flag).
+      voiceInput: profile?.voiceInput ?? false,
     };
   },
 });
@@ -89,6 +92,18 @@ export const setShowTools = mutation({
     const profile = await getProfile(ctx, userId);
     if (profile === null) return; // pre-bootstrap: nothing to set yet
     await ctx.db.patch(profile._id, { showTools: show });
+  },
+});
+
+// Toggle the per-user "show the composer voice-input (mic) button" preference.
+// Identity-level (like setShowTools). The mic only appears when this is true.
+export const setVoiceInput = mutation({
+  args: { enabled: v.boolean() },
+  handler: async (ctx, { enabled }) => {
+    const userId = await requireUserId(ctx);
+    const profile = await getProfile(ctx, userId);
+    if (profile === null) return; // pre-bootstrap: nothing to set yet
+    await ctx.db.patch(profile._id, { voiceInput: enabled });
   },
 });
 

@@ -127,6 +127,60 @@ first" lesson as the `/api/media` SPA false-positive). Real shapes:
 - This extends the bridge's normalized-vocabulary boundary to a **session-meta
   descriptor** (read) + a **knob-set write** (later); Hermes implements the same.
 
+#### 2.2 Write-back "Avancé ▾" — LANDED (UI-3 #65, 2026-06-06)
+
+The write path is now built (params verified live). Key decisions:
+- **IMMEDIATE apply, not next-send.** The first design stored the choice and
+  applied it on the next message. It FAILED the acceptance test ("change in the
+  popover → `describe` confirms → chip moves") and the trust rule (the chip would
+  show a value the gateway didn't yet hold). Corrected after advisor: `setSessionKnob`
+  schedules a bridge `POST /patch` that `sessions.patch` + re-`describe` + reports
+  the LIVE meta — **the chip reads truth, never an optimistic guess.**
+- **`sessionSettings` = persistence, NOT the display source.** It is the user's
+  sticky intent (so `performSend` re-applies it after a session reset); the chip
+  always reads `sessionMeta` (the gateway's confirmed state).
+- **Linchpin** (`describe` reflects `sessions.patch` immediately) verified on 6.1
+  AND 5.19. Reasoning enum + `models.list` shape identical across versions.
+- **"Inherit" = patch to the current `thinkingDefault`** (not a clear) — re-patches
+  the gateway to the default AND re-lights the "héritée" badge for free.
+- **Verbose is intentionally NOT editable** — the bridge pins `verboseLevel=full`
+  for complete streaming frames; exposing it would silently degrade streaming. The
+  exclusion is SURFACED to the user (a muted note in the menu), not dropped silently.
+
+#### 2.3 Streaming/processing states — LANDED (UI-4 #66, 2026-06-06)
+
+The "calm state chips" from Part 3 are built, driven by a PURE, unit-tested mapping
+`runStatusView(status, hasText)` (the states are sub-second / un-screenshottable, so
+correctness lives in the test, not only the live capture):
+- `thinking` (streaming, no text yet) → animated 3-dots + **"Réflexion…"** (the
+  typing indicator that fills the felt latency gap before the first token).
+- `generating` (streaming, has text) → soft pulse + **"Génération…"**.
+- `error` → Lucide CircleAlert + **"Erreur"** + the message (destructive color).
+- `aborted` → Square + **"Interrompu"**. complete → no chip.
+
+a11y, done right: the live region is `role="status"` on the STATUS CHIP, NOT the
+streaming message body — wrapping the body would re-announce the answer on every
+token delta (SR spam). Micro-interaction: a message fades+rises in once on mount
+(safe: the assistant message id is the stable Convex `_id`, so streaming→complete
+does not remount → no re-fire); a global `prefers-reduced-motion` guard disables it.
+The composer tools toggle dropped its 🔧 emoji for a Lucide Wrench (no-emoji rule).
+
+#### 2.4 Export + a11y finale — LANDED (UI-5 #67, 2026-06-06) — UI PROGRAM COMPLETE
+
+Part 4 steps 4–5 closed. **Export**: an "Exporter ▾" menu serializes the owner-scoped
+transcript to Markdown/JSON via PURE unit-tested functions; the file carries an
+EXPLICIT truncation marker when the 200-message window is hit (a file named "the
+transcript" must not silently drop turns — trust). **SR final-answer announce**: the
+gap left in UI-4 is closed — a persistent, initially-empty `aria-live="polite"`
+region emits a SHORT cue ("Réponse reçue.") once per completed turn (the answer
+itself stays in the transcript; a polite region must not read 400 words), with a
+trailing-space toggle so a second identical cue still announces. **a11y**:
+focus-visible across composer/copy controls; a measured 40px hit-area (not a forced
+44px that would clog a dense desktop composer). Deferred (need backend/gateway): a
+retry-on-error action (an `onReload` re-dispatch of the last user turn) and an
+in-text streaming caret. The Attach drag-drop path needs a HUMAN test (CDP cannot
+drive the OS file picker).
+
 ---
 
 ## Part 3 — Design direction (build on our theme, elevate the interaction)
