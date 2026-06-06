@@ -44,6 +44,7 @@ import type { ConvexId } from "./chat/convexTypes";
 import { ConvexChat } from "./chat/ConvexChat";
 import { ChatSidebar } from "./chat/ChatSidebar";
 import { UserMenu } from "./chat/UserMenu";
+import { NotificationBell } from "./chat/NotificationBell";
 import { GlobalSearch } from "./chat/GlobalSearch";
 import {
   TABS,
@@ -62,6 +63,7 @@ import { TracesTab } from "./chat/admin/TracesTab";
 import { KpiTab } from "./chat/admin/KpiTab";
 import { AnomaliesTab } from "./chat/admin/AnomaliesTab";
 import { IntegrationsTab } from "./chat/admin/IntegrationsTab";
+import { FeedbacksTab } from "./chat/admin/FeedbacksTab";
 import { ThemeShowroom } from "./chat/ThemeShowroom";
 import {
   tracesSearchSchema,
@@ -280,6 +282,7 @@ function AppTopBar({
         <GlobalSearch />
       </div>
       <div className="oc-topbar__actions">
+        <NotificationBell />
         <UserMenu label={userLabel} mode={themeMode} />
       </div>
     </header>
@@ -468,6 +471,8 @@ function SettingsParamlessScreen() {
       return <InstancesTab />;
     case "theme":
       return <ThemeShowroom />;
+    case "feedbacks":
+      return <FeedbacksTab />;
     case "roles":
     default:
       return <RolesTab />;

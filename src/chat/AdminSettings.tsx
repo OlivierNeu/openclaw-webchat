@@ -59,12 +59,18 @@ export const TABS = [
   "integrations",
   "theme",
   "audit",
+  "feedbacks",
 ] as const;
 export type Tab = (typeof TABS)[number];
 
-// The four tabs that carry NO search params — they ride the shared
-// `/settings/$tab` route in the router.
-export const PARAMLESS_TABS = ["roles", "integrations", "instances", "theme"] as const;
+// The paramless tabs — they ride the shared `/settings/$tab` route in the router.
+export const PARAMLESS_TABS = [
+  "roles",
+  "integrations",
+  "instances",
+  "theme",
+  "feedbacks",
+] as const;
 export type ParamlessTab = (typeof PARAMLESS_TABS)[number];
 
 // FR labels for tabs whose raw key isn't a clean capitalized word. Tabs absent
@@ -76,6 +82,7 @@ export const TAB_LABELS: Partial<Record<Tab, string>> = {
   kpi: "KPI",
   anomalies: "Anomalies",
   integrations: "Intégrations",
+  feedbacks: "Feedbacks",
 };
 
 export function UsersTab() {

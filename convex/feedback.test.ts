@@ -192,3 +192,166 @@ describe("feedback.submitFeedback", () => {
     expect(fb.impersonated).toBe(true);
   });
 });
+
+describe("feedback admin view (increment B)", () => {
+  // Seed one feedback filed by a regular user, return { owner, admin, feedbackId }.
+  async function seedReported(t: ReturnType<typeof convexTest>) {
+    const owner = await seedUser(t);
+    const admin = await seedUser(t, "admin");
+    const chatId = (await owner.as.mutation(api.chats.createChat, {})) as Id<"chats">;
+    const { replyId } = await seedTurn(t, chatId, owner.userId, "ma question", "ma réponse");
+    const res = await owner.as.mutation(api.feedback.submitFeedback, {
+      chatId,
+      messageId: replyId,
+      category: "incorrect",
+      comment: "secret comment",
+      client: { displayedText: "ma réponse" },
+    });
+    return { owner, admin, feedbackId: res.feedbackId };
+  }
+
+  test("listForAdmin returns METADATA only, no message content", async () => {
+    const t = convexTest(schema, modules);
+    const { admin } = await seedReported(t);
+    const rows = await admin.as.query(api.feedback.listForAdmin, {});
+    expect(rows.length).toBe(1);
+    const row = rows[0];
+    expect(row.category).toBe("incorrect");
+    expect(row.messageRole).toBe("assistant");
+    expect(row.hasComment).toBe(true);
+    // CRITICAL: no content leaks through the metadata list.
+    expect("messageText" in row).toBe(false);
+    expect("comment" in row).toBe(false);
+    expect("snapshot" in row).toBe(false);
+  });
+
+  test("listForAdmin rejects a non-admin", async () => {
+    const t = convexTest(schema, modules);
+    const { owner } = await seedReported(t);
+    await expect(owner.as.query(api.feedback.listForAdmin, {})).rejects.toThrow(
+      /admin/i,
+    );
+  });
+
+  test("readSnapshot returns content AND audits the cross-user read", async () => {
+    const t = convexTest(schema, modules);
+    const { owner, admin, feedbackId } = await seedReported(t);
+    const res = await admin.as.mutation(api.feedback.readSnapshot, { feedbackId });
+    // Content is returned (admin has no privacy block).
+    expect(res.snapshot.messageText).toBe("ma réponse");
+    expect(res.comment).toBe("secret comment");
+
+    // The cross-user content read is traced: who read + whose data.
+    const audit = await t.run(async (ctx) =>
+      ctx.db
+        .query("auditLog")
+        .filter((q) => q.eq(q.field("action"), "feedback.read.content"))
+        .collect(),
+    );
+    expect(audit.length).toBe(1);
+    expect(audit[0].realUserId).toBe(admin.userId);
+    expect(audit[0].effectiveUserId).toBe(owner.userId);
+    expect(audit[0].impersonated).toBe(true); // admin != owner = cross-user
+  });
+
+  test("readSnapshot rejects a non-admin", async () => {
+    const t = convexTest(schema, modules);
+    const { owner, feedbackId } = await seedReported(t);
+    await expect(
+      owner.as.mutation(api.feedback.readSnapshot, { feedbackId }),
+    ).rejects.toThrow(/admin/i);
+  });
+
+  test("deleteFeedback removes the row and audits it", async () => {
+    const t = convexTest(schema, modules);
+    const { admin, feedbackId } = await seedReported(t);
+    await admin.as.mutation(api.feedback.deleteFeedback, { feedbackId });
+    const gone = await t.run(async (ctx) => await ctx.db.get(feedbackId));
+    expect(gone).toBeNull();
+    const audit = await t.run(async (ctx) =>
+      ctx.db
+        .query("auditLog")
+        .filter((q) => q.eq(q.field("action"), "feedback.delete"))
+        .collect(),
+    );
+    expect(audit.length).toBe(1);
+  });
+
+  async function impersonate(
+    t: ReturnType<typeof convexTest>,
+    adminUserId: Id<"users">,
+    targetUserId: Id<"users"> | undefined,
+  ) {
+    await t.run(async (ctx) => {
+      const p = await ctx.db
+        .query("profiles")
+        .filter((q) => q.eq(q.field("userId"), adminUserId))
+        .first();
+      await ctx.db.patch(p!._id, { impersonatingUserId: targetUserId });
+    });
+  }
+
+  test("admin responds → user sees thread + unread; mark read clears it; audited", async () => {
+    const t = convexTest(schema, modules);
+    const { owner, admin, feedbackId } = await seedReported(t);
+    expect(await owner.as.query(api.feedback.myUnreadFeedbackCount, {})).toBe(0);
+
+    await admin.as.mutation(api.feedback.respondToFeedback, {
+      feedbackId,
+      text: "Analysé : aucune altération côté serveur.",
+    });
+
+    const list = await owner.as.query(api.feedback.myFeedback, {});
+    expect(list.length).toBe(1);
+    expect(list[0].thread.length).toBe(1);
+    expect(list[0].thread[0].authorRole).toBe("admin");
+    expect(list[0].thread[0].text).toMatch(/Analysé/);
+    expect(list[0].answered).toBe(true);
+    expect(list[0].unread).toBe(true);
+    expect(await owner.as.query(api.feedback.myUnreadFeedbackCount, {})).toBe(1);
+
+    const audit = await t.run(async (ctx) =>
+      ctx.db
+        .query("auditLog")
+        .filter((q) => q.eq(q.field("action"), "feedback.respond"))
+        .collect(),
+    );
+    expect(audit.length).toBe(1);
+    expect(audit[0].realUserId).toBe(admin.userId);
+    expect(audit[0].effectiveUserId).toBe(owner.userId);
+
+    await owner.as.mutation(api.feedback.markAllMyFeedbackRead, {});
+    expect(await owner.as.query(api.feedback.myUnreadFeedbackCount, {})).toBe(0);
+    const list2 = await owner.as.query(api.feedback.myFeedback, {});
+    expect(list2[0].unread).toBe(false);
+  });
+
+  test("respondToFeedback rejects a non-admin", async () => {
+    const t = convexTest(schema, modules);
+    const { owner, feedbackId } = await seedReported(t);
+    await expect(
+      owner.as.mutation(api.feedback.respondToFeedback, { feedbackId, text: "x" }),
+    ).rejects.toThrow(/admin/i);
+  });
+
+  test("markAllMyFeedbackRead is a NO-OP under impersonation (never clears the user's badge)", async () => {
+    const t = convexTest(schema, modules);
+    const { owner, admin, feedbackId } = await seedReported(t);
+    await admin.as.mutation(api.feedback.respondToFeedback, {
+      feedbackId,
+      text: "réponse",
+    });
+    expect(await owner.as.query(api.feedback.myUnreadFeedbackCount, {})).toBe(1);
+
+    // Admin investigates AS the owner and opens the bell (markAllRead).
+    await impersonate(t, admin.userId, owner.userId);
+    await admin.as.mutation(api.feedback.markAllMyFeedbackRead, {});
+    await impersonate(t, admin.userId, undefined);
+
+    // The owner's badge MUST still be unread — the admin peeking didn't clear it.
+    expect(await owner.as.query(api.feedback.myUnreadFeedbackCount, {})).toBe(1);
+    // The real user clearing it works.
+    await owner.as.mutation(api.feedback.markAllMyFeedbackRead, {});
+    expect(await owner.as.query(api.feedback.myUnreadFeedbackCount, {})).toBe(0);
+  });
+});

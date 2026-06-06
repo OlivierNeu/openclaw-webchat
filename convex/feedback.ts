@@ -25,8 +25,18 @@
 import { v } from "convex/values";
 import { mutation, query } from "./_generated/server";
 import { Doc } from "./_generated/dataModel";
-import { requireActive, requireOwnedChat } from "./lib/access";
+import {
+  requireActive,
+  requireOwnedChat,
+  requireAdmin,
+  getProfile,
+} from "./lib/access";
 import { recordAudit } from "./lib/audit";
+import {
+  PERMISSIONS,
+  permissionsForRoleKey,
+  roleHasPermission,
+} from "./lib/rbac";
 
 // Allowed report categories (mirrors OpenRouter's set, adapted: `altered_words`
 // is added because it is the dispute this whole feature exists to investigate;
@@ -87,6 +97,8 @@ export const submitFeedback = mutation({
         timezone: v.optional(v.string()),
         appVersion: v.optional(v.string()),
         theme: v.optional(v.string()),
+        plugins: v.optional(v.array(v.string())),
+        extensionsDetected: v.optional(v.array(v.string())),
       }),
     ),
   },
@@ -239,6 +251,8 @@ export const submitFeedback = mutation({
               appVersion: args.client.appVersion,
               theme: args.client.theme,
               sourceWasOpen: args.client.sourceWasOpen,
+              plugins: args.client.plugins?.slice(0, 40),
+              extensionsDetected: args.client.extensionsDetected?.slice(0, 20),
             }
           : undefined,
       },
@@ -273,5 +287,262 @@ export const myReportedMessageIds = query({
     return rows
       .filter((r) => r.userId === userId)
       .map((r) => r.messageId as string);
+  },
+});
+
+// ===========================================================================
+// Increment B — ADMIN administration of recorded feedback (Settings tab).
+//
+// Split by sensitivity (Olivier's rule: admin has no privacy constraint, but
+// every admin view of ANOTHER user's CONTENT must be audited):
+//   - listForAdmin  = METADATA only (category, who, when, fidelity verdict). No
+//     message content → no per-row audit, like the traces/audit log lists.
+//   - readSnapshot  = the CONTENT read (message text, prompt, context, comment).
+//     A MUTATION (queries can't write the audit) gated by `traces.read.content`
+//     and AUDITED per call as a cross-user content access.
+//   - deleteFeedback = administration (clear a handled report), audited.
+// ===========================================================================
+
+const ADMIN_LIST_MAX = 200;
+
+/** Admin metadata list — NO message content, so no per-row content audit. */
+export const listForAdmin = query({
+  args: { limit: v.optional(v.number()) },
+  handler: async (ctx, { limit }) => {
+    await requireAdmin(ctx);
+    const rows = await ctx.db
+      .query("feedback")
+      .withIndex("by_time")
+      .order("desc")
+      .take(Math.min(limit ?? ADMIN_LIST_MAX, ADMIN_LIST_MAX));
+    return Promise.all(
+      rows.map(async (r) => {
+        const reporter = await getProfile(ctx, r.userId);
+        const realReporter = r.impersonated
+          ? await getProfile(ctx, r.realUserId)
+          : reporter;
+        return {
+          _id: r._id,
+          at: r.at,
+          category: r.category,
+          hasComment: !!r.comment,
+          messageRole: r.snapshot.messageRole,
+          displayedMatchesStored: r.snapshot.displayedMatchesStored,
+          sourceWasOpen: r.snapshot.clientInfo?.sourceWasOpen ?? false,
+          impersonated: r.impersonated,
+          answered: latestAdminAt(r.thread) > 0,
+          reporterEmail: reporter?.email ?? null,
+          reporterName: reporter?.name ?? null,
+          // When filed under impersonation, surface the REAL operator too.
+          realOperatorEmail: r.impersonated
+            ? (realReporter?.email ?? null)
+            : null,
+          chatId: r.chatId,
+          messageId: r.messageId,
+          // METADATA ONLY — never messageText/promptText/comment here.
+        };
+      }),
+    );
+  },
+});
+
+/**
+ * The AUDITED content read. Returns the frozen snapshot (message text, prompt,
+ * context, comment, client declarations). Gated by `traces.read.content`; every
+ * call writes an audit row attributing the admin (realUserId) AND whose content
+ * was read (effectiveUserId = the feedback owner; impersonated=true marks the
+ * cross-user case) — satisfying "admin sees another user's info → traced".
+ */
+export const readSnapshot = mutation({
+  args: { feedbackId: v.id("feedback") },
+  handler: async (ctx, { feedbackId }) => {
+    const adminId = await requireAdmin(ctx);
+    // Content-read gate (documents intent + future-proofs a non-admin auditor
+    // role): the admin's role must hold traces.read.content (admin = wildcard).
+    const adminProfile = await getProfile(ctx, adminId);
+    const perms = await permissionsForRoleKey(
+      ctx,
+      adminProfile?.role ?? "user",
+    );
+    if (!roleHasPermission(perms, PERMISSIONS.TRACES_READ_CONTENT)) {
+      throw new Error("Forbidden: traces.read.content required");
+    }
+
+    const fb = await ctx.db.get(feedbackId);
+    if (fb === null) throw new Error("Not found: feedback");
+
+    // Audit the cross-user content access (reuses the audit identity model:
+    // realUserId = who read, effectiveUserId = whose data, impersonated = cross).
+    await recordAudit(
+      ctx,
+      {
+        realUserId: adminId,
+        effectiveUserId: fb.userId,
+        impersonating: adminId !== fb.userId,
+      },
+      "feedback.read.content",
+      { resource: "feedback", resourceId: feedbackId },
+    );
+
+    return {
+      _id: fb._id,
+      at: fb.at,
+      category: fb.category,
+      comment: fb.comment ?? null,
+      impersonated: fb.impersonated,
+      reporterUserId: fb.userId,
+      realUserId: fb.realUserId,
+      chatId: fb.chatId,
+      messageId: fb.messageId,
+      thread: (fb.thread ?? []).map((m) => ({
+        authorRole: m.authorRole,
+        text: m.text,
+        at: m.at,
+      })),
+      snapshot: fb.snapshot,
+    };
+  },
+});
+
+/** Administration: remove a handled feedback. Audited (no content exposed). */
+export const deleteFeedback = mutation({
+  args: { feedbackId: v.id("feedback") },
+  handler: async (ctx, { feedbackId }) => {
+    const adminId = await requireAdmin(ctx);
+    const fb = await ctx.db.get(feedbackId);
+    if (fb === null) return; // idempotent
+    await recordAudit(
+      ctx,
+      {
+        realUserId: adminId,
+        effectiveUserId: fb.userId,
+        impersonating: adminId !== fb.userId,
+      },
+      "feedback.delete",
+      { resource: "feedback", resourceId: feedbackId },
+    );
+    await ctx.db.delete(feedbackId);
+  },
+});
+
+// ===========================================================================
+// Increment C — feedback EXCHANGE loop + per-user notification zone.
+//
+//   - respondToFeedback : admin appends a response to the thread (audited).
+//   - myFeedback        : the user reads THEIR OWN reports + the thread (never
+//     the forensic snapshot). Owner-scoped to the effective identity.
+//   - myUnreadFeedbackCount : reactive badge — count of the user's reports whose
+//     latest admin message is newer than what the user has read.
+//   - markAllMyFeedbackRead : clears the badge. NO-OP under impersonation, so an
+//     admin investigating AS a user never silently clears that user's badge.
+// ===========================================================================
+
+const RESPONSE_MAX = 2000;
+
+function latestAdminAt(thread: Doc<"feedback">["thread"]): number {
+  let mx = 0;
+  for (const m of thread ?? []) if (m.authorRole === "admin" && m.at > mx) mx = m.at;
+  return mx;
+}
+
+/** Admin appends a response to a report's thread (audited; not a content read). */
+export const respondToFeedback = mutation({
+  args: { feedbackId: v.id("feedback"), text: v.string() },
+  handler: async (ctx, { feedbackId, text }) => {
+    const adminId = await requireAdmin(ctx);
+    const fb = await ctx.db.get(feedbackId);
+    if (fb === null) throw new Error("Not found: feedback");
+    const trimmed = text.trim().slice(0, RESPONSE_MAX);
+    if (trimmed.length === 0) throw new Error("Empty response");
+    await ctx.db.patch(feedbackId, {
+      thread: [
+        ...(fb.thread ?? []),
+        {
+          authorUserId: adminId,
+          authorRole: "admin" as const,
+          text: trimmed,
+          at: Date.now(),
+        },
+      ],
+    });
+    await recordAudit(
+      ctx,
+      {
+        realUserId: adminId,
+        effectiveUserId: fb.userId,
+        impersonating: adminId !== fb.userId,
+      },
+      "feedback.respond",
+      { resource: "feedback", resourceId: feedbackId },
+    );
+  },
+});
+
+/** The user's OWN reports + exchange thread (never the forensic snapshot). */
+export const myFeedback = query({
+  args: {},
+  handler: async (ctx) => {
+    const { userId } = await requireActive(ctx);
+    const rows = await ctx.db
+      .query("feedback")
+      .withIndex("by_user", (q) => q.eq("userId", userId))
+      .order("desc")
+      .take(ADMIN_LIST_MAX);
+    return rows.map((r) => {
+      const adminAt = latestAdminAt(r.thread);
+      return {
+        _id: r._id,
+        at: r.at,
+        category: r.category,
+        comment: r.comment ?? null,
+        messageRole: r.snapshot.messageRole,
+        chatId: r.chatId,
+        messageId: r.messageId,
+        // Thread WITHOUT author ids (the user only needs role + text + time).
+        thread: (r.thread ?? []).map((m) => ({
+          authorRole: m.authorRole,
+          text: m.text,
+          at: m.at,
+        })),
+        answered: adminAt > 0,
+        unread: adminAt > (r.userReadAt ?? 0),
+      };
+    });
+  },
+});
+
+/** Reactive unread badge count for the notification bell. */
+export const myUnreadFeedbackCount = query({
+  args: {},
+  handler: async (ctx) => {
+    const { userId } = await requireActive(ctx);
+    const rows = await ctx.db
+      .query("feedback")
+      .withIndex("by_user", (q) => q.eq("userId", userId))
+      .take(ADMIN_LIST_MAX);
+    let count = 0;
+    for (const r of rows) {
+      if (latestAdminAt(r.thread) > (r.userReadAt ?? 0)) count++;
+    }
+    return count;
+  },
+});
+
+/** Mark all the user's reports read. NO-OP under impersonation (advisor guard). */
+export const markAllMyFeedbackRead = mutation({
+  args: {},
+  handler: async (ctx) => {
+    const { userId, impersonating } = await requireActive(ctx);
+    if (impersonating) return; // an admin peeking AS the user must not clear it
+    const now = Date.now();
+    const rows = await ctx.db
+      .query("feedback")
+      .withIndex("by_user", (q) => q.eq("userId", userId))
+      .take(ADMIN_LIST_MAX);
+    for (const r of rows) {
+      if (latestAdminAt(r.thread) > (r.userReadAt ?? 0)) {
+        await ctx.db.patch(r._id, { userReadAt: now });
+      }
+    }
   },
 });

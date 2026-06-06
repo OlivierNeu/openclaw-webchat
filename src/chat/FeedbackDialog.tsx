@@ -62,6 +62,47 @@ function categoriesFor(role: MsgRole) {
   return role === "user" ? USER_CATEGORIES : AI_CATEGORIES;
 }
 
+// Known text-mutating browser extensions and the DOM footprint they inject.
+// Extensions are NOT API-enumerable (privacy), but the ones that rewrite text
+// add identifiable nodes — detecting those is the useful forensic signal for
+// "did a client tool alter the words?". We match on extension-INJECTED elements,
+// never on our own `data-gramm="false"` attribute (which would false-positive).
+const EXTENSION_SIGNATURES: { name: string; selector: string }[] = [
+  {
+    name: "Grammarly",
+    selector:
+      "grammarly-desktop-integration, grammarly-extension, [data-grammarly-shadow-root]",
+  },
+  { name: "LanguageTool", selector: "[data-lt-installed], .lt-toolbar" },
+  { name: "DeepL", selector: "deepl-inline-translate, .deepl-translator" },
+  { name: "ProWritingAad", selector: "pwa-shadow-host, .pwa-tag" },
+];
+
+// Best-effort browser context for the forensic snapshot.
+function captureBrowserContext(): {
+  plugins: string[];
+  extensionsDetected: string[];
+} {
+  let plugins: string[] = [];
+  try {
+    // Privacy-neutered in modern Chrome (fixed PDF list); kept for completeness.
+    plugins = Array.from(navigator.plugins ?? [])
+      .map((p) => p.name)
+      .slice(0, 40);
+  } catch {
+    plugins = [];
+  }
+  const extensionsDetected: string[] = [];
+  for (const { name, selector } of EXTENSION_SIGNATURES) {
+    try {
+      if (document.querySelector(selector)) extensionsDetected.push(name);
+    } catch {
+      /* invalid selector / detached doc — skip */
+    }
+  }
+  return { plugins, extensionsDetected };
+}
+
 type FeedbackTarget = {
   chatId: string;
   messageId: string;
@@ -124,6 +165,7 @@ export function FeedbackProvider({ children }: { children: React.ReactNode }) {
           theme: document.documentElement.classList.contains("dark")
             ? "dark"
             : "light",
+          ...captureBrowserContext(),
         },
       });
       setVerdict(res.displayedMatchesStored);

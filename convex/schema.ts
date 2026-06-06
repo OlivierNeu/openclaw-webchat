@@ -434,14 +434,42 @@ export default defineSchema({
           appVersion: v.optional(v.string()),
           theme: v.optional(v.string()),
           sourceWasOpen: v.optional(v.boolean()),
+          // Browser plugins (navigator.plugins). NOTE: privacy-neutered in modern
+          // Chrome (a fixed PDF-viewer list, NOT the real set) and never includes
+          // extensions — kept best-effort for completeness, low signal.
+          plugins: v.optional(v.array(v.string())),
+          // Text-mutating extensions DETECTED via their injected DOM footprint
+          // (extensions are not API-enumerable). THIS is the useful signal: it
+          // names client-side tools (Grammarly/LanguageTool/…) that could alter
+          // typed/displayed text.
+          extensionsDetected: v.optional(v.array(v.string())),
         }),
       ),
     }),
+    // Increment C — admin↔user exchange about this report. Append-list (a thread,
+    // not a single field) so an admin can post follow-ups over time without a
+    // migration. `authorRole` distinguishes admin responses from (future) user
+    // replies; the user sees this thread in their notification zone.
+    thread: v.optional(
+      v.array(
+        v.object({
+          authorUserId: v.id("users"),
+          authorRole: v.union(v.literal("admin"), v.literal("user")),
+          text: v.string(),
+          at: v.number(),
+        }),
+      ),
+    ),
+    // When the OWNER last read their thread (drives the unread badge). Unread =
+    // latest admin message `at` > userReadAt. NOT written under impersonation.
+    userReadAt: v.optional(v.number()),
   })
     .index("by_chat", ["chatId"])
     .index("by_message", ["messageId"])
     .index("by_time", ["at"])
-    .index("by_real", ["realUserId"]),
+    .index("by_real", ["realUserId"])
+    // The user's own reports, newest-first, for the notification zone.
+    .index("by_user", ["userId"]),
 
   // ===========================================================================
   // Observability & RBAC spine (increment 1). All NEW tables -> required fields

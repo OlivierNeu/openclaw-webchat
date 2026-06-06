@@ -817,6 +817,60 @@ row status **complete** ("Bridge validé, je te reçois bien."). CAPTURED LIVE G
   backend change). Live: AI shows 7, user shows 3, user submit stored with messageRole "user". Files:
   FeedbackDialog.tsx (provider refactor + role categories), main.tsx (FeedbackProvider wiring). Gates: tsc
   src 0, vite build OK.
+  **UI-9 INCREMENT B — ADMIN FEEDBACK VIEW (Settings › Feedbacks) — DONE + LIVE-VERIFIED 2026-06-06:**
+  Olivier: "il manque la liste des feedbacks pour les administrer". Built a paramless Settings tab.
+  SPLIT BY SENSITIVITY (Olivier's audit rule): `feedback.listForAdmin` (query, requireAdmin) returns
+  METADATA ONLY — category, role, reporter email/name, when, fidelity pill, hasComment — NO message content,
+  so listing is unaudited like the audit/trace logs (a test pins that messageText/comment/snapshot do NOT
+  leak through the list). `feedback.readSnapshot` (MUTATION — queries can't write audit) is the CONTENT read:
+  gated by `traces.read.content` (admin=wildcard holds it) + writes a `feedback.read.content` audit row
+  reusing the identity model (realUserId=admin, effectiveUserId=feedback owner, impersonated=cross-user) → so
+  every admin view of another user's content is traced. `feedback.deleteFeedback` (requireAdmin + audited).
+  Frontend: src/chat/admin/FeedbacksTab.tsx — DataTableShell metadata table + inline row expansion that calls
+  readSnapshot (audited) and renders the full forensic snapshot (stored text in a ligature-off pre, displayed
+  text when sourceWasOpen, prompt, frozen context turns, outbox payload, client env, honest fidelity pill),
+  + delete via useConfirm. Wired: TABS/PARAMLESS_TABS/TAB_LABELS (AdminSettings.tsx) + SettingsParamlessScreen
+  case (router.tsx). Tests: 5 (listForAdmin metadata-only, non-admin rejected ×2, readSnapshot returns
+  content + audits cross-user, delete + audit) → vitest 132 total. Live: /settings/feedbacks renders, 5 rows,
+  detail opens with all sections, auditLog shows 2× feedback.read.content + 5× feedback.submit. DELETE
+  live-verified (kebab→Supprimer→AlertDialog appears→confirm→row drops 5→4). NEVER committed.
+  **UI-9 CLIENT CONTEXT ENRICHMENT (Olivier) — DONE + LIVE-VERIFIED 2026-06-06:** capture browser context in
+  the snapshot's clientInfo. `plugins` = navigator.plugins (best-effort; LIVE-CONFIRMED neutered — Chrome
+  returns the fixed 5-entry PDF-viewer list, never the real set, and NEVER extensions → low signal, shown
+  with that caveat in the admin detail). The USEFUL signal: `extensionsDetected` = text-mutating extensions
+  found by their INJECTED DOM footprint (Grammarly/LanguageTool/DeepL/ProWritingAid; extensions aren't
+  API-enumerable, but the ones that rewrite text add identifiable nodes — matched on injected ELEMENTS, never
+  our own data-gramm attr). Highlighted (is-warn pill) in the admin detail when present — direct evidence for
+  "did a client tool alter the words?". Live: plugins=[5 PDF entries], extensionsDetected=[] (none installed
+  here). Files: schema.ts (clientInfo +plugins/+extensionsDetected), feedback.ts (client args + store),
+  FeedbackDialog.tsx (captureBrowserContext), FeedbacksTab.tsx (display). Gates: tsc src/convex 0, vitest 132,
+  build OK.
+  **UI-9 KNOWN NUANCES (documented, not bugs):** (1) re-viewing the SAME feedback detail serves from the
+  `byId` client cache → does NOT re-call readSnapshot → no NEW audit row. We audit each content FETCH, not
+  each re-render (re-displaying already-disclosed data isn't a new disclosure). (2) `feedback.read.content`
+  audit rows carry impersonated=true (identity-model reuse: effectiveUserId=data owner), so they appear under
+  the AuditTab `impersonated=yes` filter even though no impersonation SESSION occurred — the `action` name
+  disambiguates. (3) STILL deferred: `contentHash`/tamper-evidence (snapshot is an admin-editable DB row).
+  **UI-9 INCREMENT C — FEEDBACK EXCHANGE LOOP + PER-USER NOTIFICATION ZONE — DONE + LIVE-VERIFIED 2026-06-06:**
+  Olivier: "échanges d'information via une zone de notification par utilisateur; admin renvoie une réponse au
+  rapport; l'utilisateur voit ses propres feedbacks". Modeled as a THREAD (advisor: "échanges" → append-list,
+  not a single field, to avoid migration on follow-ups): feedback += `thread[]` ({authorUserId, authorRole
+  admin|user, text, at}) + `userReadAt` + `by_user` index (all additive). Backend (convex/feedback.ts):
+  `respondToFeedback` (admin appends an admin message; audited `feedback.respond`); `myFeedback` (user query,
+  owner-scoped to EFFECTIVE id — returns the user's reports + thread + `answered`/`unread`, NEVER the forensic
+  snapshot); `myUnreadFeedbackCount` (reactive badge — count where latestAdminAt > userReadAt);
+  `markAllMyFeedbackRead` (clears badge, **NO-OP under impersonation** so an admin investigating AS a user
+  never silently clears that user's badge — advisor-caught, pinned by a test). `readSnapshot` also returns the
+  thread; `listForAdmin` gains `answered` (metadata). Frontend: src/chat/NotificationBell.tsx — Bell in the
+  topbar (oc-topbar__actions, active chrome only) with a reactive unread badge → DropdownMenu panel "Mes
+  signalements" listing the user's reports (category/comment/date/status + admin responses); opening marks
+  read. FeedbacksTab detail gains an "Échange avec l'utilisateur" section (thread + Répondre textarea,
+  optimistic append) + a "Statut" column (Répondu/En attente). Tests: 3 (respond→user sees+unread+audited,
+  non-admin rejected, mark-read NO-OP under impersonation) → vitest 135 total. Live: bell renders, admin
+  responds → reactive badge "1" appears → panel shows the response (status Répondu) → close marks read →
+  badge clears; auditLog 1× feedback.respond. NEVER committed. Files: schema.ts, feedback.ts (+ .test.ts),
+  NotificationBell.tsx, FeedbacksTab.tsx, router.tsx (bell wiring), convexChat.css. Natural next step (not
+  built): user REPLY back (thread already supports authorRole user) + admin-side unread.
   **#53 INCREMENT 3 — COMPOSER POLISH BUILT + LIVE-VERIFIED 2026-06-05 (pure frontend, no live agent):**
   via assistant-ui 0.14 primitives in `ConvexChat.tsx` + `convexChat.css`: (1) EMPTY STATE
   (`ThreadPrimitive.Empty`) — OC avatar + "Comment puis-je aider ?" + 4 suggestion cards

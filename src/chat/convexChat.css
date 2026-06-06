@@ -435,6 +435,157 @@
   border-color: color-mix(in oklch, var(--destructive, orange) 45%, var(--border));
 }
 
+/* ── Admin feedback detail (Settings › Feedbacks, increment B) */
+.oc-fbadmin__detail {
+  display: flex;
+  flex-direction: column;
+  gap: 0.85rem;
+  padding: 0.4rem 0.2rem 0.6rem;
+}
+.oc-fbadmin__detail section { display: flex; flex-direction: column; gap: 0.3rem; }
+.oc-fbadmin__h {
+  margin: 0;
+  font-size: 0.7rem;
+  font-weight: 600;
+  letter-spacing: 0.03em;
+  text-transform: uppercase;
+  color: var(--muted-foreground);
+}
+.oc-fbadmin__row { display: flex; align-items: center; gap: 0.6rem; flex-wrap: wrap; }
+.oc-fbadmin__meta { font-size: 0.82rem; color: var(--muted-foreground); }
+.oc-fbadmin__comment {
+  margin: 0;
+  padding: 0.5rem 0.7rem;
+  background: var(--muted);
+  border-radius: var(--radius-md);
+  font-size: 0.875rem;
+}
+.oc-fbadmin__pill {
+  display: inline-block;
+  padding: 0.1rem 0.5rem;
+  border-radius: 999px;
+  font-size: 0.72rem;
+  font-weight: 600;
+  background: var(--muted);
+  color: var(--muted-foreground);
+  border: 1px solid var(--border);
+}
+.oc-fbadmin__pill.is-ok {
+  background: color-mix(in oklch, var(--primary, green) 14%, var(--background));
+  color: var(--foreground);
+  border-color: color-mix(in oklch, var(--primary, green) 45%, var(--border));
+}
+.oc-fbadmin__pill.is-warn {
+  background: color-mix(in oklch, var(--destructive, orange) 16%, var(--background));
+  color: var(--foreground);
+  border-color: color-mix(in oklch, var(--destructive, orange) 50%, var(--border));
+}
+.oc-fbadmin__ctx { display: flex; flex-direction: column; gap: 0.3rem; }
+.oc-fbadmin__ctx-turn {
+  display: grid;
+  grid-template-columns: 64px 1fr;
+  gap: 0.5rem;
+  font-size: 0.82rem;
+  padding: 0.3rem 0.4rem;
+  border-left: 2px solid var(--border);
+}
+.oc-fbadmin__ctx-role { color: var(--muted-foreground); font-weight: 600; }
+.oc-fbadmin__ctx-text { white-space: pre-wrap; word-break: break-word; }
+.oc-fbadmin__env { margin: 0; font-size: 0.78rem; color: var(--muted-foreground); display: flex; flex-direction: column; gap: 0.2rem; }
+.oc-fbadmin__ua { font-family: var(--font-mono); font-size: 0.72rem; opacity: 0.75; }
+.oc-fbadmin__plugins { font-size: 0.78rem; }
+.oc-fbadmin__note { opacity: 0.7; font-style: italic; }
+.oc-fbadmin__thread { display: flex; flex-direction: column; gap: 0.4rem; margin-bottom: 0.5rem; }
+
+/* ── Notification bell + per-user notification zone (UI-9 increment C) */
+.oc-bell {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 34px;
+  height: 34px;
+  border-radius: var(--radius-md);
+  color: var(--foreground);
+  background: transparent;
+  border: none;
+  cursor: pointer;
+}
+.oc-bell:hover { background: var(--muted); }
+.oc-bell__badge {
+  position: absolute;
+  top: 2px;
+  right: 2px;
+  min-width: 16px;
+  height: 16px;
+  padding: 0 4px;
+  border-radius: 999px;
+  background: var(--destructive, #e5484d);
+  color: #fff;
+  font-size: 0.62rem;
+  font-weight: 700;
+  line-height: 16px;
+  text-align: center;
+}
+.oc-notif {
+  width: 360px;
+  max-width: 92vw;
+  padding: 0;
+  max-height: 70vh;
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+}
+.oc-notif__head {
+  padding: 0.6rem 0.8rem;
+  font-weight: 600;
+  font-size: 0.85rem;
+  border-bottom: 1px solid var(--border);
+}
+.oc-notif__empty { padding: 1rem 0.8rem; color: var(--muted-foreground); font-size: 0.85rem; }
+.oc-notif__list { overflow-y: auto; }
+.oc-notif__item {
+  padding: 0.6rem 0.8rem;
+  border-bottom: 1px solid var(--border);
+  display: flex;
+  flex-direction: column;
+  gap: 0.3rem;
+}
+.oc-notif__item.is-unread { background: color-mix(in oklch, var(--primary, blue) 7%, var(--background)); }
+.oc-notif__item-head { display: flex; align-items: center; justify-content: space-between; gap: 0.5rem; }
+.oc-notif__cat { font-weight: 600; font-size: 0.82rem; }
+.oc-notif__status {
+  font-size: 0.68rem;
+  font-weight: 600;
+  padding: 0.05rem 0.45rem;
+  border-radius: 999px;
+  background: var(--muted);
+  color: var(--muted-foreground);
+  border: 1px solid var(--border);
+}
+.oc-notif__status.is-answered {
+  background: color-mix(in oklch, var(--primary, green) 14%, var(--background));
+  color: var(--foreground);
+  border-color: color-mix(in oklch, var(--primary, green) 45%, var(--border));
+}
+.oc-notif__when { font-size: 0.72rem; color: var(--muted-foreground); }
+.oc-notif__comment { margin: 0; font-size: 0.82rem; font-style: italic; color: var(--muted-foreground); }
+.oc-notif__thread { display: flex; flex-direction: column; gap: 0.35rem; margin-top: 0.15rem; }
+.oc-notif__msg {
+  display: flex;
+  flex-direction: column;
+  gap: 0.1rem;
+  padding: 0.4rem 0.55rem;
+  border-radius: var(--radius-md);
+  font-size: 0.83rem;
+}
+.oc-notif__msg--admin { background: var(--muted); }
+.oc-notif__msg--user { background: color-mix(in oklch, var(--primary, blue) 9%, var(--background)); }
+.oc-notif__msg-who { font-size: 0.68rem; font-weight: 700; color: var(--muted-foreground); text-transform: uppercase; letter-spacing: 0.03em; }
+.oc-notif__msg-text { white-space: pre-wrap; word-break: break-word; }
+.oc-notif__link { font-size: 0.74rem; color: var(--primary, #3b82f6); text-decoration: none; align-self: flex-start; }
+.oc-notif__link:hover { text-decoration: underline; }
+
 /* ── Raw "Source" view of a message — verbatim, convention-free (no markdown,
    no autocorrect): exactly the stored text, monospace + wrapping + selectable.
    The trust guarantee a user can rely on to confirm what was sent/received. */
