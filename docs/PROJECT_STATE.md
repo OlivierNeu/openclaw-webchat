@@ -726,6 +726,27 @@ row status **complete** ("Bridge validé, je te reçois bien."). CAPTURED LIVE G
   (tooltip "Dictée vocale — bientôt disponible"). Verified live: flag off → no mic; toggle on → mic
   appears (right group, before Send), matching Olivier's reference. Files: convex/{schema,me}.ts,
   src/chat/{UserMenu,ConvexChat}.tsx. When the voice phase lands, wire the mic onClick + the recording.
+  **UI-7 #69 — MESSAGE DELETE + REGENERATE + CASCADE + GATEWAY REALIGN — DONE + LIVE-VERIFIED 2026-06-06:**
+  delete action under BOTH assistant + user turns (copy stays). Semantics (messages.deleteMessage,
+  owner-scoped, truncate-forward): delete an ASSISTANT turn → remove it + all following, then REGENERATE
+  the now-last user turn; delete a USER turn → remove it + all following. BOTH deletes confirm via a
+  styled shadcn AlertDialog (`useConfirm()`, replaces window.confirm) with role-specific copy —
+  assistant: "Supprimer et régénérer cette réponse ?"; user: "Supprimer ce message et les suivants ?".
+  **CRITICAL realignment (advisor):** deleting in Convex does NOT remove the turn from the OpenClaw
+  session, so EVERY delete schedules a `sessions.reset` (new bridge `POST /reset` + `dispatchReset`
+  action) → `systemSent=false` → the next turn re-hydrates from the TRUNCATED Convex state → gateway
+  realigned. For regenerate, `dispatchReset` chains the re-dispatch ONLY after a successful reset (so it
+  runs on the fresh, re-hydrating session — never the stale one). Pieces: bridge server.ts (/reset +
+  performReset + parseResetBody), convex/bridge.ts (dispatchReset), convex/messages.ts (deleteMessage +
+  regenerate outbox with reconstructed attachments + unique clientMessageId), convertMessage.ts
+  (messageId in metadata for the authoritative delete id), ConvexChat.tsx (DeleteMessageButton + both
+  action bars) + convexChat.css. LIVE-VERIFIED 6.1 (jx7f3yr): delete assistant "417" → regenerate "437"
+  (bridge log: reset → "fresh session -> prepended 71 prior turns"); delete user "Donne un nombre" →
+  cascade (it + "437" removed, tail truncated to "OK"). `sessions.reset` probed: accepted, systemSent→false.
+  Gates: tsc src+convex 0, vite build OK, vitest 123, bridge 55. NEVER committed. DEVIATION surfaced: a
+  MID-thread assistant delete truncates everything after it (more than the literal "regenerate last user
+  turn") — identical for the LAST turn (the common case); coherent for mid-thread. OUTCOME (model no
+  longer sees deleted content after realignment) → NAS #62 case 9 (codex-harness masks it locally).
   **#53 INCREMENT 3 — COMPOSER POLISH BUILT + LIVE-VERIFIED 2026-06-05 (pure frontend, no live agent):**
   via assistant-ui 0.14 primitives in `ConvexChat.tsx` + `convexChat.css`: (1) EMPTY STATE
   (`ThreadPrimitive.Empty`) — OC avatar + "Comment puis-je aider ?" + 4 suggestion cards

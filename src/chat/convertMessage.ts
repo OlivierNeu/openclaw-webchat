@@ -124,6 +124,9 @@ export function convertConvexMessage(
     // assistant-ui reads custom `metadata` for renderers that opt in.
     metadata: {
       custom: {
+        // The Convex message _id — surfaced so per-message actions (delete) call
+        // the mutation with the authoritative id, not assistant-ui's internal one.
+        messageId: message._id,
         status: message.status,
         runId: message.runId ?? null,
         error: message.error ?? null,

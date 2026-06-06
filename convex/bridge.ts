@@ -366,3 +366,90 @@ export const dispatchPatch = internalAction({
     }
   },
 });
+
+/**
+ * Realign the OpenClaw session after a message DELETE: POST `/reset` so the
+ * gateway flips `systemSent=false` and the next turn re-hydrates from the
+ * (now-truncated) Convex state. Scheduled by `messages.deleteMessage`.
+ *
+ * If `regenerateOutboxId` is provided (assistant-delete -> regenerate), the
+ * re-dispatch is chained ONLY AFTER a SUCCESSFUL reset — running it on a stale
+ * (un-reset) session would re-answer with the deleted turn still in context.
+ * Best-effort: a missing config / unrouted user / bridge error is logged and
+ * traced but never throws (a thrown action would be retried by Convex).
+ */
+export const dispatchReset = internalAction({
+  args: {
+    chatId: v.id("chats"),
+    userId: v.id("users"),
+    regenerateOutboxId: v.optional(v.id("outbox")),
+  },
+  handler: async (ctx, { chatId, userId, regenerateOutboxId }) => {
+    const bridgeUrl = process.env.BRIDGE_URL;
+    const sharedSecret = process.env.BRIDGE_SHARED_SECRET;
+    if (!bridgeUrl || !sharedSecret) {
+      console.error(
+        "bridge.dispatchReset: BRIDGE_URL / BRIDGE_SHARED_SECRET not configured",
+      );
+      return;
+    }
+    const routing = await ctx.runQuery(internal.bridge.getChatRouting, {
+      chatId,
+      userId,
+    });
+    if (!routing || routing.target === null) {
+      console.error("bridge.dispatchReset: user is unrouted (no valve target)");
+      return;
+    }
+
+    let ok = false;
+    try {
+      const response = await fetch(`${bridgeUrl.replace(/\/$/, "")}/reset`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: sharedSecret,
+        },
+        body: JSON.stringify({
+          chatId,
+          openclawChatId: routing.openclawChatId,
+          instanceName: routing.target.instanceName,
+          agentId: routing.target.agentId,
+          canonical: routing.target.canonical,
+        }),
+      });
+      ok = response.ok;
+      if (!ok) console.error(`bridge POST /reset -> HTTP ${response.status}`);
+    } catch (err) {
+      console.error("bridge POST /reset failed:", err);
+      ok = false;
+    }
+
+    // Chain the regenerate ONLY after a clean reset (else skip — a stale-session
+    // regenerate would answer with the deleted context).
+    if (ok && regenerateOutboxId) {
+      await ctx.scheduler.runAfter(0, internal.bridge.dispatch, {
+        outboxId: regenerateOutboxId,
+      });
+    }
+
+    try {
+      await ctx.runMutation(internal.observability.recordEvent, {
+        kind: "openclaw.reset",
+        direction: "outbound",
+        principalType: "user",
+        principalId: userId,
+        chatId,
+        correlationId: `${chatId}:reset`,
+        meta: JSON.stringify({
+          resetStatus: ok ? "sent" : "failed",
+          regenerated: Boolean(regenerateOutboxId) && ok,
+          instanceName: routing.target.instanceName,
+          agentId: routing.target.agentId,
+        }),
+      });
+    } catch {
+      // best-effort
+    }
+  },
+});

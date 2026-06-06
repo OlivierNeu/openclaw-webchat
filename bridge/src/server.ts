@@ -49,6 +49,12 @@ interface PatchBody {
   model: string | null;
 }
 
+/** Inbound body for a session reset (`POST /reset`). */
+interface ResetBody {
+  chatId: string;
+  openclawChatId: string | null;
+}
+
 /** Constant-time string compare that does not leak length via early return. */
 function constantTimeEqual(a: string, b: string): boolean {
   const ab = Buffer.from(a, "utf8");
@@ -111,6 +117,23 @@ function parseSendBody(raw: string): SendBody | null {
     messageId: typeof obj.messageId === "string" ? obj.messageId : null,
     sessionSettings: parseSessionSettings(obj.sessionSettings),
     attachments: obj.attachments,
+  };
+}
+
+/** Defensive parse of the session-reset body. Exported for tests. */
+export function parseResetBody(raw: string): ResetBody | null {
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(raw);
+  } catch {
+    return null;
+  }
+  if (typeof parsed !== "object" || parsed === null) return null;
+  const obj = parsed as Record<string, unknown>;
+  if (typeof obj.chatId !== "string") return null;
+  return {
+    chatId: obj.chatId,
+    openclawChatId: typeof obj.openclawChatId === "string" ? obj.openclawChatId : null,
   };
 }
 
@@ -424,6 +447,21 @@ async function performPatch(
   }
 }
 
+/**
+ * Reset the OpenClaw session (`sessions.reset`). Called after a message DELETE in
+ * Convex so the gateway's session context stops diverging from the (now-truncated)
+ * webchat: a reset flips `systemSent` to false, so the NEXT turn re-hydrates from
+ * the truncated Convex state (docs/SESSION_CONTINUITY_DESIGN.md). Without this, a
+ * warm session would keep deleted turns in the model's context — the user would
+ * see a truncated thread while the model still reasons over what they removed.
+ * We also clear `verboseFullApplied` so the next send re-applies verboseLevel.
+ */
+async function performReset(session: BridgeSession): Promise<void> {
+  const conn = session.connection;
+  await conn.request("sessions.reset", { key: session.sessionKey }, 10_000);
+  conn.verboseFullApplied = false;
+}
+
 export interface BridgeServerDeps {
   config: BridgeConfig;
   registry: SessionRegistry;
@@ -454,7 +492,10 @@ export function createBridgeServer(deps: BridgeServerDeps): Server {
       sendJson(res, 200, { status: "ok" });
       return;
     }
-    if (req.method !== "POST" || (req.url !== "/send" && req.url !== "/patch")) {
+    if (
+      req.method !== "POST" ||
+      (req.url !== "/send" && req.url !== "/patch" && req.url !== "/reset")
+    ) {
       sendJson(res, 404, { ok: false, error: "not found" });
       return;
     }
@@ -487,6 +528,23 @@ export function createBridgeServer(deps: BridgeServerDeps): Server {
       } catch (err) {
         console.error("bridge /patch failed:", (err as Error)?.message ?? err);
         sendJson(res, 502, { ok: false, error: "upstream patch failed" });
+      }
+      return;
+    }
+
+    if (req.url === "/reset") {
+      const reset = parseResetBody(raw);
+      if (reset === null) {
+        sendJson(res, 400, { ok: false, error: "invalid body" });
+        return;
+      }
+      try {
+        const session = await registry.acquire(reset.chatId, reset.openclawChatId);
+        await performReset(session);
+        sendJson(res, 200, { ok: true });
+      } catch (err) {
+        console.error("bridge /reset failed:", (err as Error)?.message ?? err);
+        sendJson(res, 502, { ok: false, error: "upstream reset failed" });
       }
       return;
     }

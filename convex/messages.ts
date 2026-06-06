@@ -17,9 +17,11 @@
 // `listByChatPaginated`) rather than widen this window.
 
 import { v } from "convex/values";
-import { query } from "./_generated/server";
+import { query, mutation } from "./_generated/server";
+import { internal } from "./_generated/api";
 import { Id } from "./_generated/dataModel";
 import { requireActive, requireOwnedChat } from "./lib/access";
+import { auditImpersonated } from "./lib/audit";
 
 // Hard upper bound on how many recent messages the reactive feed loads. Chosen
 // to cover a typical visible conversation while keeping the query (and the
@@ -184,5 +186,122 @@ export const listChats = query({
         pinned: c.pinned ?? false,
         color: c.color ?? null,
       }));
+  },
+});
+
+// Delete a message (owner-scoped) with the TRUNCATE-FORWARD semantics Olivier
+// asked for, PLUS the gateway realignment the trust requirement demands:
+//   - User message deleted      -> delete it + ALL following turns (rewind).
+//   - Assistant message deleted -> delete it + ALL following, then RE-RUN the
+//     now-last user message (regenerate). For the LAST assistant turn (the common
+//     case) this is exactly "delete + regenerate"; for a mid-thread one it rewinds
+//     to that point then regenerates (a coherent superset of the literal ask).
+// CRITICAL (advisor): deleting in Convex does NOT remove the turn from the OpenClaw
+// SESSION context. So on every truncating delete we schedule a `sessions.reset`
+// (bridge): reset -> systemSent=false -> the next turn re-hydrates from the
+// TRUNCATED Convex state, realigning the gateway. Without it the model would keep
+// reasoning over turns the user deleted and no longer sees — a trust violation.
+// (docs/SESSION_CONTINUITY_DESIGN.md; OUTCOME proof gated on NAS #62.)
+export const deleteMessage = mutation({
+  args: { messageId: v.id("messages") },
+  handler: async (ctx, { messageId }) => {
+    const { userId, actor } = await requireActive(ctx);
+    const message = await ctx.db.get(messageId);
+    if (message === null) return; // already gone (e.g. double-click)
+    const chat = await requireOwnedChat(ctx, userId, message.chatId);
+
+    // Do not delete a turn mid-stream — the bridge's finalize would then throw on
+    // a missing message. Ask the user to wait for the reply to settle.
+    if (message.status === "streaming") {
+      throw new Error("Patientez la fin de la réponse avant de supprimer.");
+    }
+
+    const wasAssistant = message.role === "assistant";
+    const cutoff = message._creationTime;
+
+    // This message + every later one in the chat (truncate forward). Bounded read.
+    const chatMessages = await ctx.db
+      .query("messages")
+      .withIndex("by_chat", (q) => q.eq("chatId", chat._id))
+      .collect();
+    for (const m of chatMessages) {
+      if (m._creationTime < cutoff) continue;
+      const parts = await ctx.db
+        .query("messageParts")
+        .withIndex("by_message", (q) => q.eq("messageId", m._id))
+        .collect();
+      for (const p of parts) await ctx.db.delete(p._id);
+      await ctx.db.delete(m._id);
+    }
+
+    // Drop this chat's pending outbox so a stale dispatch cannot resurrect a
+    // deleted turn (mirrors chats.cascadeDeleteChat).
+    const pending = await ctx.db
+      .query("outbox")
+      .withIndex("by_status", (q) => q.eq("status", "pending"))
+      .collect();
+    for (const o of pending) {
+      if (o.chatId === chat._id) await ctx.db.delete(o._id);
+    }
+
+    // Assistant delete -> regenerate the now-last user message (if any): build a
+    // fresh outbox from that user turn (text + its file attachments). dispatchReset
+    // runs it AFTER the gateway reset, so it re-hydrates the truncated history.
+    let regenerateOutboxId: Id<"outbox"> | undefined;
+    if (wasAssistant) {
+      const remaining = await ctx.db
+        .query("messages")
+        .withIndex("by_chat", (q) => q.eq("chatId", chat._id))
+        .order("desc")
+        .take(1);
+      const lastUser = remaining[0];
+      if (lastUser && lastUser.role === "user") {
+        const partDocs = await ctx.db
+          .query("messageParts")
+          .withIndex("by_message", (q) => q.eq("messageId", lastUser._id))
+          .collect();
+        const attachments: {
+          storageId: Id<"_storage">;
+          filename: string;
+          mimeType: string;
+        }[] = [];
+        for (const d of partDocs) {
+          if (d.part.kind === "file") {
+            attachments.push({
+              storageId: d.part.storageId,
+              filename: d.part.filename,
+              mimeType: d.part.mimeType,
+            });
+          }
+        }
+        regenerateOutboxId = await ctx.db.insert("outbox", {
+          chatId: chat._id,
+          userId,
+          // Unique key (Date.now() is deterministic in a mutation) so the send
+          // idempotency guard never dedupes a regenerate against the original.
+          clientMessageId: `regen-${lastUser._id}-${Date.now()}`,
+          messageId: lastUser._id,
+          text: lastUser.text,
+          attachmentIds: attachments.map((a) => a.storageId),
+          attachments,
+          status: "pending",
+        });
+      }
+    }
+
+    // ALWAYS realign the gateway. For the regenerate case dispatchReset chains the
+    // re-dispatch AFTER a successful reset (so it runs on the fresh, re-hydrating
+    // session — never on the stale one).
+    await ctx.scheduler.runAfter(0, internal.bridge.dispatchReset, {
+      chatId: chat._id,
+      userId,
+      ...(regenerateOutboxId ? { regenerateOutboxId } : {}),
+    });
+
+    await ctx.db.patch(chat._id, { updatedAt: Date.now() });
+    await auditImpersonated(ctx, actor, "message.delete", {
+      resource: "message",
+      resourceId: messageId,
+    });
   },
 });

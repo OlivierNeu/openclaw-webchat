@@ -366,6 +366,11 @@
   outline: 2px solid var(--ring);
   outline-offset: 2px;
 }
+/* Destructive variant (message delete): neutral at rest, red on hover/focus. */
+.oc-iconbtn--danger:hover {
+  color: var(--destructive);
+  background: color-mix(in srgb, var(--destructive) 12%, transparent);
+}
 
 .oc-msg {
   display: flex;
@@ -445,6 +450,20 @@
   font-size: 0.9rem;
   font-weight: 600;
   color: var(--foreground);
+}
+/* User-turn column: sized to the bubble + right-aligned (the bubble + its delete
+   action sit on the right). Reuses .oc-msg__col's reserved action-bar space. */
+.oc-msg__col--user {
+  flex: 0 1 auto;
+  align-items: flex-end;
+  max-width: 85%;
+}
+.oc-msg__col--user .oc-msg__bubble {
+  max-width: 100%;
+}
+.oc-msg__actions--user {
+  left: auto;
+  right: -0.35rem;
 }
 .oc-msg__body {
   min-width: 0;
@@ -715,12 +734,39 @@
   color: var(--card-foreground);
   font-size: 0.85rem;
 }
+/* The tool header is the <summary> of the outer <details> (the whole tool
+   collapses to this single row). Hide the native marker; a chevron carries the
+   affordance. The divider shows ONLY when open, so a collapsed tool is a clean
+   single row. */
 .oc-tool__header {
   display: flex;
   align-items: center;
   gap: 0.5rem;
   padding: 0.4rem 0.6rem;
+  cursor: pointer;
+  list-style: none;
+  user-select: none;
+}
+.oc-tool__header::-webkit-details-marker {
+  display: none;
+}
+.oc-tool__header:hover {
+  background: color-mix(in srgb, var(--muted-foreground) 6%, transparent);
+}
+.oc-tool[open] > .oc-tool__header {
   border-bottom: 1px solid var(--border);
+}
+.oc-tool__chevron {
+  flex: 0 0 auto;
+  margin-left: 0.1rem;
+  color: var(--muted-foreground);
+  transition: transform 150ms ease;
+}
+.oc-tool[open] > .oc-tool__header .oc-tool__chevron {
+  transform: rotate(90deg);
+}
+.oc-tool__body {
+  padding-top: 0.15rem;
 }
 .oc-tool__name {
   font-weight: 600;
@@ -730,23 +776,90 @@
   font-size: 0.75rem;
   color: var(--muted-foreground);
 }
-.oc-tool--completed .oc-tool__icon {
-  color: var(--chart-2, #16a34a);
+/* Neutral status glyph (lucide). NO green check — the "completed" text already
+   carries the state. Muted by default; only error gets a meaningful colour.
+   running = a spinning loader (the agent-plan "task" vocabulary, kept quiet). */
+.oc-tool__status {
+  flex: 0 0 auto;
+  color: var(--muted-foreground);
 }
-.oc-tool--error .oc-tool__icon {
+.oc-tool--error .oc-tool__status {
   color: var(--destructive);
 }
-.oc-tool__io {
-  padding: 0.3rem 0.6rem;
+.oc-tool__status--spin {
+  animation: oc-spin 1s linear infinite;
 }
+@keyframes oc-spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+.oc-tool__io {
+  padding: 0.3rem 0.6rem 0.55rem;
+}
+/* Disclosure label ("input"/"output"): a quiet, small uppercase tag — present
+   but not shouting. */
+.oc-tool__io > summary {
+  cursor: pointer;
+  width: fit-content;
+  font-size: 0.68rem;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--muted-foreground);
+}
+/* Tool input/output content: a SOFT recessed surface — same gentle token as the
+   markdown code blocks (var(--muted) + border), NOT an inverted high-contrast
+   block. Theme-adaptive: a light grey well in light mode, a softly-elevated dark
+   well in dark mode — clearly demarcated from the rest of the message, never a
+   bright/black slab that fatigues the eye. */
 .oc-tool__pre {
-  margin: 0.3rem 0 0;
-  padding: 0.5rem;
-  background: color-mix(in srgb, var(--foreground) 92%, var(--background));
-  color: var(--background);
-  border-radius: 6px;
+  margin: 0.35rem 0 0;
+  padding: 0.55rem 0.7rem;
+  background: var(--muted);
+  color: var(--foreground);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
   overflow-x: auto;
+  font-family: var(--font-mono);
   font-size: 0.78rem;
+  line-height: 1.5;
+}
+/* Copy affordance for a tool input/output block: hover-revealed in the top-right
+   corner of the block (the standard code-copy pattern), gentle. */
+.oc-tool__prewrap {
+  position: relative;
+}
+.oc-copybtn {
+  position: absolute;
+  top: 0.55rem;
+  right: 0.55rem;
+  display: inline-grid;
+  place-items: center;
+  width: 1.65rem;
+  height: 1.65rem;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm, 6px);
+  background: var(--card);
+  color: var(--muted-foreground);
+  cursor: pointer;
+  opacity: 0;
+  transition:
+    opacity 150ms ease,
+    color 150ms ease,
+    background 150ms ease;
+}
+.oc-tool__prewrap:hover .oc-copybtn,
+.oc-copybtn:focus-visible {
+  opacity: 1;
+}
+.oc-copybtn:hover {
+  color: var(--foreground);
+  background: var(--muted);
+}
+.oc-copybtn:focus-visible {
+  outline: 2px solid var(--ring);
+  outline-offset: 2px;
 }
 
 /* Media */
@@ -801,7 +914,11 @@
     border-color 150ms ease,
     box-shadow 150ms ease;
 }
-.oc-composer:focus-within {
+/* The card's "active" ring lights ONLY when the TEXTAREA is focused — not when a
+   config control (Outils / + / mic / send) inside the card takes focus. Those
+   are settings placed in the chat zone, not "being in the chat"; clicking them
+   must not imply composing. (:has > :focus-within for exactly this reason.) */
+.oc-composer:has(.oc-composer__input:focus) {
   border-color: var(--ring);
   box-shadow: 0 0 0 3px color-mix(in srgb, var(--ring) 22%, transparent);
 }
@@ -875,10 +992,21 @@
   color: var(--foreground);
   background: var(--muted);
 }
+/* Active (tools shown): a SOFT-TINTED pill — clearly "on" (the thin border read
+   as off) without the heaviness of a solid fill. A light foreground tint + a
+   marked border + slightly bolder text; theme-stable (works in dark mode). */
 .oc-composer__tools.is-on {
   color: var(--foreground);
-  border-color: var(--ring);
-  background: var(--accent);
+  /* Visual uniformity: the SAME surface token as the tool-message content
+     (.oc-tool__pre = var(--muted)) — identical contrast against the card, in both
+     themes. The marked border + bolder text carry the "active" signal. */
+  background: var(--muted);
+  border-color: color-mix(in srgb, var(--foreground) 42%, transparent);
+  font-weight: 600;
+}
+.oc-composer__tools.is-on:hover {
+  background: color-mix(in srgb, var(--foreground) 8%, var(--muted));
+  color: var(--foreground);
 }
 .oc-composer__tools:focus-visible {
   outline: 2px solid var(--ring);
@@ -1639,7 +1767,8 @@
     transform: none;
   }
   .oc-dots > span,
-  .oc-run-status__pulse {
+  .oc-run-status__pulse,
+  .oc-tool__status--spin {
     animation: none;
   }
 }

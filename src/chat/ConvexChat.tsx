@@ -4,6 +4,7 @@ import {
   ComposerPrimitive,
   MessagePrimitive,
   ThreadPrimitive,
+  useMessage,
 } from "@assistant-ui/react";
 import { useEffect, useRef, useState, type ReactNode } from "react";
 import { useQuery, useMutation, useConvex } from "convex/react";
@@ -24,6 +25,7 @@ import {
   ArrowUp,
   Square,
   Mic,
+  Trash2,
 } from "lucide-react";
 import {
   DropdownMenu,
@@ -35,6 +37,7 @@ import {
   DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
+import { useConfirm } from "@/components/ConfirmDialog";
 import { useConvexChatRuntime } from "./useConvexChatRuntime";
 import { RunStatus } from "./RunStatus";
 import { ToolCard } from "./ToolCard";
@@ -541,11 +544,87 @@ const assistantComponents = {
 // User turn: a subtle, low-contrast bubble aligned right (Open WebUI style).
 // Uses --muted (light grey in light, elevated grey in dark) instead of the
 // high-contrast --primary, so it never flips to a tiring solid white/black.
+// Per-message delete. Reads the Convex message id from metadata (authoritative,
+// set in convertMessage) and calls deleteMessage. Truncate-forward semantics live
+// in the mutation: deleting an assistant turn regenerates the last user turn;
+// deleting a user turn removes it + all following. The cascade is destructive +
+// has no undo, so the user-message variant confirms first.
+function DeleteMessageButton({ kind }: { kind: "user" | "assistant" }) {
+  const messageId = useMessage(
+    (m) => (m.metadata?.custom as { messageId?: string } | undefined)?.messageId,
+  );
+  const del = useMutation(api.messages.deleteMessage);
+  // Styled, promise-based confirm (radix AlertDialog) — replaces window.confirm.
+  // BOTH roles confirm (the action is destructive either way), with copy that
+  // matches the actual behavior: user = cascade, assistant = delete + regenerate.
+  const confirm = useConfirm();
+  if (!messageId) return null;
+
+  async function onDelete(): Promise<void> {
+    const ok = await confirm(
+      kind === "assistant"
+        ? {
+            title: "Supprimer et régénérer cette réponse ?",
+            description:
+              "Cette réponse sera supprimée, puis régénérée à partir de votre dernier message.",
+            confirmLabel: "Régénérer",
+            cancelLabel: "Annuler",
+            destructive: true,
+          }
+        : {
+            title: "Supprimer ce message et les suivants ?",
+            description:
+              "Ce message et tous les messages qui le suivent seront supprimés de la conversation. Cette action est irréversible.",
+            confirmLabel: "Supprimer",
+            cancelLabel: "Annuler",
+            destructive: true,
+          },
+    );
+    if (!ok) return;
+    await del({ messageId: messageId as Id<"messages"> });
+  }
+
+  return (
+    <button
+      type="button"
+      className="oc-iconbtn oc-iconbtn--danger"
+      title={
+        kind === "assistant"
+          ? "Supprimer et régénérer la réponse"
+          : "Supprimer ce message et les suivants"
+      }
+      aria-label="Supprimer le message"
+      onClick={() => void onDelete()}
+    >
+      <Trash2 size={15} aria-hidden />
+    </button>
+  );
+}
+
+// User turn: subtle right-aligned bubble + a hover/last-visible action bar with a
+// delete (deleting a user turn removes it + every following turn — confirmed).
 function UserMessage() {
   return (
     <MessagePrimitive.Root className="oc-msg oc-msg--user">
-      <div className="oc-msg__bubble">
-        <MessagePrimitive.Parts components={plainComponents} />
+      <div className="oc-msg__col oc-msg__col--user">
+        <div className="oc-msg__bubble">
+          <MessagePrimitive.Parts components={plainComponents} />
+        </div>
+        <ActionBarPrimitive.Root
+          className="oc-msg__actions oc-msg__actions--user"
+          hideWhenRunning
+          autohide="not-last"
+        >
+          <ActionBarPrimitive.Copy className="oc-iconbtn" title="Copier le message">
+            <MessagePrimitive.If copied>
+              <IconCheck />
+            </MessagePrimitive.If>
+            <MessagePrimitive.If copied={false}>
+              <IconCopy />
+            </MessagePrimitive.If>
+          </ActionBarPrimitive.Copy>
+          <DeleteMessageButton kind="user" />
+        </ActionBarPrimitive.Root>
       </div>
     </MessagePrimitive.Root>
   );
@@ -566,13 +645,10 @@ function AssistantMessage() {
           <MessagePrimitive.Parts components={assistantComponents} />
           <RunStatus />
         </div>
-        {/* Per-message Copy. Hidden while a turn runs, revealed on hover for
-            non-last turns (autohide). NOTE: a "Régénérer" (Reload) action is
-            intentionally NOT rendered yet — the external-store runtime
-            (useConvexChatRuntime) only implements `onNew`, so `ActionBar.Reload`
-            would be a dead/no-op button. Add it together with an `onReload`
-            re-dispatch of the last user turn (a future increment, also needs a
-            working gateway to verify). */}
+        {/* Per-message actions, hidden while a turn runs + revealed on hover for
+            non-last turns (always shown on the last). Copy + Delete. Deleting an
+            assistant turn truncates from here and REGENERATES the last user turn
+            (see messages.deleteMessage) — no confirm (recoverable). */}
         <ActionBarPrimitive.Root
           className="oc-msg__actions"
           hideWhenRunning
@@ -586,6 +662,7 @@ function AssistantMessage() {
               <IconCopy />
             </MessagePrimitive.If>
           </ActionBarPrimitive.Copy>
+          <DeleteMessageButton kind="assistant" />
         </ActionBarPrimitive.Root>
       </div>
     </MessagePrimitive.Root>
