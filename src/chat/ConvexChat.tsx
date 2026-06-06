@@ -26,6 +26,7 @@ import {
   Square,
   Mic,
   Trash2,
+  Code,
 } from "lucide-react";
 import {
   DropdownMenu,
@@ -601,14 +602,59 @@ function DeleteMessageButton({ kind }: { kind: "user" | "assistant" }) {
   );
 }
 
+// "Source" view: the EXACT stored text, verbatim — no markdown, no autocorrect,
+// no transformation of any kind. This is the convention-free trust guarantee:
+// for a USER turn it's exactly what was typed/sent; for an ASSISTANT turn it's
+// the gateway's final text (our pipeline leaves prose byte-identical — only
+// server paths are stripped for security; see bridge/sanitize.ts). It lets a
+// user verify a word was not silently changed by autocorrect or by rendering.
+function MessageSource() {
+  const raw = useMessage(
+    (m) => (m.metadata?.custom as { rawText?: string } | undefined)?.rawText ?? "",
+  );
+  return (
+    <div className="oc-msg__source">
+      <div className="oc-msg__source-label">Source · texte brut exact</div>
+      <pre className="oc-msg__source-pre">{raw.length > 0 ? raw : "(aucun texte)"}</pre>
+    </div>
+  );
+}
+
+// Toggle between the rendered message and its raw source.
+function SourceToggleButton({
+  active,
+  onToggle,
+}: {
+  active: boolean;
+  onToggle: () => void;
+}) {
+  return (
+    <button
+      type="button"
+      className={`oc-iconbtn${active ? " is-on" : ""}`}
+      onClick={onToggle}
+      aria-pressed={active}
+      title={active ? "Afficher le message rendu" : "Afficher la source (texte brut exact)"}
+      aria-label="Afficher la source du message"
+    >
+      <Code size={15} aria-hidden />
+    </button>
+  );
+}
+
 // User turn: subtle right-aligned bubble + a hover/last-visible action bar with a
 // delete (deleting a user turn removes it + every following turn — confirmed).
 function UserMessage() {
+  const [showSource, setShowSource] = useState(false);
   return (
     <MessagePrimitive.Root className="oc-msg oc-msg--user">
       <div className="oc-msg__col oc-msg__col--user">
         <div className="oc-msg__bubble">
-          <MessagePrimitive.Parts components={plainComponents} />
+          {showSource ? (
+            <MessageSource />
+          ) : (
+            <MessagePrimitive.Parts components={plainComponents} />
+          )}
         </div>
         <ActionBarPrimitive.Root
           className="oc-msg__actions oc-msg__actions--user"
@@ -623,6 +669,10 @@ function UserMessage() {
               <IconCopy />
             </MessagePrimitive.If>
           </ActionBarPrimitive.Copy>
+          <SourceToggleButton
+            active={showSource}
+            onToggle={() => setShowSource((s) => !s)}
+          />
           <DeleteMessageButton kind="user" />
         </ActionBarPrimitive.Root>
       </div>
@@ -634,6 +684,7 @@ function UserMessage() {
 // fills the readable column (Open WebUI style). An avatar + name header carries
 // the identity; RunStatus shows the live status (and hides itself when done).
 function AssistantMessage() {
+  const [showSource, setShowSource] = useState(false);
   return (
     <MessagePrimitive.Root className="oc-msg oc-msg--assistant">
       <div className="oc-msg__avatar" aria-hidden>
@@ -642,7 +693,11 @@ function AssistantMessage() {
       <div className="oc-msg__col">
         <div className="oc-msg__name">OpenClaw</div>
         <div className="oc-msg__body">
-          <MessagePrimitive.Parts components={assistantComponents} />
+          {showSource ? (
+            <MessageSource />
+          ) : (
+            <MessagePrimitive.Parts components={assistantComponents} />
+          )}
           <RunStatus />
         </div>
         {/* Per-message actions, hidden while a turn runs + revealed on hover for
@@ -662,6 +717,10 @@ function AssistantMessage() {
               <IconCopy />
             </MessagePrimitive.If>
           </ActionBarPrimitive.Copy>
+          <SourceToggleButton
+            active={showSource}
+            onToggle={() => setShowSource((s) => !s)}
+          />
           <DeleteMessageButton kind="assistant" />
         </ActionBarPrimitive.Root>
       </div>
@@ -698,11 +757,23 @@ function Composer({
   return (
     <ComposerPrimitive.Root className="oc-composer">
       <ComposerPrimitive.Attachments components={{}} />
+      {/* Content fidelity: disable the browser/OS conventions that MUTATE typed
+          text (autocorrect, auto-capitalize, autocomplete) so a word is sent
+          exactly as typed — never silently swapped at submit. `data-gramm`
+          disables Grammarly. spellCheck stays ON (it underlines, it does NOT
+          mutate). NB: no third-party extension is 100% controllable — the
+          per-message "Source" view is the real, convention-free guarantee. */}
       <ComposerPrimitive.Input
         className="oc-composer__input"
         placeholder="Message OpenClaw…"
         autoFocus
         rows={1}
+        autoCorrect="off"
+        autoCapitalize="off"
+        autoComplete="off"
+        data-gramm="false"
+        data-gramm_editor="false"
+        data-enable-grammarly="false"
       />
       <div className="oc-composer__bar">
         <div className="oc-composer__group">

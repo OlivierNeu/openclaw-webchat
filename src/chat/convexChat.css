@@ -371,6 +371,44 @@
   color: var(--destructive);
   background: color-mix(in srgb, var(--destructive) 12%, transparent);
 }
+/* Active toggle (e.g. the "Source" view is showing). */
+.oc-iconbtn.is-on {
+  color: var(--foreground);
+  background: var(--muted);
+}
+
+/* ── Raw "Source" view of a message — verbatim, convention-free (no markdown,
+   no autocorrect): exactly the stored text, monospace + wrapping + selectable.
+   The trust guarantee a user can rely on to confirm what was sent/received. */
+.oc-msg__source-label {
+  margin-bottom: 0.3rem;
+  font-size: 0.68rem;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--muted-foreground);
+}
+.oc-msg__source-pre {
+  margin: 0;
+  padding: 0.6rem 0.75rem;
+  background: var(--muted);
+  color: var(--foreground);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  font-family: var(--font-mono);
+  font-size: 0.8rem;
+  line-height: 1.55;
+  white-space: pre-wrap;
+  word-break: break-word;
+  user-select: text;
+}
+/* Inside the user bubble (already a muted surface), drop the box — the bubble
+   is the container; keep just the verbatim monospace text. */
+.oc-msg--user .oc-msg__source-pre {
+  background: transparent;
+  border: none;
+  padding: 0;
+}
 
 .oc-msg {
   display: flex;

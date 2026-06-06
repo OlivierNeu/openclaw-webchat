@@ -747,6 +747,24 @@ row status **complete** ("Bridge validé, je te reçois bien."). CAPTURED LIVE G
   MID-thread assistant delete truncates everything after it (more than the literal "regenerate last user
   turn") — identical for the LAST turn (the common case); coherent for mid-thread. OUTCOME (model no
   longer sees deleted content after realignment) → NAS #62 case 9 (codex-harness masks it locally).
+  **UI-8 #70 — CONTENT FIDELITY (anti-mutation composer + per-message Source view) — DONE + LIVE-VERIFIED
+  2026-06-06:** Olivier reported words changing at submit (autocorrect) + doubt about AI response fidelity.
+  VERIFIED our pipeline does NOT corrupt prose: `sendMessage` stores `args.text` verbatim; the user bubble
+  renders PLAIN text (not markdown); on the AI side `normalizer.this.text` accumulates the raw candidate
+  (snapshot replaces / delta `+=` = lossless concat of JSON-parsed strings) and `sanitize.ts:sanitizeText`
+  EARLY-RETURNS VERBATIM unless the text contains a server-path marker (so normal prose is byte-identical;
+  it only rewrites server paths → basename for security + drops MEDIA:/path: machine directives). So
+  `message.text` = the agent's exact output (prose-faithful). Built: (a) composer hardening — `autoCorrect`
+  /`autoCapitalize`/`autoComplete="off"` + `data-gramm="false"` on the input (spellCheck kept — underlines,
+  never mutates); (b) per-message "Source" view (user + AI): `rawText = message.text` surfaced in
+  convertMessage metadata; a `<>` toggle in the action bar swaps the rendered body for `MessageSource` — the
+  EXACT stored string in a monospace `white-space:pre-wrap` block, no markdown/transform. Gated to settled
+  messages (the action bar is `hideWhenRunning`). ANSWER to "can words change as tokens arrive?": YES via
+  `message.snapshot`/`message.final` replacing the text (the gateway revising, faithfully mirrored) — the
+  Source view shows the final stabilized text. Files: ConvexChat.tsx (Composer attrs, MessageSource,
+  SourceToggleButton), convertMessage.ts (rawText), convexChat.css. Gates: tsc src 0, vitest 123, vite
+  build OK. NEVER committed. DEFERRED (separate feature): provenance of the INPUTS that fed a response
+  (prompt/context/tool inputs) = observability/trace, not text fidelity.
   **#53 INCREMENT 3 — COMPOSER POLISH BUILT + LIVE-VERIFIED 2026-06-05 (pure frontend, no live agent):**
   via assistant-ui 0.14 primitives in `ConvexChat.tsx` + `convexChat.css`: (1) EMPTY STATE
   (`ThreadPrimitive.Empty`) — OC avatar + "Comment puis-je aider ?" + 4 suggestion cards

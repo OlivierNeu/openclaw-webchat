@@ -130,6 +130,12 @@ export function convertConvexMessage(
         status: message.status,
         runId: message.runId ?? null,
         error: message.error ?? null,
+        // The EXACT stored text — the verbatim string for the "Source" view (no
+        // markdown, no autocorrect, no transformation). For the user turn this is
+        // what was typed/sent; for the assistant turn it is the gateway's final
+        // text. The trust guarantee that lets a user verify a word was not
+        // silently changed (see docs note in ConvexChat MessageSource).
+        rawText: message.text,
       },
     },
   } satisfies ThreadMessageLike;
