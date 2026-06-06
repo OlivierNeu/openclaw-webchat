@@ -92,6 +92,7 @@
   flex-direction: column;
   flex: 1;
   min-height: 0;
+  position: relative; /* anchor for the absolute scroll-to-bottom pill */
 }
 /* Conversation column. Messages are centered in a readable column whose width
    tracks the workspace (the cap keeps line length comfortable; collapsing the
@@ -108,6 +109,231 @@
   flex-direction: column;
   align-items: center;
   gap: 1.75rem;
+}
+
+/* ── Chat-header "spotted strip" (CHAT_UX_DESIGN Part 3) ───────────────────
+   A thin, low-emphasis bar above the transcript. Left: chat title (meaning
+   first). Right: OpenClaw session knobs surfaced as features — model chip,
+   reasoning (thinking) chip with inheritance hint, and the always-visible
+   context-usage meter (the deliberate "spotted" target, color escalates). */
+.oc-chathead {
+  flex: 0 0 auto;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1rem;
+  min-height: 2.75rem;
+  padding: 0.45rem 1rem;
+  border-bottom: 1px solid var(--border);
+  background: var(--background);
+}
+.oc-chathead__title {
+  min-width: 0;
+  font-size: 0.875rem;
+  font-weight: 600;
+  color: var(--foreground);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.oc-chathead__meta {
+  flex: 0 0 auto;
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+}
+.oc-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+  padding: 0.2rem 0.55rem;
+  font-size: 0.78rem;
+  font-weight: 500;
+  color: var(--muted-foreground);
+  background: var(--muted);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  white-space: nowrap;
+}
+.oc-chip__icon {
+  flex: 0 0 auto;
+  opacity: 0.85;
+}
+.oc-chip__hint {
+  margin-left: 0.3rem;
+  padding: 0.02rem 0.32rem;
+  font-size: 0.68rem;
+  font-weight: 600;
+  border-radius: var(--radius-sm);
+  background: var(--secondary);
+  color: var(--secondary-foreground);
+}
+.oc-meter {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.45rem;
+  padding: 0.2rem 0.55rem;
+  font-size: 0.78rem;
+  font-variant-numeric: tabular-nums;
+  color: var(--muted-foreground);
+  background: var(--muted);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  white-space: nowrap;
+}
+.oc-meter__track {
+  width: 3.5rem;
+  height: 0.4rem;
+  border-radius: 999px;
+  background: color-mix(in oklch, var(--muted-foreground) 22%, transparent);
+  overflow: hidden;
+}
+.oc-meter__fill {
+  display: block;
+  height: 100%;
+  border-radius: 999px;
+  background: var(--primary);
+  transition: width 200ms ease;
+}
+.oc-meter__label {
+  font-weight: 500;
+}
+/* Calm → escalating usage colors (universal meter language, theme-stable). */
+.oc-meter.is-ok .oc-meter__fill {
+  background: oklch(0.62 0.15 150);
+}
+.oc-meter.is-warn .oc-meter__fill {
+  background: oklch(0.74 0.16 75);
+}
+.oc-meter.is-critical .oc-meter__fill {
+  background: var(--destructive);
+}
+.oc-meter.is-warn .oc-meter__label {
+  color: oklch(0.56 0.13 75);
+}
+.oc-meter.is-critical .oc-meter__label {
+  color: var(--destructive);
+}
+@media (max-width: 560px) {
+  .oc-meter__label {
+    display: none;
+  }
+}
+
+/* ── Empty state: capability transparency + suggested prompts ─────────────── */
+.oc-emptystate {
+  margin: auto 0;
+  width: 100%;
+  max-width: var(--oc-thread-w);
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  text-align: center;
+  gap: 0.4rem;
+  padding: 2rem 0;
+}
+.oc-emptystate__avatar {
+  width: 3rem;
+  height: 3rem;
+  display: grid;
+  place-items: center;
+  margin-bottom: 0.5rem;
+  border-radius: 50%;
+  background: var(--primary);
+  color: var(--primary-foreground);
+  font-weight: 700;
+  font-size: 0.95rem;
+}
+.oc-emptystate__title {
+  margin: 0;
+  font-size: 1.5rem;
+  font-weight: 600;
+  color: var(--foreground);
+}
+.oc-emptystate__subtitle {
+  margin: 0 0 1rem;
+  font-size: 0.95rem;
+  color: var(--muted-foreground);
+}
+.oc-emptystate__suggestions {
+  width: 100%;
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 0.6rem;
+}
+.oc-suggestion {
+  text-align: left;
+  padding: 0.75rem 0.9rem;
+  font-size: 0.875rem;
+  line-height: 1.35;
+  color: var(--foreground);
+  background: var(--card);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+  cursor: pointer;
+  transition:
+    background 150ms ease,
+    border-color 150ms ease;
+}
+.oc-suggestion:hover {
+  background: var(--muted);
+  border-color: var(--ring);
+}
+@media (max-width: 560px) {
+  .oc-emptystate__suggestions {
+    grid-template-columns: 1fr;
+  }
+}
+
+/* ── Scroll-to-bottom pill (auto-hidden when already at the bottom) ───────── */
+.oc-scrolldown {
+  position: absolute;
+  left: 50%;
+  bottom: 5.5rem;
+  transform: translateX(-50%);
+  z-index: 5;
+  display: inline-flex;
+  align-items: center;
+  gap: 0.4rem;
+  padding: 0.4rem 0.8rem;
+  font-size: 0.8rem;
+  font-weight: 500;
+  color: var(--foreground);
+  background: var(--popover);
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  box-shadow: 0 4px 14px rgb(0 0 0 / 0.12);
+  cursor: pointer;
+  transition: background 150ms ease;
+}
+.oc-scrolldown:hover {
+  background: var(--muted);
+}
+
+/* ── Per-message action bar (copy / regenerate), hover-revealed ──────────── */
+.oc-msg__actions {
+  display: flex;
+  gap: 0.15rem;
+  margin-top: 0.35rem;
+  margin-left: -0.35rem;
+}
+.oc-iconbtn {
+  display: inline-grid;
+  place-items: center;
+  width: 1.9rem;
+  height: 1.9rem;
+  color: var(--muted-foreground);
+  background: transparent;
+  border: none;
+  border-radius: var(--radius-md);
+  cursor: pointer;
+  transition:
+    background 150ms ease,
+    color 150ms ease;
+}
+.oc-iconbtn:hover {
+  background: var(--muted);
+  color: var(--foreground);
 }
 
 .oc-msg {

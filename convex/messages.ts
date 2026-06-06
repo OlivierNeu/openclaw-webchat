@@ -127,6 +127,27 @@ export const listByChat = query({
   },
 });
 
+// Chat-header read: the chat's title + OpenClaw session meta (model, reasoning
+// level + its enum, verbosity, and the context-usage counts) so the top strip
+// can render the model/reasoning chips + context meter. Owner-scoped; resilient
+// to a just-deleted chat (returns null instead of throwing, so the reactive
+// header does not error while the active chat is being removed).
+export const getSessionMeta = query({
+  args: { chatId: v.id("chats") },
+  handler: async (ctx, { chatId }) => {
+    const { userId } = await requireActive(ctx);
+    const chat = await ctx.db.get(chatId);
+    if (chat === null) return null;
+    if (chat.userId !== userId) {
+      throw new Error("Forbidden: chat not owned by user");
+    }
+    return {
+      title: chat.title ?? null,
+      sessionMeta: chat.sessionMeta ?? null,
+    };
+  },
+});
+
 // Optional: list the chats owned by the authenticated user (sidebar). Scoped.
 export const listChats = query({
   args: {},

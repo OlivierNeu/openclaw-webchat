@@ -225,3 +225,35 @@ export const finalize = internalMutation({
     });
   },
 });
+
+// Mirror the gateway's `sessions.describe` onto the chat so the header strip can
+// surface the model / reasoning level / context meter (CHAT_UX_DESIGN Part 2.1).
+// The bridge calls this (via the ingest httpAction) when it learns a turn's
+// session meta. INTERNAL (not browser-callable). All fields optional + stamped
+// with `updatedAt` — never holds secrets (model/level names are non-sensitive).
+export const setSessionMeta = internalMutation({
+  args: {
+    chatId: v.id("chats"),
+    meta: v.object({
+      model: v.optional(v.string()),
+      modelProvider: v.optional(v.string()),
+      agentRuntime: v.optional(v.string()),
+      thinkingLevel: v.optional(v.string()),
+      thinkingDefault: v.optional(v.string()),
+      thinkingLevels: v.optional(
+        v.array(v.object({ id: v.string(), label: v.string() })),
+      ),
+      verboseLevel: v.optional(v.string()),
+      totalTokens: v.optional(v.number()),
+      contextTokens: v.optional(v.number()),
+      estimatedCostUsd: v.optional(v.number()),
+    }),
+  },
+  handler: async (ctx, { chatId, meta }) => {
+    const chat = await ctx.db.get(chatId);
+    if (chat === null) return; // chat gone (e.g. deleted mid-turn) — nothing to do
+    await ctx.db.patch(chatId, {
+      sessionMeta: { ...meta, updatedAt: Date.now() },
+    });
+  },
+});

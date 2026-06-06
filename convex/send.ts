@@ -130,6 +130,13 @@ export const sendMessage = mutation({
       messageId,
       text: args.text,
       attachmentIds: attachments.map((a) => a.storageId),
+      // Keep filename + mimeType so the dispatch can build OpenClaw's
+      // chat.send.attachment shape (the storageId alone loses them).
+      attachments: attachments.map((a) => ({
+        storageId: a.storageId,
+        filename: a.filename,
+        mimeType: a.mimeType,
+      })),
       status: "pending",
     });
 

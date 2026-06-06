@@ -547,6 +547,214 @@ export const chatStats = query({
   },
 });
 
+/**
+ * #59 INBOUND ROUND-TRIP (dev-gated). Store a raw image blob into Convex file
+ * storage, then enqueue a user turn whose outbox row carries it as a real
+ * `attachments` entry + schedule the SAME `internal.bridge.dispatch`. This
+ * exercises the entire PRODUCTION inbound path — storageId -> base64 in dispatch
+ * -> chat.send.attachments -> gateway media/inbound -> agent vision — WITHOUT the
+ * browser's assistant-ui attach widget (CDP automation cannot drive its file
+ * picker; the widget wiring is verified separately by reading ConvexChat.tsx).
+ *
+ *   CONVEX_AGENT_MODE=anonymous npx convex run dev:seedImageAttachment \
+ *     '{"base64":"<...>","filename":"carre-rouge.png","mimeType":"image/png",
+ *       "text":"Quelle couleur domine ?","chatId":"<id>"}'
+ *
+ * IDOR NOTE: production send (send.sendMessage) enforces assertOwnsUpload; this
+ * dev path inserts the outbox row directly and intentionally skips that gate
+ * (unit-covered elsewhere) — it targets the dispatch resolution, not IDOR.
+ */
+export const seedImageAttachment = action({
+  args: {
+    base64: v.string(),
+    filename: v.string(),
+    mimeType: v.string(),
+    text: v.string(),
+    chatId: v.optional(v.id("chats")),
+  },
+  handler: async (
+    ctx,
+    { base64, filename, mimeType, text, chatId },
+  ): Promise<
+    | { ok: true; chatId: Id<"chats">; outboxId: Id<"outbox">; storageId: Id<"_storage"> }
+    | { ok: false; reason: string }
+  > => {
+    assertDev();
+    // Decode base64 -> bytes -> Blob. The default Convex action runtime provides
+    // `atob` + `Blob` (no Node Buffer), mirroring the dispatch's btoa encode.
+    const binary = atob(base64);
+    const bytes = new Uint8Array(binary.length);
+    for (let i = 0; i < binary.length; i++) bytes[i] = binary.charCodeAt(i);
+    const blob = new Blob([bytes], { type: mimeType });
+    const storageId = await ctx.storage.store(blob);
+    const res = await ctx.runMutation(internal.dev.enqueueAttachmentTurn, {
+      storageId,
+      filename,
+      mimeType,
+      text,
+      chatId,
+    });
+    if (!res.ok) return res;
+    return { ok: true, chatId: res.chatId, outboxId: res.outboxId, storageId };
+  },
+});
+
+/**
+ * Internal half of #59 round-trip: insert the SAME outbox row shape that
+ * send.sendMessage builds (attachmentIds + attachments + a `file` messagePart)
+ * and schedule the SAME dispatch. Dev-gated. Reuses testSend's owner/routing
+ * resolution so the live send only ever reaches an allowlisted dev instance.
+ */
+export const enqueueAttachmentTurn = internalMutation({
+  args: {
+    storageId: v.id("_storage"),
+    filename: v.string(),
+    mimeType: v.string(),
+    text: v.string(),
+    chatId: v.optional(v.id("chats")),
+  },
+  handler: async (
+    ctx,
+    { storageId, filename, mimeType, text, chatId },
+  ): Promise<
+    | { ok: true; chatId: Id<"chats">; messageId: Id<"messages">; outboxId: Id<"outbox"> }
+    | { ok: false; reason: string }
+  > => {
+    assertDev();
+    const profiles = await ctx.db.query("profiles").take(500);
+    let owner: (typeof profiles)[number] | undefined;
+    if (chatId) {
+      const chat = await ctx.db.get(chatId);
+      if (!chat) return { ok: false, reason: "chat not found" };
+      owner = profiles.find((p) => p.userId === chat.userId);
+      if (!owner) return { ok: false, reason: "chat owner has no profile" };
+    } else {
+      owner =
+        profiles.find((p) => p.overrideInstance) ??
+        profiles.find((p) => p.role === "admin") ??
+        profiles[0];
+    }
+    if (!owner) return { ok: false, reason: "no routed profile" };
+    if (!owner.overrideInstance) {
+      return { ok: false, reason: "test user not routed (run dev.routeUser first)" };
+    }
+    assertDevInstance(owner.overrideInstance);
+    const userId = owner.userId;
+    const now = Date.now();
+
+    const cid: Id<"chats"> =
+      chatId ??
+      (await ctx.db.insert("chats", {
+        userId,
+        title: "Inbound test",
+        archived: false,
+        sortKey: -1000,
+        updatedAt: now,
+      }));
+
+    const messageId = await ctx.db.insert("messages", {
+      chatId: cid,
+      userId,
+      role: "user",
+      status: "complete",
+      text,
+      updatedAt: now,
+    });
+    // Render the attachment in the thread (faithful to send.sendMessage step 4).
+    await ctx.db.insert("messageParts", {
+      messageId,
+      order: 0,
+      part: { kind: "file", storageId, filename, mimeType },
+    });
+    await ctx.db.patch(cid, { updatedAt: now });
+
+    const outboxId = await ctx.db.insert("outbox", {
+      chatId: cid,
+      userId,
+      clientMessageId: `live-att-${messageId}`,
+      messageId,
+      text,
+      attachmentIds: [storageId],
+      attachments: [{ storageId, filename, mimeType }],
+      status: "pending",
+    });
+    await ctx.scheduler.runAfter(0, internal.bridge.dispatch, { outboxId });
+
+    return { ok: true, chatId: cid, messageId, outboxId };
+  },
+});
+
+/**
+ * Read an outbox row's #59-relevant fields back (dev-gated) so the round-trip
+ * can assert the dispatch saw a populated `attachments` array AND marked the row
+ * terminal `sent`. Complements chatStats (which reads the assistant turn).
+ *   npx convex run dev:outboxStatus '{"outboxId":"<id>"}'
+ */
+export const outboxStatus = query({
+  args: { outboxId: v.id("outbox") },
+  handler: async (ctx, { outboxId }) => {
+    assertDev();
+    const row = await ctx.db.get(outboxId);
+    if (!row) return null;
+    return {
+      status: row.status,
+      attachmentCount: (row.attachments ?? []).length,
+      attachmentNames: (row.attachments ?? []).map((a) => a.filename),
+      attachmentIdCount: row.attachmentIds.length,
+    };
+  },
+});
+
+/**
+ * Seed a chat's `sessionMeta` (dev-gated) so the chat-header strip (model +
+ * reasoning chips + context meter) can be verified in the browser WITHOUT a live
+ * gateway/bridge (which writes this per turn in production). Defaults mirror the
+ * real `sessions.describe` shape from the live read-only probe (image #27:
+ * 62226/272000 = 22.9% ≈ 23% context used, gpt-5.5, thinking=high).
+ *
+ *   npx convex run dev:seedSessionMeta '{"chatId":"<id>"}'
+ *   npx convex run dev:seedSessionMeta '{"chatId":"<id>","totalTokens":270000}'
+ */
+export const seedSessionMeta = mutation({
+  args: {
+    chatId: v.id("chats"),
+    model: v.optional(v.string()),
+    thinkingLevel: v.optional(v.string()),
+    thinkingDefault: v.optional(v.string()),
+    verboseLevel: v.optional(v.string()),
+    totalTokens: v.optional(v.number()),
+    contextTokens: v.optional(v.number()),
+    estimatedCostUsd: v.optional(v.number()),
+  },
+  handler: async (ctx, args) => {
+    assertDev();
+    const chat = await ctx.db.get(args.chatId);
+    if (!chat) return { ok: false as const, reason: "chat not found" };
+    await ctx.db.patch(args.chatId, {
+      sessionMeta: {
+        model: args.model ?? "gpt-5.5",
+        modelProvider: "openai-codex",
+        agentRuntime: "codex",
+        thinkingLevel: args.thinkingLevel ?? "high",
+        thinkingDefault: args.thinkingDefault ?? "high",
+        thinkingLevels: [
+          { id: "off", label: "off" },
+          { id: "low", label: "low" },
+          { id: "medium", label: "medium" },
+          { id: "high", label: "high" },
+          { id: "xhigh", label: "xhigh" },
+        ],
+        verboseLevel: args.verboseLevel ?? "full",
+        totalTokens: args.totalTokens ?? 62226,
+        contextTokens: args.contextTokens ?? 272000,
+        estimatedCostUsd: args.estimatedCostUsd ?? 1.78,
+        updatedAt: Date.now(),
+      },
+    });
+    return { ok: true as const, chatId: args.chatId };
+  },
+});
+
 export const reset = mutation({
   args: {},
   handler: async (ctx) => {

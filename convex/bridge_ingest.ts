@@ -102,6 +102,26 @@ type IngestOp =
       status: "complete" | "error" | "aborted";
       text: string;
       error: string | null;
+    }
+  // Session meta mirrored from the gateway's `sessions.describe` (model,
+  // reasoning level + enum, verbosity, context-usage counts) so the chat header
+  // can render the model/reasoning chips + context meter. Non-secret knob labels
+  // only. The bridge posts this when it learns a turn's session meta.
+  | {
+      op: "setSessionMeta";
+      chatId: string;
+      meta: {
+        model?: string;
+        modelProvider?: string;
+        agentRuntime?: string;
+        thinkingLevel?: string;
+        thinkingDefault?: string;
+        thinkingLevels?: { id: string; label: string }[];
+        verboseLevel?: string;
+        totalTokens?: number;
+        contextTokens?: number;
+        estimatedCostUsd?: number;
+      };
     };
 
 export const ingest = httpAction(async (ctx, request) => {
@@ -260,6 +280,31 @@ export const ingest = httpAction(async (ctx, request) => {
           textLen: body.text.length,
           // Whether an error was surfaced (boolean only — never the error text).
           hasError: body.error != null,
+          ok: true,
+        },
+      });
+      return json({ ok: true });
+    }
+    case "setSessionMeta": {
+      await ctx.runMutation(internal.stream.setSessionMeta, {
+        chatId: body.chatId as Id<"chats">,
+        meta: body.meta,
+      });
+      await traceIngest(ctx, {
+        kind: "openclaw.ingest",
+        chatId: body.chatId,
+        correlationId: body.chatId,
+        meta: {
+          op: body.op,
+          // Non-PHI knob labels + derived context % only — never raw counts/PHI.
+          model: body.meta.model,
+          thinkingLevel: body.meta.thinkingLevel,
+          pctContext:
+            body.meta.totalTokens != null && body.meta.contextTokens
+              ? Math.round(
+                  (body.meta.totalTokens / body.meta.contextTokens) * 100,
+                )
+              : undefined,
           ok: true,
         },
       });

@@ -25,6 +25,21 @@ import { getProfile } from "./lib/access";
 import { resolveTargetForProfile } from "./routing";
 
 /**
+ * ArrayBuffer -> base64 in the DEFAULT Convex action runtime (no Node Buffer;
+ * `btoa` is available). Chunked so a multi-MB attachment doesn't blow the call
+ * stack on `String.fromCharCode(...spread)`.
+ */
+function arrayBufferToBase64(buf: ArrayBuffer): string {
+  const bytes = new Uint8Array(buf);
+  const CHUNK = 0x8000;
+  let binary = "";
+  for (let i = 0; i < bytes.length; i += CHUNK) {
+    binary += String.fromCharCode(...bytes.subarray(i, i + CHUNK));
+  }
+  return btoa(binary);
+}
+
+/**
  * Emit an outbound `openclaw.dispatch` trace via the `recordEvent`
  * internalMutation (an action has no `ctx.db`). D2: metadata only — never the
  * outbox text, attachment contents, or gateway tokens. Target instance/agent
@@ -167,6 +182,39 @@ export const dispatch = internalAction({
       return;
     }
 
+    // Resolve INBOUND attachments (storageId -> bytes -> base64) into OpenClaw's
+    // chat.send.attachment shape. Inbound rides the JSON WS, so it MUST be inline
+    // base64 (the gateway offloads it to media://inbound); bounded by the WS
+    // maxPayload (~25 MiB). Unreadable / over-cap blobs are skipped (logged) so a
+    // bad attachment never fails the text send.
+    const INBOUND_MAX_BYTES = 20 * 1024 * 1024;
+    const resolvedAttachments: Array<{
+      type: string;
+      mimeType: string;
+      fileName: string;
+      content: string;
+    }> = [];
+    for (const a of row.attachments ?? []) {
+      try {
+        const blob = await ctx.storage.get(a.storageId);
+        if (blob === null) continue;
+        if (blob.size > INBOUND_MAX_BYTES) {
+          console.error(
+            `bridge.dispatch: inbound attachment too large (${blob.size} bytes) — skipped`,
+          );
+          continue;
+        }
+        resolvedAttachments.push({
+          type: "file",
+          mimeType: a.mimeType || blob.type || "application/octet-stream",
+          fileName: a.filename,
+          content: arrayBufferToBase64(await blob.arrayBuffer()),
+        });
+      } catch (err) {
+        console.error("bridge.dispatch: attachment resolve failed:", err);
+      }
+    }
+
     // We mark the row terminal (sent/failed) and deliberately do NOT re-throw on
     // a transient bridge error. Re-throwing triggers Convex action retries,
     // which would re-POST after we already recorded "failed" -> duplicate sends.
@@ -193,7 +241,7 @@ export const dispatch = internalAction({
           canonical: routing.target.canonical,
           text: row.text,
           clientMessageId: row.clientMessageId,
-          attachments: row.attachmentIds,
+          attachments: resolvedAttachments,
         }),
       });
       ok = response.ok;

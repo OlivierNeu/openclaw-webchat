@@ -197,6 +197,31 @@ export default defineSchema({
     sortKey: v.optional(v.number()), // fractional manual order (lower = higher)
     pinned: v.optional(v.boolean()), // pinned chats sort above unpinned
     color: v.optional(v.string()), // preset token name, list display only
+    // OpenClaw session meta, mirrored from the gateway's self-describing
+    // `sessions.describe({ key })` so the chat header can surface the model,
+    // reasoning (thinking) level, verbosity, and the context-usage meter without
+    // the frontend hardcoding any enum. The bridge refreshes this per turn; it is
+    // READ-ONLY here (write-back via a later `sessions.patch` increment). Fully
+    // OPTIONAL + every inner field optional → additive on existing rows AND
+    // forward-compatible (a new thinking level / model surfaces with no schema
+    // change). NEVER holds secrets — model/level names are non-sensitive.
+    sessionMeta: v.optional(
+      v.object({
+        model: v.optional(v.string()), // e.g. "gpt-5.5"
+        modelProvider: v.optional(v.string()), // e.g. "openai-codex"
+        agentRuntime: v.optional(v.string()), // e.g. "codex"
+        thinkingLevel: v.optional(v.string()), // current effective level
+        thinkingDefault: v.optional(v.string()), // agent default (inheritance src)
+        thinkingLevels: v.optional(
+          v.array(v.object({ id: v.string(), label: v.string() })),
+        ),
+        verboseLevel: v.optional(v.string()), // e.g. "full"
+        totalTokens: v.optional(v.number()), // used context tokens
+        contextTokens: v.optional(v.number()), // context window size
+        estimatedCostUsd: v.optional(v.number()),
+        updatedAt: v.optional(v.number()),
+      }),
+    ),
   })
     .index("by_user", ["userId"])
     .index("by_project", ["projectId"]),
@@ -284,6 +309,19 @@ export default defineSchema({
     messageId: v.optional(v.id("messages")),
     text: v.string(),
     attachmentIds: v.array(v.id("_storage")),
+    // Inbound attachments WITH the browser-supplied filename + mimeType (the
+    // dispatch needs both to build OpenClaw's chat.send.attachment shape — the
+    // storageId alone loses them). Optional/additive: legacy rows only have
+    // `attachmentIds`. The dispatch resolves storageId -> bytes -> base64.
+    attachments: v.optional(
+      v.array(
+        v.object({
+          storageId: v.id("_storage"),
+          filename: v.string(),
+          mimeType: v.string(),
+        }),
+      ),
+    ),
     status: v.union(
       v.literal("pending"),
       v.literal("sent"),

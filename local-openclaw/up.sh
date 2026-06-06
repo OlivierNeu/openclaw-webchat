@@ -44,6 +44,13 @@ else
   echo "ℹ codex auth or seed missing → gateway stays unconfigured (no agent turns; media-share still testable)."
 fi
 
+# 4b) Inbound media: the media/outbound bind makes docker create the parent
+# /home/node/.openclaw/media root-owned, so the gateway (node) can't mkdir
+# media/inbound to offload USER-sent attachments (EACCES). Make media node-owned.
+docker exec -u root oc-local-gateway sh -c \
+  'mkdir -p /home/node/.openclaw/media/inbound && chown -R node:node /home/node/.openclaw/media' \
+  >/dev/null 2>&1 || true
+
 # 5) Auto-pair the bridge's device (token auth still needs device approval).
 ./pair.sh
 

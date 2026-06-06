@@ -571,6 +571,88 @@ row status **complete** ("Bridge validé, je te reçois bien."). CAPTURED LIVE G
   comparison trustworthy, absolute may differ from the NAS. The ledger has a promotion-decision
   checklist + an observations log to append per version. Separate reliability axis to track later:
   codex `MEDIA:`-directive compliance (intermittent omission → intermittent attachment loss).
+  **#59 INBOUND BUILT + PROVEN ON 6.1 (2026-06-05):** the GAP above is CLOSED. Resolution lives in
+  the dispatch internalAction (`convex/bridge.ts`): for each `row.attachments[]` it does
+  `ctx.storage.get(storageId)` → `arrayBuffer()` → chunked `btoa` (`arrayBufferToBase64`, default
+  action runtime, no Node Buffer) → `{type:"file",mimeType,fileName,content}` (the flat shape the
+  live gateway probe ACCEPTED + offloaded to `media/inbound`), capped `INBOUND_MAX_BYTES`=20 MiB
+  (under the ~25 MiB WS `maxPayload`), per-attachment try/catch so a bad blob never fails the text
+  send. ADDITIVE schema: `outbox.attachments?: {storageId,filename,mimeType}[]` (kept `attachmentIds`);
+  `send.sendMessage` populates BOTH; the dispatch body now sends `attachments: resolvedAttachments`
+  (was the opaque `row.attachmentIds`). PROOF (real production path, not a mock — exercises the actual
+  `internal.bridge.dispatch` on a real outbox row): new dev helpers `dev.seedImageAttachment` (action:
+  `storage.store(blob)` from base64) + `dev.enqueueAttachmentTurn` (inserts the SAME outbox row shape
+  send.sendMessage builds + a `file` messagePart + schedules the SAME dispatch) + `dev.outboxStatus`.
+  Round-trip on **2026.6.1**: uploaded a 96×96 red square (`carre-rouge.png`, 199 B) → agent (codex
+  vision, gpt-5.5) replied **"Rouge"**; outbox `status:sent`, `attachmentCount:1`. Both discriminating
+  checks hold (bytes reached the agent's vision via media/inbound + outbox terminal-sent). Browser also
+  renders the user's image inline (`docs/live-evidence-59-inbound-61-rouge.png`). The media/inbound
+  EACCES (the `media/outbound` bind makes `/home/node/.openclaw/media` root-owned so node can't mkdir
+  `media/inbound`) is fixed in `up.sh` (chown media node-owned) — re-verified node-writable on the live
+  6.1 container before the test, so the vision hit is real, not a perms artifact. **GAP (frontend, NOT
+  #59 backend):** the assistant-ui attach widget (`ComposerPrimitive.AddAttachment`/`Attachments` +
+  adapter, ConvexChat.tsx:154-157/:96) is wired correctly but NOT verified via automation — CDP
+  `upload_file` cannot drive its file picker (no `add()` fires, no chip). Needs a 10-second human
+  drag-drop test at the checkpoint. **5.19 ROUND-TRIP BLOCKED by a HARNESS BRING-UP REGRESSION (NOT
+  by #59 code, NOT version-specific) 2026-06-05:** trying to re-run on 5.19 surfaced that EVERY
+  `bridge /send` (attachment AND plain text-only `dev.testSend`) on a freshly `reset → up → pair.sh →
+  bridge-restart`'d container fails with `unauthorized: gateway token mismatch (set gateway.remote.token
+  to match gateway.auth.token)` — even though ALL 5 token values hash-match (`dc0ece750a7f`) and
+  hand-patching `gateway.remote.token`+restart didn't fix it. **Confirmed version-INDEPENDENT:** a fresh
+  `reset → up 2026.6.1` via the SAME scripts fails IDENTICALLY. So the #59 "Rouge" proof + the
+  smoke/stability numbers were on gateway containers brought up BEFORE this session (device already
+  paired at full scope in persisted state) — they STAND, but are not reproducible via the current
+  bring-up cycle. Leading (unconfirmed) hypothesis: `pair.sh`'s `devices approve` grants only
+  `operator.pairing` scope while a send needs the `operator.admin` upgrade, which the gateway refuses
+  (log: `scopesTo=operator.admin … connect failed 1008`). Full honest write-up + table correction in
+  docs/OPENCLAW_VERSION_STABILITY.md. **#59 stays in_progress: dispatch code DONE + proven on 6.1; the
+  blocker is the harness, version-independent.** Live-agent verification (and the 5.19 round-trip) needs
+  the harness bring-up fixed first (or a non-reset container). Checkpoint item; tracked as a new task.
+  **#54 INCREMENT 1 — CONTEXT METER + MODEL/REASONING CHIPS (read-only) BUILT + LIVE-VERIFIED 2026-06-05:**
+  the chat-header "spotted strip" (CHAT_UX_DESIGN Part 3) is shipped + browser-proven. Surfaces OpenClaw
+  native knobs as FEATURES: model chip, reasoning (thinking) chip with an inheritance hint, and the
+  always-visible context-usage meter (color escalates green→amber→red). Pieces:
+  (1) SCHEMA: `chats.sessionMeta?` (fully optional, every inner field optional → additive +
+  forward-compatible; mirrors the gateway's self-describing `sessions.describe`: model/modelProvider/
+  agentRuntime/thinkingLevel/thinkingDefault/thinkingLevels[]/verboseLevel/totalTokens/contextTokens/
+  estimatedCostUsd). (2) QUERY: `messages.getSessionMeta(chatId)` (owner-scoped, returns {title,
+  sessionMeta}). (3) FRONTEND: `ChatHeader` in `ConvexChat.tsx` + `.oc-chathead`/`.oc-chip`/`.oc-meter`
+  CSS (theme tokens; inline Lucide-style SVG icons, no emoji); pct = totalTokens/contextTokens; the
+  "héritée" badge shows only when thinkingLevel===thinkingDefault. (4) DEV SEED: `dev.seedSessionMeta`
+  (realistic `sessions.describe` defaults: 62226/272000 ≈ 23%). (5) RECEIVING CONTRACT: ingest op
+  `setSessionMeta` (`bridge_ingest.ts`) → `internal.stream.setSessionMeta` (patches chat.sessionMeta,
+  non-secret labels only). **NOTE for reviewers/diff-scan: this op has NO production caller yet** — it
+  is the documented receiving seam the bridge producer (below) will use; so far only the `curl` test
+  and `dev.seedSessionMeta` exercise it. Intentional, not an oversight. **LIVE-VERIFIED (3 ways):** seed 23% → green meter + "gpt-5.5" + "Réflexion :
+  High · héritée" (matches image #27 exactly: `23% · 62.2k/272.0k`); re-seed 92% + medium → RED meter +
+  "Medium" with NO héritée badge (escalation + inheritance logic + Convex reactivity, no reload); and a
+  raw `curl POST /bridge/ingest setSessionMeta` (gpt-5.4-mini/low/48%) → strip updated → proves the
+  RECEIVING CONTRACT end-to-end WITHOUT the gateway. Evidence: docs/live-evidence-54-chathead-strip-*.png.
+  tsc(src+convex)+vite build green. **REMAINING (the producer half, BLOCKED on harness #61 — NOT built
+  blind):** the bridge must call `conn.request("sessions.describe", { key: sessionKey })` (param is
+  `key`, verified via the earlier read-only probe) after a turn and POST the parsed meta via a new
+  `convex-writer.reportSessionMeta` → the `setSessionMeta` ingest op. Clean integration point:
+  `bridge/src/session.ts` finalize (it holds conn+sessionKey+chatId+writer). Deferred because the gateway
+  RPC can't be live-verified while the harness send-path is broken (#61) — wiring it blind would give
+  false confidence. Field mapping = the `sessions.describe` shape in CHAT_UX_DESIGN §2.1. **Write-back
+  (`sessions.patch`) increment stays gated on the off-hours param probe (also needs a working gateway).**
+  **#53 INCREMENT 3 — COMPOSER POLISH BUILT + LIVE-VERIFIED 2026-06-05 (pure frontend, no live agent):**
+  via assistant-ui 0.14 primitives in `ConvexChat.tsx` + `convexChat.css`: (1) EMPTY STATE
+  (`ThreadPrimitive.Empty`) — OC avatar + "Comment puis-je aider ?" + 4 suggestion cards
+  (`ThreadPrimitive.Suggestion send={false}` → fills the composer for review, NOT auto-send; prompts
+  showcase proven capabilities: web search, downloadable file exchange, mail). (2) SCROLL-TO-BOTTOM
+  pill (`ThreadPrimitive.ScrollToBottom`, auto-hides at bottom, wrapped in `If empty={false}` so it
+  never shows on an empty thread). (3) PER-MESSAGE COPY on assistant turns (`ActionBarPrimitive.Copy`,
+  `hideWhenRunning` + `autohide="not-last"`; flips to a check on `MessagePrimitive.If copied`).
+  **Régénérer (Reload) deliberately NOT rendered:** the external-store runtime
+  (`useConvexChatRuntime`) implements only `onNew` (no `onReload`), so `ActionBar.Reload` would be a
+  DEAD button — dropped until an `onReload` re-dispatch of the last user turn is built (+ a working
+  gateway to verify). Inline Lucide-style SVG icons (no emoji). "Stop generating"
+  (`ComposerPrimitive.Cancel`) already existed. LIVE-VERIFIED: 2×2 suggestion grid renders
+  (docs/live-evidence-53-emptystate-suggestions.png); clicking a suggestion fills the composer +
+  enables Send; copy/reload + scroll pill render on a populated chat and the pill is correctly hidden
+  on the empty chat. tsc(src)+vitest(97 pass)+vite build green. Lower-priority Part-4 remainder: export
+  transcript (md/json), voice/Talk, the full a11y/motion pass.
 - **CHAT UX + CONFIG-OPTIONS work QUEUED (tasks #53/#54, see docs/CHAT_UX_DESIGN.md):** research done
   (eye-tracking/F-pattern/layer-cake, conversational design, streaming, composer, a11y) + the OpenClaw
   feature inventory + the REVISED schema decision (knobs come from `sessions.describe`
