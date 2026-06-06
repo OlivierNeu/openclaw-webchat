@@ -61,6 +61,21 @@ export const bootstrap = mutation({
   },
 });
 
+// Public (PRE-AUTH) — which sign-in providers this deployment has enabled, so the
+// sign-in screen renders the right buttons. Booleans ONLY: no client-id, issuer,
+// or secret ever crosses this boundary. Microsoft requires BOTH creds AND a
+// tenant issuer (mirrors auth.ts's refuse-without-issuer rule).
+export const authProviders = query({
+  args: {},
+  handler: async () => ({
+    google: !!process.env.AUTH_GOOGLE_ID,
+    microsoft:
+      !!process.env.AUTH_MICROSOFT_ENTRA_ID_ID &&
+      !!process.env.AUTH_MICROSOFT_ENTRA_ID_ISSUER,
+    anonymous: process.env.OPENCLAW_ENABLE_ANON_AUTH === "1",
+  }),
+});
+
 export const getMe = query({
   args: {},
   handler: async (ctx) => {

@@ -118,41 +118,64 @@ function RootShell() {
 
 function SignIn() {
   const { signIn } = useAuthActions();
+  // Which providers the deployment enabled (env-driven, server-resolved). Pre-auth
+  // query → no identity required.
+  const providers = useQuery(api.me.authProviders);
   const [error, setError] = useState<string | null>(null);
-  // Google is the production method, restricted server-side to the allowed email
-  // domains (convex/lib/authDomains). "anonymous" is a DEV-ONLY provider (enabled
-  // on the deployment via OPENCLAW_ENABLE_ANON_AUTH=1).
-  async function google() {
+  // OAuth sign-in, restricted server-side to the allowed email domains
+  // (convex/lib/authDomains). On a disallowed account the OAuth flow is rejected
+  // server-side; surface a clear message instead of a silent failure.
+  async function oauth(provider: string) {
     setError(null);
     try {
-      await signIn("google");
+      await signIn(provider);
     } catch {
-      // A disallowed-domain account is rejected server-side; surface a clear
-      // message instead of a silent failure. (Exact surfacing of the OAuth
-      // redirect error is verified on the live Google deployment.)
       setError(
         "Connexion refusée. Comptes autorisés : @lacneu.com et @ataraxis-coaching.com.",
       );
     }
   }
+  const noneEnabled =
+    providers !== undefined &&
+    !providers.google &&
+    !providers.microsoft &&
+    !providers.anonymous;
   return (
     <div className="oc-signin">
       <h1 className="oc-signin__title">OpenClaw webchat</h1>
-      <button type="button" className="oc-signin__btn" onClick={() => void google()}>
-        Sign in with Google
-      </button>
-      <p className="oc-signin__hint">
-        Réservé aux comptes <strong>@lacneu.com</strong> et{" "}
-        <strong>@ataraxis-coaching.com</strong>.
-      </p>
+      {providers?.google ? (
+        <button type="button" className="oc-signin__btn" onClick={() => void oauth("google")}>
+          Se connecter avec Google
+        </button>
+      ) : null}
+      {providers?.microsoft ? (
+        <button
+          type="button"
+          className="oc-signin__btn"
+          onClick={() => void oauth("microsoft-entra-id")}
+        >
+          Se connecter avec Microsoft
+        </button>
+      ) : null}
+      {providers?.google || providers?.microsoft ? (
+        <p className="oc-signin__hint">
+          Réservé aux comptes <strong>@lacneu.com</strong> et{" "}
+          <strong>@ataraxis-coaching.com</strong>.
+        </p>
+      ) : null}
       {error ? <p className="oc-signin__error">{error}</p> : null}
-      <button
-        type="button"
-        className="oc-signin__btn oc-signin__btn--dev"
-        onClick={() => void signIn("anonymous")}
-      >
-        Continue (dev, no account)
-      </button>
+      {noneEnabled ? (
+        <p className="oc-signin__error">Aucun mode de connexion configuré.</p>
+      ) : null}
+      {providers?.anonymous ? (
+        <button
+          type="button"
+          className="oc-signin__btn oc-signin__btn--dev"
+          onClick={() => void signIn("anonymous")}
+        >
+          Continue (dev, no account)
+        </button>
+      ) : null}
     </div>
   );
 }

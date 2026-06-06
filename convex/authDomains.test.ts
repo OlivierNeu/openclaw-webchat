@@ -9,7 +9,11 @@ import { convexTest } from "convex-test";
 import { describe, expect, test } from "vitest";
 import { api } from "./_generated/api";
 import schema from "./schema";
-import { emailDomainAllowed, emailVerifiedTruthy } from "./lib/authDomains";
+import {
+  emailDomainAllowed,
+  emailVerifiedTruthy,
+  extractEntraEmail,
+} from "./lib/authDomains";
 
 const modules = import.meta.glob("./**/*.ts");
 
@@ -50,6 +54,16 @@ describe("emailDomainAllowed (default lacneu.com / ataraxis-coaching.com)", () =
     expect(emailVerifiedTruthy(false)).toBe(false);
     expect(emailVerifiedTruthy("false")).toBe(false);
     expect(emailVerifiedTruthy(undefined)).toBe(false);
+  });
+
+  test("extractEntraEmail: email > upn > preferred_username; absent → undefined", () => {
+    expect(extractEntraEmail({ email: "a@x.com", upn: "b@x.com" })).toBe("a@x.com");
+    expect(extractEntraEmail({ upn: "b@x.com", preferred_username: "c@x.com" })).toBe(
+      "b@x.com",
+    );
+    expect(extractEntraEmail({ preferred_username: "c@x.com" })).toBe("c@x.com");
+    expect(extractEntraEmail({ sub: "123", name: "No Email" })).toBeUndefined();
+    expect(extractEntraEmail({ email: "" })).toBeUndefined();
   });
 });
 
@@ -93,10 +107,34 @@ describe("ensureProfile email-domain gate (authoritative, defense-in-depth)", ()
     expect(await profileOf(t, userId)).toBeNull(); // never provisioned
   });
 
-  test("anonymous identity (no email) is EXEMPT (dev) → profile provisioned", async () => {
-    const t = convexTest(schema, modules);
-    const { userId, as } = await authedNoProfile(t, undefined);
-    await as.mutation(api.me.bootstrap, {});
-    expect(await profileOf(t, userId)).not.toBeNull();
+  test("no-email identity is EXEMPT ONLY when the dev Anonymous flag is ON", async () => {
+    const prev = process.env.OPENCLAW_ENABLE_ANON_AUTH;
+    try {
+      process.env.OPENCLAW_ENABLE_ANON_AUTH = "1"; // dev Anonymous enabled
+      const t = convexTest(schema, modules);
+      const { userId, as } = await authedNoProfile(t, undefined);
+      await as.mutation(api.me.bootstrap, {});
+      expect(await profileOf(t, userId)).not.toBeNull();
+    } finally {
+      if (prev === undefined) delete process.env.OPENCLAW_ENABLE_ANON_AUTH;
+      else process.env.OPENCLAW_ENABLE_ANON_AUTH = prev;
+    }
+  });
+
+  test("PROD HOLE: anon flag OFF + no-email identity → REJECTED, no profile", async () => {
+    // The bug the gate change closes: with Microsoft, a flaky OAuth token can
+    // arrive with NO mapped email. Pre-fix, no-email = bypass → provisioned. Now,
+    // with the dev flag off (= production), a no-email identity is refused.
+    const prev = process.env.OPENCLAW_ENABLE_ANON_AUTH;
+    try {
+      delete process.env.OPENCLAW_ENABLE_ANON_AUTH; // production
+      const t = convexTest(schema, modules);
+      const { userId, as } = await authedNoProfile(t, undefined);
+      await expect(as.mutation(api.me.bootstrap, {})).rejects.toThrow(/email/i);
+      expect(await profileOf(t, userId)).toBeNull();
+    } finally {
+      if (prev === undefined) delete process.env.OPENCLAW_ENABLE_ANON_AUTH;
+      else process.env.OPENCLAW_ENABLE_ANON_AUTH = prev;
+    }
   });
 });

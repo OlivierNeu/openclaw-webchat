@@ -18,7 +18,7 @@
 import { getAuthUserId } from "@convex-dev/auth/server";
 import { Doc, Id } from "../_generated/dataModel";
 import { MutationCtx, QueryCtx } from "../_generated/server";
-import { emailDomainAllowed } from "./authDomains";
+import { anonAuthEnabled, emailDomainAllowed } from "./authDomains";
 
 export type Role = "pending" | "user" | "admin";
 const APP_META_KEY = "singleton";
@@ -125,13 +125,20 @@ export async function ensureProfile(ctx: MutationCtx): Promise<Id<"users">> {
   const userId = await rawUserId(ctx);
 
   // AUTHORITATIVE email-domain gate (defense-in-depth behind auth.ts profile()).
-  // An OAuth identity carries an email → it MUST be in an allowed domain; the
-  // dev Anonymous identity has NO email → exempt (dev-only). Fail-closed. Runs on
-  // BOTH the existing-profile and new-profile paths, so a profile that somehow
-  // predates the gate (or slipped past profile()) is still refused.
+  // Runs on BOTH the existing- and new-profile paths, so a profile that slipped
+  // past profile() (the untestable provider layer) is still refused. Fail-closed:
+  //   - email present  → MUST be in an allowed domain.
+  //   - email ABSENT   → allowed ONLY when the dev Anonymous provider is on
+  //     (no-email is its signature). In production (anon off) a no-email OAuth
+  //     identity — e.g. a flaky Microsoft Entra token with no mapped email — is
+  //     REFUSED, never silently provisioned.
   const identity = await ctx.auth.getUserIdentity();
   const email = (identity?.email as string | undefined) ?? undefined;
-  if (email !== undefined && !emailDomainAllowed(email)) {
+  if (email === undefined) {
+    if (!anonAuthEnabled()) {
+      throw new Error("Forbidden: identity has no email");
+    }
+  } else if (!emailDomainAllowed(email)) {
     throw new Error("Forbidden: email domain not allowed");
   }
 

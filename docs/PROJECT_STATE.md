@@ -2,8 +2,8 @@
 
 **Purpose of this file:** the single, durable, detailed snapshot to RESUME from
 after a context compaction. Read this first. It is kept current as work lands.
-Last verified-green: **2026-06-06** — `tsc src` 0, `tsc convex` 0, `vitest` 149
-(convex+routing, incl. UI-9 feedback 12 + UI-prefs 5 + integrations 17 + authDomains 8) + mcp 36, `vite build` OK.
+Last verified-green: **2026-06-06** — `tsc src` 0, `tsc convex` 0, `vitest` 151
+(convex+routing, incl. UI-9 feedback 12 + UI-prefs 5 + integrations 17 + authDomains 10) + mcp 36, `vite build` OK.
 
 Companion docs (authoritative for their area): `OBSERVABILITY_PLATFORM_PLAN.md`
 (contract), `OBSERVABILITY_RESEARCH.md`, `OBSERVABILITY_REVIEW.md` (28-item
@@ -971,9 +971,29 @@ row status **complete** ("Bridge validé, je te reçois bien."). CAPTURED LIVE G
   locally (Google OAuth needs a live deployment + AUTH_GOOGLE_ID/SECRET; locally we're on Anonymous). NAS
   PRE-FLIGHT (gating "done"): with Google creds set, confirm an allowed-domain account signs in AND a
   personal gmail is REJECTED with a comprehensible message. Files: auth.ts, lib/authDomains.ts (+ .test.ts),
-  lib/access.ts (ensureProfile gate), router.tsx (SignIn), convexChat.css. NEVER committed. OPEN: Olivier said
-  "modes d'authentification" (plural) — confirm whether passwordless magic-link email (same domain gate) is
-  also wanted, or Google-only.
+  lib/access.ts (ensureProfile gate), router.tsx (SignIn), convexChat.css. NEVER committed.
+  **AUTH — MICROSOFT ENTRA ID PROVIDER (env-driven multi-provider) — BUILT + UNIT-VERIFIED 2026-06-06
+  (live-Microsoft pending):** Olivier wants Microsoft "instead of Google" for a future corporate (M365)
+  deployment; NAS stays Google-only for now. Providers are now ENV-DRIVEN (a deployment picks by which creds
+  it sets — no code change): Google if AUTH_GOOGLE_ID; Microsoft (`@auth/core/providers/microsoft-entra-id`)
+  if AUTH_MICROSOFT_ENTRA_ID_ID **AND** AUTH_MICROSOFT_ENTRA_ID_ISSUER; Anonymous if OPENCLAW_ENABLE_ANON_AUTH.
+  Microsoft specifics (advisor-decided): **REFUSE without a tenant issuer** (omitted issuer → "common" =
+  every MS tenant + personal accounts = fail-OPEN; the tenant/issuer is the PRIMARY authz, the email-domain
+  allowlist is the SECONDARY filter); `checks:["state"]` (PKCE breaks with convex-auth+Entra #235); NO
+  email_verified requirement (token vouched by the pinned tenant); email via `extractEntraEmail`
+  (email→upn→preferred_username, the canonical-first order). **CRITICAL HOLE FIXED (advisor):** ensureProfile's
+  "no email → exempt" rule was safe only when Anonymous was the sole no-email path; with Microsoft a flaky
+  token can arrive emailless → now the exemption is GATED ON the anon flag (`anonAuthEnabled()`): prod
+  (anon off) + no-email → REFUSED (unit-test pins it). Public pre-auth `me.authProviders` query (booleans
+  only) drives the SignIn screen's conditional Google/Microsoft buttons (id "microsoft-entra-id") + a
+  "no provider configured" fallback. Tests: authDomains 10 — incl. extractEntraEmail order + the PROD-HOLE
+  "anon-off + no-email → throws, no profile" → vitest 151. Verified NOT locked out locally (anon flag on →
+  exempt; authProviders live = {anonymous:true, google:false, microsoft:false}). CORPORATE SETUP (live-verify
+  much later): set AUTH_MICROSOFT_ENTRA_ID_ID/_SECRET + AUTH_MICROSOFT_ENTRA_ID_ISSUER
+  (https://login.microsoftonline.com/<tenant>/v2.0) + register redirect URI .../api/auth/callback/
+  microsoft-entra-id + AUTH_ALLOWED_EMAIL_DOMAINS = the tenant domains. Files: auth.ts, lib/authDomains.ts
+  (anonAuthEnabled + extractEntraEmail), lib/access.ts (no-email gate), me.ts (authProviders), router.tsx
+  (SignIn), authDomains.test.ts. NEVER committed. (Magic-link email auth NOT requested — user chose Microsoft.)
   **#53 INCREMENT 3 — COMPOSER POLISH BUILT + LIVE-VERIFIED 2026-06-05 (pure frontend, no live agent):**
   via assistant-ui 0.14 primitives in `ConvexChat.tsx` + `convexChat.css`: (1) EMPTY STATE
   (`ThreadPrimitive.Empty`) — OC avatar + "Comment puis-je aider ?" + 4 suggestion cards

@@ -35,3 +35,24 @@ export function emailDomainAllowed(email: string | undefined | null): boolean {
 export function emailVerifiedTruthy(v: unknown): boolean {
   return v === true || v === "true";
 }
+
+/** The dev Anonymous provider (no email) is enabled ONLY with this flag. Shared
+ *  so auth.ts (provider list) and access.ts (the no-email exemption) agree. */
+export function anonAuthEnabled(): boolean {
+  return process.env.OPENCLAW_ENABLE_ANON_AUTH === "1";
+}
+
+/**
+ * Extract a usable email from a Microsoft Entra profile. Prefer the canonical
+ * `upn` over the MUTABLE `preferred_username`; `email` first when present. This
+ * feeds only the SECONDARY domain filter — the tenant (issuer) is the primary
+ * authorization. Returns undefined if no claim carries an email (→ fail-closed).
+ */
+export function extractEntraEmail(
+  p: Record<string, unknown>,
+): string | undefined {
+  const cand = (p.email ?? p.upn ?? p.preferred_username) as
+    | string
+    | undefined;
+  return typeof cand === "string" && cand.length > 0 ? cand : undefined;
+}
