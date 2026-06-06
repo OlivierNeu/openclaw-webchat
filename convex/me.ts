@@ -24,6 +24,13 @@ import {
   roleOf,
 } from "./lib/access";
 import { auditImpersonated } from "./lib/audit";
+import {
+  isUiPrefKey,
+  prefGateKey,
+  resolveUiPrefs,
+  type FeaturesEnabled,
+  type UiPrefsObject,
+} from "./lib/uiPrefs";
 
 const APP_META_KEY = "singleton";
 
@@ -73,39 +80,54 @@ export const getMe = query({
       themeMode: userMode ?? null,
       resolvedThemeMode: resolveThemeMode(userMode, adminDefaultMode),
       defaultThemeMode: adminDefaultMode ?? null,
-      // Chat pref: show tool-execution cards (default true when unset).
-      showTools: profile?.showTools ?? true,
-      // Composer pref: show the voice-input (mic) button (default false — the
-      // voice pipeline is not wired yet; opt-in feature flag).
-      voiceInput: profile?.voiceInput ?? false,
+      // Unified UI preferences (the interface-config module): the resolved
+      // effective values the chat renders by, plus the user's own overrides, the
+      // admin defaults, and which features are system-enabled (so the Préférences
+      // panel can grey locked toggles). Resolution + the system gate live in
+      // convex/lib/uiPrefs (single source of truth).
+      ui: resolveUiPrefs(
+        profile?.uiPrefs as UiPrefsObject | undefined,
+        meta?.uiPrefDefaults as UiPrefsObject | undefined,
+        meta?.featuresEnabled as FeaturesEnabled | undefined,
+        { showTools: profile?.showTools, voiceInput: profile?.voiceInput },
+      ),
     };
   },
 });
 
-// Toggle the per-user "show tool cards in chat" preference. Identity-level
-// (requireUserId, like setThemeMode) so it persists per user and drives the
-// chat's tool-card visibility reactively.
-export const setShowTools = mutation({
-  args: { show: v.boolean() },
-  handler: async (ctx, { show }) => {
+// Single write path for the UI preferences module. `value: null` clears the
+// override (re-inherit the default). The SERVER-SIDE gate is the real
+// enforcement (greying is cosmetic): a system-gated feature cannot be turned ON
+// until an admin has enabled the underlying system in appMeta.featuresEnabled.
+export const setUiPref = mutation({
+  args: { key: v.string(), value: v.union(v.boolean(), v.null()) },
+  handler: async (ctx, { key, value }) => {
     const userId = await requireUserId(ctx);
     const profile = await getProfile(ctx, userId);
-    if (profile === null) return; // pre-bootstrap: nothing to set yet
-    await ctx.db.patch(profile._id, { showTools: show });
+    if (profile === null) return; // pre-bootstrap
+    if (!isUiPrefKey(key)) throw new Error(`Unknown UI preference: ${key}`);
+
+    const gate = prefGateKey(key);
+    if (gate && value === true) {
+      const meta = await readAppMeta(ctx);
+      const enabled =
+        (meta?.featuresEnabled as FeaturesEnabled | undefined)?.[gate] === true;
+      if (!enabled) {
+        throw new Error(`Feature not enabled: ${key}`);
+      }
+    }
+
+    const next: UiPrefsObject = { ...(profile.uiPrefs ?? {}) };
+    if (value === null) delete next[key];
+    else next[key] = value;
+    await ctx.db.patch(profile._id, { uiPrefs: next });
   },
 });
 
-// Toggle the per-user "show the composer voice-input (mic) button" preference.
-// Identity-level (like setShowTools). The mic only appears when this is true.
-export const setVoiceInput = mutation({
-  args: { enabled: v.boolean() },
-  handler: async (ctx, { enabled }) => {
-    const userId = await requireUserId(ctx);
-    const profile = await getProfile(ctx, userId);
-    if (profile === null) return; // pre-bootstrap: nothing to set yet
-    await ctx.db.patch(profile._id, { voiceInput: enabled });
-  },
-});
+// NOTE: the former setShowTools / setVoiceInput mutations were removed — the UI
+// preferences module (`setUiPref`) is now the single write path for those toggles
+// (showTools/voiceInput), with the legacy profile fields kept read-only for
+// existing rows (see convex/lib/uiPrefs.ts + getMe).
 
 // Set the calling user's theme preference. Identity-level: requireUserId (NOT
 // requireActive) so a pending user on the waiting screen can still theme the UI.

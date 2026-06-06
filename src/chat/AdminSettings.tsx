@@ -58,6 +58,7 @@ export const TABS = [
   "anomalies",
   "integrations",
   "theme",
+  "uiprefs",
   "audit",
   "feedbacks",
 ] as const;
@@ -69,6 +70,7 @@ export const PARAMLESS_TABS = [
   "integrations",
   "instances",
   "theme",
+  "uiprefs",
   "feedbacks",
 ] as const;
 export type ParamlessTab = (typeof PARAMLESS_TABS)[number];
@@ -83,6 +85,7 @@ export const TAB_LABELS: Partial<Record<Tab, string>> = {
   anomalies: "Anomalies",
   integrations: "Intégrations",
   feedbacks: "Feedbacks",
+  uiprefs: "Préférences UI",
 };
 
 export function UsersTab() {

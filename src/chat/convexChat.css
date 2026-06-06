@@ -586,6 +586,59 @@
 .oc-notif__link { font-size: 0.74rem; color: var(--primary, #3b82f6); text-decoration: none; align-self: flex-start; }
 .oc-notif__link:hover { text-decoration: underline; }
 
+/* ── User UI-preferences panel (interface-config module) */
+.oc-prefs { display: flex; flex-direction: column; }
+.oc-prefs__empty { padding: 1rem; color: var(--muted-foreground); }
+.oc-prefs__row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1rem;
+  padding: 0.6rem 0.1rem;
+  border-bottom: 1px solid var(--border);
+}
+.oc-prefs__row:last-child { border-bottom: none; }
+.oc-prefs__row.is-locked { opacity: 0.6; }
+.oc-prefs__info { display: flex; flex-direction: column; gap: 0.15rem; min-width: 0; }
+.oc-prefs__label { display: flex; align-items: center; gap: 0.5rem; font-size: 0.9rem; font-weight: 500; }
+.oc-prefs__help { font-size: 0.78rem; color: var(--muted-foreground); }
+.oc-prefs__lock {
+  font-size: 0.64rem;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
+  padding: 0.05rem 0.4rem;
+  border-radius: 999px;
+  background: color-mix(in oklch, var(--destructive, orange) 16%, var(--background));
+  color: var(--foreground);
+  border: 1px solid color-mix(in oklch, var(--destructive, orange) 45%, var(--border));
+}
+.oc-prefs__def {
+  font-size: 0.64rem;
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
+  padding: 0.05rem 0.4rem;
+  border-radius: 999px;
+  background: var(--muted);
+  color: var(--muted-foreground);
+  border: 1px solid var(--border);
+}
+.oc-prefs__ctl { display: flex; align-items: center; gap: 0.6rem; flex-shrink: 0; }
+.oc-prefs__reset {
+  font-size: 0.72rem;
+  color: var(--muted-foreground);
+  background: none;
+  border: none;
+  cursor: pointer;
+  text-decoration: underline;
+}
+.oc-prefs__reset:hover { color: var(--foreground); }
+
+/* ── Admin "Préférences UI" tab */
+.oc-uipa__section { margin-bottom: 1.5rem; }
+.oc-uipa__h { font-size: 0.95rem; font-weight: 600; margin: 0 0 0.25rem; }
+.oc-uipa__note { font-size: 0.8rem; color: var(--muted-foreground); margin: 0 0 0.6rem; }
+
 /* ── Raw "Source" view of a message — verbatim, convention-free (no markdown,
    no autocorrect): exactly the stored text, monospace + wrapping + selectable.
    The trust guarantee a user can rely on to confirm what was sent/received. */

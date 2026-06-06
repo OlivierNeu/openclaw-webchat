@@ -34,6 +34,7 @@ import type * as lib_filters from "../lib/filters.js";
 import type * as lib_rbac from "../lib/rbac.js";
 import type * as lib_search from "../lib/search.js";
 import type * as lib_timeRange from "../lib/timeRange.js";
+import type * as lib_uiPrefs from "../lib/uiPrefs.js";
 import type * as me from "../me.js";
 import type * as messages from "../messages.js";
 import type * as observability from "../observability.js";
@@ -78,6 +79,7 @@ declare const fullApi: ApiFromModules<{
   "lib/rbac": typeof lib_rbac;
   "lib/search": typeof lib_search;
   "lib/timeRange": typeof lib_timeRange;
+  "lib/uiPrefs": typeof lib_uiPrefs;
   me: typeof me;
   messages: typeof messages;
   observability: typeof observability;

@@ -10,6 +10,12 @@ import { Id } from "./_generated/dataModel";
 import { getProfile, requireAdmin, roleOf } from "./lib/access";
 import { recordAudit } from "./lib/audit";
 import {
+  isUiPrefKey,
+  UI_PREF_SYSTEM_GATE,
+  type UiPrefsObject,
+  type FeaturesEnabled,
+} from "./lib/uiPrefs";
+import {
   applyFilter,
   filterValidator,
   type FilterConfig,
@@ -240,6 +246,60 @@ export const setDefaultThemeMode = mutation({
       return;
     }
     await ctx.db.patch(meta._id, { defaultThemeMode: mode ?? undefined });
+  },
+});
+
+// --- UI preferences module (admin side) ------------------------------------
+
+/** Set the admin DEFAULT for a UI pref (inherited by users with no override).
+ *  `value: null` clears it (fall back to the code default). */
+export const setUiPrefDefault = mutation({
+  args: { key: v.string(), value: v.union(v.boolean(), v.null()) },
+  handler: async (ctx, { key, value }) => {
+    await requireAdmin(ctx);
+    if (!isUiPrefKey(key)) throw new Error(`Unknown UI preference: ${key}`);
+    const meta = await ctx.db
+      .query("appMeta")
+      .withIndex("by_key", (q) => q.eq("key", APP_META_KEY))
+      .unique();
+    const defaults: UiPrefsObject = { ...(meta?.uiPrefDefaults ?? {}) };
+    if (value === null) delete defaults[key];
+    else defaults[key] = value;
+    if (meta === null) {
+      await ctx.db.insert("appMeta", {
+        key: APP_META_KEY,
+        adminAssigned: true,
+        uiPrefDefaults: defaults,
+      });
+      return;
+    }
+    await ctx.db.patch(meta._id, { uiPrefDefaults: defaults });
+  },
+});
+
+/** Enable/disable a system-gated feature. Until enabled, a gated UI pref stays
+ *  locked/greyed and `setUiPref` rejects turning it on. */
+export const setFeatureEnabled = mutation({
+  args: { key: v.string(), enabled: v.boolean() },
+  handler: async (ctx, { key, enabled }) => {
+    await requireAdmin(ctx);
+    const validGates = new Set(Object.values(UI_PREF_SYSTEM_GATE));
+    if (!validGates.has(key)) throw new Error(`Unknown system feature: ${key}`);
+    const meta = await ctx.db
+      .query("appMeta")
+      .withIndex("by_key", (q) => q.eq("key", APP_META_KEY))
+      .unique();
+    const fe: FeaturesEnabled = { ...(meta?.featuresEnabled ?? {}) };
+    fe[key] = enabled;
+    if (meta === null) {
+      await ctx.db.insert("appMeta", {
+        key: APP_META_KEY,
+        adminAssigned: true,
+        featuresEnabled: fe,
+      });
+      return;
+    }
+    await ctx.db.patch(meta._id, { featuresEnabled: fe });
   },
 });
 

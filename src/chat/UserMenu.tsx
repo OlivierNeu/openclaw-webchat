@@ -1,6 +1,6 @@
-import { useMutation, useQuery } from "convex/react";
+import { useMutation } from "convex/react";
 import { useAuthActions } from "@convex-dev/auth/react";
-import { ChevronDown, LogOut, Monitor, Moon, Sun, Mic, Check } from "lucide-react";
+import { ChevronDown, LogOut, Monitor, Moon, Sun, SlidersHorizontal } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import {
   DropdownMenu,
@@ -13,6 +13,7 @@ import {
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import { api } from "./convexApi";
+import { usePreferences } from "./PreferencesDialog";
 import type { ThemeMode } from "@/lib/useTheme";
 
 // Single top-right menu: identity header + theme mode (radio) + sign out.
@@ -28,10 +29,7 @@ export function UserMenu({
 }) {
   const { signOut } = useAuthActions();
   const setThemeMode = useMutation(api.me.setThemeMode);
-  const setVoiceInput = useMutation(api.me.setVoiceInput);
-  // Voice-input feature flag read directly (Convex dedupes this getMe with the
-  // chrome's subscription); avoids prop-drilling through the top-bar layers.
-  const voiceInput = useQuery(api.me.getMe)?.voiceInput ?? false;
+  const openPreferences = usePreferences();
   // Radio value: a concrete mode, or "default" when the user follows the admin.
   const value = mode ?? "default";
 
@@ -65,16 +63,16 @@ export function UserMenu({
           </DropdownMenuRadioItem>
         </DropdownMenuRadioGroup>
         <DropdownMenuSeparator />
-        {/* Composer feature flag: show the voice-input (mic) button. Default OFF
-            (the talk.* pipeline is not wired yet). Kept open on toggle. */}
+        {/* Detailed UI preferences (source/report/copy/delete/tools/voice…). The
+            dialog is mounted app-level (PreferencesProvider), so the menu closing
+            here does not unmount it. */}
         <DropdownMenuItem
           onSelect={(e) => {
             e.preventDefault();
-            void setVoiceInput({ enabled: !voiceInput });
+            openPreferences();
           }}
         >
-          <Mic /> Saisie vocale (micro)
-          {voiceInput ? <Check className="ml-auto" /> : null}
+          <SlidersHorizontal /> Préférences…
         </DropdownMenuItem>
         <DropdownMenuSeparator />
         <DropdownMenuItem onClick={() => void signOut()}>

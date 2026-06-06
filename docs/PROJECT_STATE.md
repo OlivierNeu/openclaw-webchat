@@ -2,8 +2,8 @@
 
 **Purpose of this file:** the single, durable, detailed snapshot to RESUME from
 after a context compaction. Read this first. It is kept current as work lands.
-Last verified-green: **2026-06-06** — `tsc src` 0, `tsc convex` 0, `vitest` 127
-(convex+routing, incl. UI-9 feedback 4) + mcp 36, `vite build` OK.
+Last verified-green: **2026-06-06** — `tsc src` 0, `tsc convex` 0, `vitest` 139
+(convex+routing, incl. UI-9 feedback 12 + UI-prefs 4) + mcp 36, `vite build` OK.
 
 Companion docs (authoritative for their area): `OBSERVABILITY_PLATFORM_PLAN.md`
 (contract), `OBSERVABILITY_RESEARCH.md`, `OBSERVABILITY_REVIEW.md` (28-item
@@ -871,6 +871,34 @@ row status **complete** ("Bridge validé, je te reçois bien."). CAPTURED LIVE G
   badge clears; auditLog 1× feedback.respond. NEVER committed. Files: schema.ts, feedback.ts (+ .test.ts),
   NotificationBell.tsx, FeedbacksTab.tsx, router.tsx (bell wiring), convexChat.css. Natural next step (not
   built): user REPLY back (thread already supports authorRole user) + admin-side unread.
+
+  **UI PREFERENCES MODULE — fine-grained interface config (admin defaults + per-user override + system gate)
+  — DONE + LIVE-VERIFIED 2026-06-06:** Olivier: "module pour configurer finement les interfaces; défauts +
+  per-user; ex. source/rapport/copie; déplacer la saisie vocale ici + la griser tant que le système n'est pas
+  activé". Mirrors the theme pattern (user override -> admin default -> code default) + a SYSTEM GATE.
+  `convex/lib/uiPrefs.ts` = single source of truth: UI_PREF_KEYS (showSource/showReport/copyAssistant/
+  copyUser/showDelete/showTools/voiceInput) + CODE_DEFAULTS + UI_PREF_SYSTEM_GATE ({voiceInput}) +
+  `resolveUiPrefs` (gates at READ time: a disabled feature -> effective false + locked, WITHOUT deleting the
+  user's override → re-enabling restores it). Schema (additive): profiles.uiPrefs + appMeta.uiPrefDefaults +
+  appMeta.featuresEnabled; legacy profiles.showTools/voiceInput kept READ-ONLY (resolver fallback).
+  SINGLE WRITE PATH: `me.setUiPref` (removed setShowTools/setVoiceInput; repointed the composer "Outils"
+  toggle + UserMenu). The SERVER reject in setUiPref is the real gate (greying is cosmetic): enabling a gated
+  feature throws unless featuresEnabled[gate]. getMe returns `ui` {effective, locked, userOverrides, defaults,
+  featuresEnabled}. Admin: `admin.setUiPrefDefault` + `admin.setFeatureEnabled`. Frontend: PreferencesProvider
+  (app-level, NOT in the dropdown — the FeedbackDialog unmount lesson) + usePreferences(); UserMenu drops the
+  voice item, adds "Préférences…"; ConvexChat provides UiPrefsContext + renders action-bar buttons (copy/
+  source/report/delete) + the composer mic conditionally on ui.effective; admin "Préférences UI" tab
+  (UiPrefsTab: system-enable toggles + per-pref default Select Activé/Désactivé/Hérité). Tests: 4 (resolver
+  order, gate-at-read-time preserves override, gated-default-locked, setUiPref server gate) → vitest 139.
+  Live-verified: Préférences opens from the menu AND stays; 7 toggles; voiceInput greyed "Non activé" +
+  disabled while system off; toggling showSource off → the </> button disappears reactively → Réinitialiser
+  restores it; admin tab enables voiceInput → user row un-greys → re-disabled (voice stays off, pipeline not
+  wired). Files: convex/lib/uiPrefs.ts (+ uiPrefs.test.ts), schema.ts, me.ts, admin.ts, PreferencesDialog.tsx,
+  UserMenu.tsx, ConvexChat.tsx, admin/UiPrefsTab.tsx, AdminSettings.tsx, router.tsx, convexChat.css. NEVER
+  committed. ADVISOR-CAUGHT latent bug fixed: PreferencesProvider is mounted ABOVE the router (so the menu
+  closing can't unmount the dialog) → its getMe also rendered on the SIGNED-OUT screen, where requireUserId
+  throws → guarded with `useQuery(api.me.getMe, open ? {} : "skip")` (only subscribes when the dialog is open
+  = authenticated; Convex dedupes with the chrome's getMe → opens instantly, no Chargement flash). Verified.
   **#53 INCREMENT 3 — COMPOSER POLISH BUILT + LIVE-VERIFIED 2026-06-05 (pure frontend, no live agent):**
   via assistant-ui 0.14 primitives in `ConvexChat.tsx` + `convexChat.css`: (1) EMPTY STATE
   (`ThreadPrimitive.Empty`) — OC avatar + "Comment puis-je aider ?" + 4 suggestion cards

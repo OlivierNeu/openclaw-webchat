@@ -94,7 +94,26 @@ export default defineSchema({
     // OPTIONAL (additive); absent => OFF (the mic is hidden by default — the
     // talk.* voice pipeline is not wired yet, so the control only appears when a
     // user explicitly opts in). Feature-flag for the composer mic.
+    // LEGACY: superseded by `uiPrefs.voiceInput` (read-fallback only; the UI
+    // preferences module is the single writer now — see convex/lib/uiPrefs.ts).
     voiceInput: v.optional(v.boolean()),
+
+    // Unified per-user UI preferences (the interface-config module). Each toggle
+    // is OPTIONAL → undefined means "inherit the admin default / code default".
+    // The SINGLE write path is `me.setUiPref`; `getMe` resolves via resolveUiPrefs
+    // (user override -> legacy field -> admin default -> code default, with a
+    // system gate). Keys MUST match convex/lib/uiPrefs.UI_PREF_KEYS.
+    uiPrefs: v.optional(
+      v.object({
+        showSource: v.optional(v.boolean()),
+        showReport: v.optional(v.boolean()),
+        copyAssistant: v.optional(v.boolean()),
+        copyUser: v.optional(v.boolean()),
+        showDelete: v.optional(v.boolean()),
+        showTools: v.optional(v.boolean()),
+        voiceInput: v.optional(v.boolean()),
+      }),
+    ),
 
     // --- Routing (valves) ---------------------------------------------------
     // Group membership drives routing by default (see `groups`). A per-user
@@ -160,6 +179,27 @@ export default defineSchema({
       v.union(v.literal("light"), v.literal("dark"), v.literal("system")),
     ),
     defaultThemeName: v.optional(v.string()),
+    // Admin-defined DEFAULTS for the UI preferences module (inherited by users
+    // who have no override). Same keys as profiles.uiPrefs / UI_PREF_KEYS.
+    uiPrefDefaults: v.optional(
+      v.object({
+        showSource: v.optional(v.boolean()),
+        showReport: v.optional(v.boolean()),
+        copyAssistant: v.optional(v.boolean()),
+        copyUser: v.optional(v.boolean()),
+        showDelete: v.optional(v.boolean()),
+        showTools: v.optional(v.boolean()),
+        voiceInput: v.optional(v.boolean()),
+      }),
+    ),
+    // System-level feature enablement. A gated UI pref (e.g. voiceInput) stays
+    // locked/greyed and cannot be turned on by users until the admin enables the
+    // underlying system here. Absent => not enabled.
+    featuresEnabled: v.optional(
+      v.object({
+        voiceInput: v.optional(v.boolean()),
+      }),
+    ),
   }).index("by_key", ["key"]),
 
   // Append-only audit trail for cross-identity (impersonation) actions. Records

@@ -6,7 +6,14 @@ import {
   ThreadPrimitive,
   useMessage,
 } from "@assistant-ui/react";
-import { useEffect, useRef, useState, type ReactNode } from "react";
+import {
+  createContext,
+  useContext,
+  useEffect,
+  useRef,
+  useState,
+  type ReactNode,
+} from "react";
 import { useQuery, useMutation, useConvex } from "convex/react";
 import { api } from "./convexApi";
 import type { Id } from "./convexApi";
@@ -54,26 +61,59 @@ export interface ConvexChatProps {
   chatId: ConvexId<"chats"> | null;
 }
 
+// Effective per-user UI toggles, resolved by getMe.ui (see convex/lib/uiPrefs).
+// Provided via context so the deep action-bar buttons render conditionally
+// without prop-drilling through assistant-ui's message primitives.
+export type UiEffective = {
+  showSource: boolean;
+  showReport: boolean;
+  copyAssistant: boolean;
+  copyUser: boolean;
+  showDelete: boolean;
+  showTools: boolean;
+  voiceInput: boolean;
+};
+const DEFAULT_UI: UiEffective = {
+  showSource: true,
+  showReport: true,
+  copyAssistant: true,
+  copyUser: true,
+  showDelete: true,
+  showTools: true,
+  voiceInput: false,
+};
+const UiPrefsContext = createContext<UiEffective>(DEFAULT_UI);
+function useUiPrefs(): UiEffective {
+  return useContext(UiPrefsContext);
+}
+
 export function ConvexChat({ chatId }: ConvexChatProps) {
   const runtime = useConvexChatRuntime({ chatId });
-  // Per-user "show tool cards" preference (reactive). Absent => shown.
+  // Resolved UI preferences (reactive): the single source for which interface
+  // elements render. The composer "Outils" quick toggle writes through the same
+  // single path (setUiPref), so it stays consistent with the Préférences panel.
   const me = useQuery(api.me.getMe);
-  const showTools = me?.showTools ?? true;
-  const setShowTools = useMutation(api.me.setShowTools);
+  const ui = (me?.ui?.effective as UiEffective | undefined) ?? DEFAULT_UI;
+  const showTools = ui.showTools;
+  const setUiPref = useMutation(api.me.setUiPref);
 
   return (
     <AssistantRuntimeProvider runtime={runtime}>
-      <div className={`oc-chat${showTools ? "" : " oc-hide-tools"}`}>
-        {chatId ? (
-          <ChatThread
-            chatId={chatId}
-            showTools={showTools}
-            onToggleTools={() => void setShowTools({ show: !showTools })}
-          />
-        ) : (
-          <div className="oc-empty">Select or create a chat to begin.</div>
-        )}
-      </div>
+      <UiPrefsContext.Provider value={ui}>
+        <div className={`oc-chat${showTools ? "" : " oc-hide-tools"}`}>
+          {chatId ? (
+            <ChatThread
+              chatId={chatId}
+              showTools={showTools}
+              onToggleTools={() =>
+                void setUiPref({ key: "showTools", value: !showTools })
+              }
+            />
+          ) : (
+            <div className="oc-empty">Select or create a chat to begin.</div>
+          )}
+        </div>
+      </UiPrefsContext.Provider>
     </AssistantRuntimeProvider>
   );
 }
@@ -669,6 +709,7 @@ function SourceToggleButton({
 // delete (deleting a user turn removes it + every following turn — confirmed).
 function UserMessage() {
   const [showSource, setShowSource] = useState(false);
+  const ui = useUiPrefs();
   return (
     <MessagePrimitive.Root className="oc-msg oc-msg--user">
       <div className="oc-msg__col oc-msg__col--user">
@@ -684,20 +725,24 @@ function UserMessage() {
           hideWhenRunning
           autohide="not-last"
         >
-          <ActionBarPrimitive.Copy className="oc-iconbtn" title="Copier le message">
-            <MessagePrimitive.If copied>
-              <IconCheck />
-            </MessagePrimitive.If>
-            <MessagePrimitive.If copied={false}>
-              <IconCopy />
-            </MessagePrimitive.If>
-          </ActionBarPrimitive.Copy>
-          <SourceToggleButton
-            active={showSource}
-            onToggle={() => setShowSource((s) => !s)}
-          />
-          <FeedbackButton />
-          <DeleteMessageButton kind="user" />
+          {ui.copyUser ? (
+            <ActionBarPrimitive.Copy className="oc-iconbtn" title="Copier le message">
+              <MessagePrimitive.If copied>
+                <IconCheck />
+              </MessagePrimitive.If>
+              <MessagePrimitive.If copied={false}>
+                <IconCopy />
+              </MessagePrimitive.If>
+            </ActionBarPrimitive.Copy>
+          ) : null}
+          {ui.showSource ? (
+            <SourceToggleButton
+              active={showSource}
+              onToggle={() => setShowSource((s) => !s)}
+            />
+          ) : null}
+          {ui.showReport ? <FeedbackButton /> : null}
+          {ui.showDelete ? <DeleteMessageButton kind="user" /> : null}
         </ActionBarPrimitive.Root>
       </div>
     </MessagePrimitive.Root>
@@ -709,6 +754,7 @@ function UserMessage() {
 // the identity; RunStatus shows the live status (and hides itself when done).
 function AssistantMessage() {
   const [showSource, setShowSource] = useState(false);
+  const ui = useUiPrefs();
   return (
     <MessagePrimitive.Root className="oc-msg oc-msg--assistant">
       <div className="oc-msg__avatar" aria-hidden>
@@ -733,20 +779,24 @@ function AssistantMessage() {
           hideWhenRunning
           autohide="not-last"
         >
-          <ActionBarPrimitive.Copy className="oc-iconbtn" title="Copier la réponse">
-            <MessagePrimitive.If copied>
-              <IconCheck />
-            </MessagePrimitive.If>
-            <MessagePrimitive.If copied={false}>
-              <IconCopy />
-            </MessagePrimitive.If>
-          </ActionBarPrimitive.Copy>
-          <SourceToggleButton
-            active={showSource}
-            onToggle={() => setShowSource((s) => !s)}
-          />
-          <FeedbackButton />
-          <DeleteMessageButton kind="assistant" />
+          {ui.copyAssistant ? (
+            <ActionBarPrimitive.Copy className="oc-iconbtn" title="Copier la réponse">
+              <MessagePrimitive.If copied>
+                <IconCheck />
+              </MessagePrimitive.If>
+              <MessagePrimitive.If copied={false}>
+                <IconCopy />
+              </MessagePrimitive.If>
+            </ActionBarPrimitive.Copy>
+          ) : null}
+          {ui.showSource ? (
+            <SourceToggleButton
+              active={showSource}
+              onToggle={() => setShowSource((s) => !s)}
+            />
+          ) : null}
+          {ui.showReport ? <FeedbackButton /> : null}
+          {ui.showDelete ? <DeleteMessageButton kind="assistant" /> : null}
         </ActionBarPrimitive.Root>
       </div>
     </MessagePrimitive.Root>
@@ -770,9 +820,9 @@ function Composer({
   showTools: boolean;
   onToggleTools: () => void;
 }) {
-  // Voice-input feature flag (default off): the mic only renders when the user
-  // opted in via the account menu. Read here directly (Convex dedupes getMe).
-  const voiceInput = useQuery(api.me.getMe)?.voiceInput ?? false;
+  // Voice-input feature flag: resolved via the UI-preferences module (gated by
+  // system enablement + the user's override). The mic only renders when true.
+  const voiceInput = useUiPrefs().voiceInput;
   // Unified composer card (per Olivier's reference): the input sits ON TOP, with
   // a single action bar BELOW it — attach (+) and the tools toggle on the left,
   // the circular send (or stop while running) on the right. The CARD owns the

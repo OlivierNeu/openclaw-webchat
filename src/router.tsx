@@ -64,6 +64,7 @@ import { KpiTab } from "./chat/admin/KpiTab";
 import { AnomaliesTab } from "./chat/admin/AnomaliesTab";
 import { IntegrationsTab } from "./chat/admin/IntegrationsTab";
 import { FeedbacksTab } from "./chat/admin/FeedbacksTab";
+import { UiPrefsTab } from "./chat/admin/UiPrefsTab";
 import { ThemeShowroom } from "./chat/ThemeShowroom";
 import {
   tracesSearchSchema,
@@ -473,6 +474,8 @@ function SettingsParamlessScreen() {
       return <ThemeShowroom />;
     case "feedbacks":
       return <FeedbacksTab />;
+    case "uiprefs":
+      return <UiPrefsTab />;
     case "roles":
     default:
       return <RolesTab />;
