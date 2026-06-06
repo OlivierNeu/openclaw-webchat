@@ -13,7 +13,10 @@
 // D3 (secrets): credentials come from OpikConfig (deployment env), used ONLY to
 // build the auth headers; never in the body, never logged.
 //
-// Endpoint: POST {baseUrl}/api/v1/private/traces/batch   body { traces: [...] }
+// Endpoint: POST {baseUrl}/v1/private/traces/batch   body { traces: [...] }
+// NOTE: baseUrl already ends in the API root (cloud default `.../opik/api`; OSS
+// convention `.../api`), so the path is `/v1/private/...` — NOT `/api/v1/...`
+// (a doubled `/api` 404s; caught by the live shipping probe 2026-06-06).
 // Auth:     Authorization: Bearer <apiKey>   (+ optional Comet-Workspace header)
 
 import { OpikConfig } from "./config";
@@ -22,20 +25,23 @@ import {
   SendResult,
   SendOptions,
   sha256Hex,
-  uuidFromHex,
+  uuidV7FromHex,
   msToIso,
   fallbackCorrelationId,
 } from "./shared";
 
-// The Opik `TraceWrite` subset we emit. `metadata` holds only non-PHI fields.
+// The Opik `TraceWrite` subset we emit. snake_case — the Opik REST API field
+// names (camelCase 422s: `start_time` is the only REQUIRED field and was missing
+// when we sent `startTime`; caught live 2026-06-06). `metadata` holds only
+// non-PHI fields.
 export type OpikTrace = {
   id: string; // deterministic UUID from correlationId
   name: string; // = event.kind
-  startTime: string; // ISO (required)
-  endTime: string; // ISO (start + latency, or start)
+  start_time: string; // ISO (required)
+  end_time: string; // ISO (start + latency, or start)
   metadata: Record<string, string | number>;
   tags: string[];
-  threadId?: string; // chat id for multi-turn grouping (non-PHI id)
+  thread_id?: string; // chat id for multi-turn grouping (non-PHI id)
 };
 
 export type OpikBatchPayload = {
@@ -51,7 +57,12 @@ export async function mapEventToVendor(
   event: ShippableEvent,
 ): Promise<OpikTrace> {
   const correlationId = fallbackCorrelationId(event);
-  const id = uuidFromHex(await sha256Hex(`opik:trace:${correlationId}`));
+  // Opik requires a v7 (time-ordered) trace id; use event.at as the timestamp so
+  // the id stays deterministic (idempotent retries) AND valid.
+  const id = uuidV7FromHex(
+    await sha256Hex(`opik:trace:${correlationId}`),
+    event.at,
+  );
 
   const startMs = event.at;
   const endMs = startMs + (event.latencyMs !== undefined ? event.latencyMs : 0);
@@ -80,12 +91,12 @@ export async function mapEventToVendor(
   const trace: OpikTrace = {
     id,
     name: event.kind,
-    startTime: msToIso(startMs),
-    endTime: msToIso(endMs),
+    start_time: msToIso(startMs),
+    end_time: msToIso(endMs),
     metadata,
     tags,
   };
-  if (event.chatId !== undefined) trace.threadId = event.chatId;
+  if (event.chatId !== undefined) trace.thread_id = event.chatId;
   return trace;
 }
 
@@ -128,7 +139,7 @@ export async function send(
 
   try {
     const res = await fetchImpl(
-      `${config.baseUrl}/api/v1/private/traces/batch`,
+      `${config.baseUrl}/v1/private/traces/batch`,
       {
         method: "POST",
         headers,

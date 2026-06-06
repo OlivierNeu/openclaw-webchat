@@ -83,6 +83,26 @@ export function uuidFromHex(hex: string): string {
   ].join("-");
 }
 
+/**
+ * Build a deterministic UUID **version 7** from a hash hex + a timestamp (ms).
+ * Opik REQUIRES trace ids to be v7 ("Trace id must be a version 7 UUID" — caught
+ * by the live shipping probe). v7 layout: 48-bit unix-ms prefix, version nibble
+ * 7, variant 10xx, the rest from the hash. Using the event's own `at` as the
+ * timestamp keeps the id meaningful AND deterministic (same hash+at → same id,
+ * so retries are idempotent).
+ */
+export function uuidV7FromHex(hex: string, ms: number): string {
+  const h = hex.padEnd(32, "0").slice(0, 32);
+  const ts = Math.max(0, Math.trunc(ms)).toString(16).padStart(12, "0").slice(-12);
+  return [
+    ts.slice(0, 8), // time_high (32 bits of the 48-bit ms)
+    ts.slice(8, 12), // time_low (16 bits)
+    `7${h.slice(0, 3)}`, // version 7 + 12 bits from hash
+    `${variantNibble(h.slice(3, 4))}${h.slice(4, 7)}`, // variant + 12 bits
+    h.slice(7, 19), // 48 bits from hash
+  ].join("-");
+}
+
 /** Map an arbitrary hex nibble onto the RFC-4122 variant range [8,9,a,b]. */
 function variantNibble(n: string): string {
   const map: Record<string, string> = {

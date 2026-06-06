@@ -18,7 +18,7 @@
 //     /settings/$tab        shared route for the 4 PARAMLESS tabs
 //                           (roles/integrations/instances/theme)
 
-import { useEffect, useRef } from "react";
+import { useEffect, useRef, useState } from "react";
 import {
   Authenticated,
   AuthLoading,
@@ -118,19 +118,34 @@ function RootShell() {
 
 function SignIn() {
   const { signIn } = useAuthActions();
-  // Google is the production method. "anonymous" is a DEV-ONLY provider (enabled
-  // on the deployment via OPENCLAW_ENABLE_ANON_AUTH=1) so the chat can be
-  // exercised locally without OAuth credentials.
+  const [error, setError] = useState<string | null>(null);
+  // Google is the production method, restricted server-side to the allowed email
+  // domains (convex/lib/authDomains). "anonymous" is a DEV-ONLY provider (enabled
+  // on the deployment via OPENCLAW_ENABLE_ANON_AUTH=1).
+  async function google() {
+    setError(null);
+    try {
+      await signIn("google");
+    } catch {
+      // A disallowed-domain account is rejected server-side; surface a clear
+      // message instead of a silent failure. (Exact surfacing of the OAuth
+      // redirect error is verified on the live Google deployment.)
+      setError(
+        "Connexion refusée. Comptes autorisés : @lacneu.com et @ataraxis-coaching.com.",
+      );
+    }
+  }
   return (
     <div className="oc-signin">
       <h1 className="oc-signin__title">OpenClaw webchat</h1>
-      <button
-        type="button"
-        className="oc-signin__btn"
-        onClick={() => void signIn("google")}
-      >
+      <button type="button" className="oc-signin__btn" onClick={() => void google()}>
         Sign in with Google
       </button>
+      <p className="oc-signin__hint">
+        Réservé aux comptes <strong>@lacneu.com</strong> et{" "}
+        <strong>@ataraxis-coaching.com</strong>.
+      </p>
+      {error ? <p className="oc-signin__error">{error}</p> : null}
       <button
         type="button"
         className="oc-signin__btn oc-signin__btn--dev"

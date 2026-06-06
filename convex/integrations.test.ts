@@ -184,17 +184,17 @@ describe("opik mapper", () => {
   test("maps a redacted event to a TraceWrite; metadata only, no secret/PHI", async () => {
     const trace = await opik.mapEventToVendor(SAMPLE_EVENT);
 
-    // UUID-shaped id, deterministic from correlationId.
+    // UUID v7 id (Opik requires version 7), deterministic from correlationId+at.
     expect(trace.id).toMatch(
-      /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/,
+      /^[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/,
     );
     const again = await opik.mapEventToVendor({ ...SAMPLE_EVENT, _id: "x" });
     expect(again.id).toEqual(trace.id);
 
     expect(trace.name).toBe("api.call");
-    expect(trace.startTime).toBe("2024-06-02T14:00:00.000Z");
-    expect(trace.endTime).toBe("2024-06-02T14:00:00.042Z");
-    expect(trace.threadId).toBe("chat_abc");
+    expect(trace.start_time).toBe("2024-06-02T14:00:00.000Z");
+    expect(trace.end_time).toBe("2024-06-02T14:00:00.042Z");
+    expect(trace.thread_id).toBe("chat_abc");
 
     // Metadata is non-PHI only.
     expect(trace.metadata.correlationId).toBe("corr_777");
@@ -275,9 +275,9 @@ describe("opik send()", () => {
     expect(res.status).toBe(204);
 
     const { url, init } = calls[0]!;
-    expect(url).toBe(
-      "https://www.comet.com/opik/api/api/v1/private/traces/batch",
-    );
+    // baseUrl already ends in `/api`; path is `/v1/private/...` (NOT `/api/v1/...`
+    // — the doubled `/api` 404'd live; fixed 2026-06-06).
+    expect(url).toBe("https://www.comet.com/opik/api/v1/private/traces/batch");
     const headers = init.headers as Record<string, string>;
     expect(headers.Authorization).toBe(`Bearer ${OPIK_KEY}`);
     expect(headers["Comet-Workspace"]).toBe("my-workspace");

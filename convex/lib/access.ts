@@ -18,6 +18,7 @@
 import { getAuthUserId } from "@convex-dev/auth/server";
 import { Doc, Id } from "../_generated/dataModel";
 import { MutationCtx, QueryCtx } from "../_generated/server";
+import { emailDomainAllowed } from "./authDomains";
 
 export type Role = "pending" | "user" | "admin";
 const APP_META_KEY = "singleton";
@@ -122,6 +123,18 @@ export async function ensureProfile(ctx: MutationCtx): Promise<Id<"users">> {
   // Provisions the CALLER's OWN profile -> must be the REAL identity, never the
   // impersonated one (otherwise an impersonating admin would touch the target).
   const userId = await rawUserId(ctx);
+
+  // AUTHORITATIVE email-domain gate (defense-in-depth behind auth.ts profile()).
+  // An OAuth identity carries an email → it MUST be in an allowed domain; the
+  // dev Anonymous identity has NO email → exempt (dev-only). Fail-closed. Runs on
+  // BOTH the existing-profile and new-profile paths, so a profile that somehow
+  // predates the gate (or slipped past profile()) is still refused.
+  const identity = await ctx.auth.getUserIdentity();
+  const email = (identity?.email as string | undefined) ?? undefined;
+  if (email !== undefined && !emailDomainAllowed(email)) {
+    throw new Error("Forbidden: email domain not allowed");
+  }
+
   const existing = await getProfile(ctx, userId);
   if (existing !== null) {
     // Backfill a role-less legacy row to "pending" (least privilege) so the
@@ -154,9 +167,7 @@ export async function ensureProfile(ctx: MutationCtx): Promise<Id<"users">> {
     role = "pending";
   }
 
-  // Pull display fields from the auth identity (non-secret).
-  const identity = await ctx.auth.getUserIdentity();
-  const email = identity?.email ?? undefined;
+  // Display name from the auth identity (email already resolved + gated above).
   const name = (identity?.name as string | undefined) ?? undefined;
 
   await ctx.db.insert("profiles", {

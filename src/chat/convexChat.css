@@ -40,6 +40,24 @@
   background: var(--secondary);
   color: var(--secondary-foreground);
 }
+.oc-signin__hint {
+  margin: -0.4rem 0 0;
+  max-width: 22rem;
+  text-align: center;
+  font-size: 0.82rem;
+  color: var(--muted-foreground);
+}
+.oc-signin__error {
+  margin: 0;
+  max-width: 22rem;
+  text-align: center;
+  font-size: 0.85rem;
+  padding: 0.5rem 0.75rem;
+  border-radius: var(--radius-md);
+  background: color-mix(in oklch, var(--destructive, #e5484d) 14%, var(--background));
+  border: 1px solid color-mix(in oklch, var(--destructive, #e5484d) 45%, var(--border));
+  color: var(--foreground);
+}
 
 /* App shell: global top bar + workspace (sidebar | main). All colors come from
    shadcn tokens so light/dark stay coherent — no hardcoded hex. */

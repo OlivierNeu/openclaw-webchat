@@ -30,6 +30,7 @@ import type * as lib_access from "../lib/access.js";
 import type * as lib_apiAuth from "../lib/apiAuth.js";
 import type * as lib_apikeys from "../lib/apikeys.js";
 import type * as lib_audit from "../lib/audit.js";
+import type * as lib_authDomains from "../lib/authDomains.js";
 import type * as lib_filters from "../lib/filters.js";
 import type * as lib_rbac from "../lib/rbac.js";
 import type * as lib_search from "../lib/search.js";
@@ -75,6 +76,7 @@ declare const fullApi: ApiFromModules<{
   "lib/apiAuth": typeof lib_apiAuth;
   "lib/apikeys": typeof lib_apikeys;
   "lib/audit": typeof lib_audit;
+  "lib/authDomains": typeof lib_authDomains;
   "lib/filters": typeof lib_filters;
   "lib/rbac": typeof lib_rbac;
   "lib/search": typeof lib_search;

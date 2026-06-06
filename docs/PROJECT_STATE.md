@@ -2,8 +2,8 @@
 
 **Purpose of this file:** the single, durable, detailed snapshot to RESUME from
 after a context compaction. Read this first. It is kept current as work lands.
-Last verified-green: **2026-06-06** — `tsc src` 0, `tsc convex` 0, `vitest` 141
-(convex+routing, incl. UI-9 feedback 12 + UI-prefs 5 + integrations 17) + mcp 36, `vite build` OK.
+Last verified-green: **2026-06-06** — `tsc src` 0, `tsc convex` 0, `vitest` 149
+(convex+routing, incl. UI-9 feedback 12 + UI-prefs 5 + integrations 17 + authDomains 8) + mcp 36, `vite build` OK.
 
 Companion docs (authoritative for their area): `OBSERVABILITY_PLATFORM_PLAN.md`
 (contract), `OBSERVABILITY_RESEARCH.md`, `OBSERVABILITY_REVIEW.md` (28-item
@@ -935,6 +935,45 @@ row status **complete** ("Bridge validé, je te reçois bien."). CAPTURED LIVE G
   render with correct badges; writing Langfuse host persists to integrationConfig; clearing falls back. Files:
   schema.ts, integrations/config.ts, integrations/ship.ts, integrations/status.ts, admin.ts, integrations.test.ts,
   admin/IntegrationsTab.tsx, convexChat.css, docs/VOICE_INTEGRATION_RESEARCH.md. NEVER committed.
+  **TRACE-SHIPPING LIVE VALIDATION (Olivier set the Convex env keys) — DONE 2026-06-06:** "configured" ≠
+  "working" — a live flush caught real bugs the green badge masked. Olivier set LANGFUSE_PUBLIC/SECRET_KEY +
+  OPIK_API_KEY via `convex env set` (badges → actif). KEY INSIGHT: the first configured flush had `stored
+  cursor === null` → it INITIALIZED the cursor to `now` WITHOUT shipping (`reason:"initialized"`) → the
+  advanced cursor was NOT proof of a successful ship. Conclusive validation = seed a fresh probe event (at >
+  cursor) → flush → assert 2xx. The probe (`observability:recordEvent` via `convex run`, kind
+  "test.shipping_probe", metadata-only) revealed: **OPIK was broken by 3 code bugs** — (1) URL doubled `/api`
+  (`{base}/api/v1/...` where base already ends `/opik/api`) → 404; (2) payload camelCase (`startTime`) vs
+  Opik's snake_case (`start_time` — only required field) → 422; (3) trace `id` was UUID v4 but Opik requires
+  **UUID v7** ("Trace id must be a version 7 UUID") → 400. Fixed: opik.ts path `/v1/private/traces/batch`,
+  snake_case (start_time/end_time/thread_id), new `shared.uuidV7FromHex(hex, ms)` (deterministic v7 using
+  event.at). **OPIK NOW LIVE-VALIDATED: status 204, shipped 1, cursor advanced.** **LANGFUSE 403 is NOT our
+  code** — the OTLP endpoint + Basic auth are correct; the body said "Ingestion suspended: Usage threshold
+  exceeded. Please upgrade your plan." = the user's Langfuse account QUOTA (account-side, upgrade/reset). Built
+  a reusable pre-flight: `scripts/validate-trace-shipping.mjs` (seed probe → flush → assert 2xx PER VENDOR,
+  exit 1 on any configured-vendor failure; unconfigured = skip). NAS DE-RISK: a green run here only proves
+  keys+code on THIS deployment — env does NOT transfer; **run the script ON the NAS after setting its env**
+  (egress/firewall/TLS can differ). Files: integrations/opik.ts, integrations/langfuse.ts (diagnostics added
+  then REVERTED), integrations/shared.ts (uuidV7FromHex), integrations.test.ts (snake_case + v7 + URL),
+  scripts/validate-trace-shipping.mjs. vitest 141. NEVER committed.
+  **AUTH — EMAIL-DOMAIN-RESTRICTED GOOGLE SIGN-IN (Olivier) — BUILT + UNIT-VERIFIED 2026-06-06 (live-Google
+  pending):** sign-in restricted to Google accounts whose VERIFIED email is in an allowed domain (default
+  `lacneu.com`, `ataraxis-coaching.com`; override `AUTH_ALLOWED_EMAIL_DOMAINS="a.com,b.com"`). Two gates:
+  (1) `convex/auth.ts` Google `profile()` — rejects in the OAuth flow if `email_verified` is not truthy or the
+  domain isn't allowed; (2) **AUTHORITATIVE** gate in `lib/access.ensureProfile` (the single role-writer, runs
+  on every provision, convex-testable) — an identity WITH an email must be allowlisted else throws; the dev
+  Anonymous identity (NO email) is EXEMPT (so local dev still works). `convex/lib/authDomains.ts` =
+  shared pure helpers: `emailDomainAllowed` (EXACT post-last-`@` match — rejects evil-lacneu.com /
+  lacneu.com.evil.com; lowercased+trimmed), `emailVerifiedTruthy` (bool or "true"), `allowedEmailDomains`
+  (fail-closed: unset env → the 2 defaults; logged once at auth load so a typo'd env is visible). Sign-in
+  screen (router.tsx SignIn): static hint "@lacneu.com / @ataraxis-coaching.com" + try/catch error message.
+  Tests: authDomains 8 — incl. the SECURITY property "disallowed-domain identity → bootstrap throws, NO
+  profile/role created" + anon-exempt + look-alike rejection + env override → vitest 149. NOT live-verifiable
+  locally (Google OAuth needs a live deployment + AUTH_GOOGLE_ID/SECRET; locally we're on Anonymous). NAS
+  PRE-FLIGHT (gating "done"): with Google creds set, confirm an allowed-domain account signs in AND a
+  personal gmail is REJECTED with a comprehensible message. Files: auth.ts, lib/authDomains.ts (+ .test.ts),
+  lib/access.ts (ensureProfile gate), router.tsx (SignIn), convexChat.css. NEVER committed. OPEN: Olivier said
+  "modes d'authentification" (plural) — confirm whether passwordless magic-link email (same domain gate) is
+  also wanted, or Google-only.
   **#53 INCREMENT 3 — COMPOSER POLISH BUILT + LIVE-VERIFIED 2026-06-05 (pure frontend, no live agent):**
   via assistant-ui 0.14 primitives in `ConvexChat.tsx` + `convexChat.css`: (1) EMPTY STATE
   (`ThreadPrimitive.Empty`) — OC avatar + "Comment puis-je aider ?" + 4 suggestion cards
