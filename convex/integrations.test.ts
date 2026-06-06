@@ -51,12 +51,14 @@ const OPIK_KEY = "opik-API-KEY-SECRET-VALUE";
 
 const LF_CONFIG = {
   configured: true,
+  enabled: true,
   host: "https://cloud.langfuse.com",
   publicKey: LF_PUBLIC,
   secretKey: LF_SECRET,
 };
 const OPIK_CONFIG = {
   configured: true,
+  enabled: true,
   baseUrl: "https://www.comet.com/opik/api",
   apiKey: OPIK_KEY,
   workspace: "my-workspace",
@@ -84,6 +86,46 @@ describe("config helpers", () => {
     // The edge-runtime test has no vendor env set -> both report not configured.
     expect(langfuseConfig().configured).toBe(false);
     expect(opikConfig().configured).toBe(false);
+  });
+
+  test("override precedence: Convex value -> env -> default; empty does NOT clobber env", () => {
+    const prevHost = process.env.LANGFUSE_HOST;
+    const prevBase = process.env.OPIK_BASE_URL;
+    try {
+      // No env, no override -> built-in default.
+      delete process.env.LANGFUSE_HOST;
+      expect(langfuseConfig().host).toBe("https://cloud.langfuse.com");
+      // A non-empty Convex override wins over the default.
+      expect(langfuseConfig({ host: "https://lf.internal" }).host).toBe(
+        "https://lf.internal",
+      );
+      // Env set + EMPTY override -> env is used (empty must not clobber a
+      // deployment that sets LANGFUSE_HOST). This is the load-bearing case.
+      process.env.LANGFUSE_HOST = "https://env.langfuse";
+      expect(langfuseConfig({ host: "" }).host).toBe("https://env.langfuse");
+      // A non-empty override still wins over env.
+      expect(langfuseConfig({ host: "https://override" }).host).toBe(
+        "https://override",
+      );
+
+      // Opik baseUrl + workspace precedence.
+      delete process.env.OPIK_BASE_URL;
+      expect(opikConfig().baseUrl).toBe("https://www.comet.com/opik/api");
+      expect(opikConfig({ baseUrl: "https://opik.internal" }).baseUrl).toBe(
+        "https://opik.internal",
+      );
+      expect(opikConfig({ workspace: "team-a" }).workspace).toBe("team-a");
+
+      // `enabled`: undefined => enabled; false => paused.
+      expect(langfuseConfig().enabled).toBe(true);
+      expect(langfuseConfig({ enabled: false }).enabled).toBe(false);
+      expect(opikConfig({ enabled: false }).enabled).toBe(false);
+    } finally {
+      if (prevHost === undefined) delete process.env.LANGFUSE_HOST;
+      else process.env.LANGFUSE_HOST = prevHost;
+      if (prevBase === undefined) delete process.env.OPIK_BASE_URL;
+      else process.env.OPIK_BASE_URL = prevBase;
+    }
   });
 });
 

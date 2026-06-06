@@ -11,10 +11,38 @@
 //   - Langfuse: LANGFUSE_PUBLIC_KEY, LANGFUSE_SECRET_KEY, LANGFUSE_HOST
 //   - Opik:     OPIK_API_KEY, OPIK_WORKSPACE, OPIK_BASE_URL
 
+import type { QueryCtx } from "../_generated/server";
+
 // Default vendor hosts when the *_HOST / *_BASE_URL env is unset.
 const DEFAULT_LANGFUSE_HOST = "https://cloud.langfuse.com";
 // Comet-hosted Opik cloud API base (self-host overrides via OPIK_BASE_URL).
 const DEFAULT_OPIK_BASE_URL = "https://www.comet.com/opik/api";
+
+// Admin-set NON-SECRET overrides from the integrationConfig singleton. Resolution
+// precedence everywhere below: override (Convex) -> env -> built-in default. This
+// preserves deployments that set LANGFUSE_HOST/OPIK_BASE_URL in env (an empty
+// form field must NOT clobber them — only a non-empty Convex value overrides).
+export type LangfuseOverride = { host?: string; enabled?: boolean };
+export type OpikOverride = {
+  baseUrl?: string;
+  workspace?: string;
+  enabled?: boolean;
+};
+
+/** Read the integrationConfig singleton (non-secret overrides) or null. */
+export async function readIntegrationConfig(ctx: QueryCtx) {
+  return await ctx.db
+    .query("integrationConfig")
+    .withIndex("by_key", (q) => q.eq("key", "singleton"))
+    .unique();
+}
+
+function pick(override: string | undefined, env: string | undefined, dflt: string): string {
+  const o = (override ?? "").trim();
+  if (o.length > 0) return o;
+  const e = (env ?? "").trim();
+  return e.length > 0 ? e : dflt;
+}
 
 /**
  * Langfuse config. `configured` is true only when BOTH keys are present (the
@@ -24,19 +52,21 @@ const DEFAULT_OPIK_BASE_URL = "https://www.comet.com/opik/api";
  */
 export type LangfuseConfig = {
   configured: boolean;
+  enabled: boolean; // admin master switch (default true); ship only when enabled
   host: string;
   publicKey: string;
   secretKey: string;
 };
 
-export function langfuseConfig(): LangfuseConfig {
+export function langfuseConfig(override?: LangfuseOverride): LangfuseConfig {
   const publicKey = (process.env.LANGFUSE_PUBLIC_KEY ?? "").trim();
   const secretKey = (process.env.LANGFUSE_SECRET_KEY ?? "").trim();
   const host = stripTrailingSlash(
-    (process.env.LANGFUSE_HOST ?? "").trim() || DEFAULT_LANGFUSE_HOST,
+    pick(override?.host, process.env.LANGFUSE_HOST, DEFAULT_LANGFUSE_HOST),
   );
   return {
     configured: publicKey.length > 0 && secretKey.length > 0,
+    enabled: override?.enabled !== false, // undefined => enabled
     host,
     publicKey,
     secretKey,
@@ -50,19 +80,21 @@ export function langfuseConfig(): LangfuseConfig {
  */
 export type OpikConfig = {
   configured: boolean;
+  enabled: boolean;
   baseUrl: string;
   apiKey: string;
   workspace: string;
 };
 
-export function opikConfig(): OpikConfig {
+export function opikConfig(override?: OpikOverride): OpikConfig {
   const apiKey = (process.env.OPIK_API_KEY ?? "").trim();
-  const workspace = (process.env.OPIK_WORKSPACE ?? "").trim();
+  const workspace = pick(override?.workspace, process.env.OPIK_WORKSPACE, "");
   const baseUrl = stripTrailingSlash(
-    (process.env.OPIK_BASE_URL ?? "").trim() || DEFAULT_OPIK_BASE_URL,
+    pick(override?.baseUrl, process.env.OPIK_BASE_URL, DEFAULT_OPIK_BASE_URL),
   );
   return {
     configured: apiKey.length > 0,
+    enabled: override?.enabled !== false,
     baseUrl,
     apiKey,
     workspace,

@@ -639,6 +639,19 @@
 .oc-uipa__h { font-size: 0.95rem; font-weight: 600; margin: 0 0 0.25rem; }
 .oc-uipa__note { font-size: 0.8rem; color: var(--muted-foreground); margin: 0 0 0.6rem; }
 
+/* ── Admin "Intégrations" tab — config sections */
+.oc-int__section {
+  margin-bottom: 1.4rem;
+  padding-bottom: 1.1rem;
+  border-bottom: 1px solid var(--border);
+}
+.oc-int__section-head { display: flex; align-items: center; gap: 0.6rem; margin-bottom: 0.2rem; }
+.oc-int__fields { display: flex; flex-direction: column; gap: 0.6rem; margin-top: 0.6rem; max-width: 480px; }
+.oc-int__field { display: flex; flex-direction: column; gap: 0.25rem; }
+.oc-int__field-label { font-size: 0.78rem; font-weight: 600; color: var(--foreground); }
+.oc-int__toggle { display: flex; align-items: center; gap: 0.5rem; font-size: 0.85rem; cursor: pointer; }
+.oc-int__toggle code, .oc-uipa__note code { font-family: var(--font-mono); font-size: 0.85em; }
+
 /* ── Raw "Source" view of a message — verbatim, convention-free (no markdown,
    no autocorrect): exactly the stored text, monospace + wrapping + selectable.
    The trust guarantee a user can rely on to confirm what was sent/received. */

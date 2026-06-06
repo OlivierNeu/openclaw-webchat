@@ -16,7 +16,7 @@ import { resolveUiPrefs } from "./lib/uiPrefs";
 const modules = import.meta.glob("./**/*.ts");
 
 describe("resolveUiPrefs", () => {
-  test("resolution order: user > legacy > admin default > code default", () => {
+  test("resolution order: user override > admin default > code default", () => {
     // code default (showSource = true)
     expect(resolveUiPrefs(undefined, undefined, undefined).effective.showSource).toBe(true);
     // admin default overrides code default
@@ -28,16 +28,17 @@ describe("resolveUiPrefs", () => {
       resolveUiPrefs({ showSource: true }, { showSource: false }, undefined).effective
         .showSource,
     ).toBe(true);
-    // legacy top-level field is a read-fallback (no uiPrefs override, no default)
-    expect(
-      resolveUiPrefs(undefined, undefined, undefined, { showTools: false }).effective
-        .showTools,
-    ).toBe(false);
-    // a uiPrefs override beats the legacy field
-    expect(
-      resolveUiPrefs({ showTools: true }, undefined, undefined, { showTools: false })
-        .effective.showTools,
-    ).toBe(true);
+  });
+
+  test("no user override -> the admin default surfaces (pins the legacy-shadow bug)", () => {
+    // The exact reported failure: with an EMPTY user override, the admin default
+    // must apply (a former legacy field must NOT shadow it).
+    expect(resolveUiPrefs({}, { showTools: false }, undefined).effective.showTools).toBe(
+      false,
+    );
+    expect(resolveUiPrefs({}, { showTools: true }, undefined).effective.showTools).toBe(
+      true,
+    );
   });
 
   test("system gate at READ time: disabling hides but preserves the override", () => {

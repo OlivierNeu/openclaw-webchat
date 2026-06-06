@@ -56,15 +56,20 @@ export type ResolvedUiPrefs = {
 };
 
 /**
- * Resolve the effective UI prefs for a user. `legacy` carries the pre-module
- * top-level profile fields (showTools/voiceInput) so existing users keep their
- * choice during the transition (read fallback; never written anymore).
+ * Resolve the effective UI prefs for a user: user override -> admin default ->
+ * code default, with a system gate applied at read time.
+ *
+ * NOTE: the pre-module legacy profile fields (showTools/voiceInput) are
+ * deliberately NOT consulted. They sat at override priority, which silently
+ * SHADOWED the admin default (a user with a stale legacy value would never see a
+ * changed admin default) while the UI still labeled it "default" — confusing and
+ * contrary to "the admin default must apply". Dropping them makes the admin
+ * default surface whenever the user has no explicit override.
  */
 export function resolveUiPrefs(
   userOverrides: UiPrefsObject | undefined,
   adminDefaults: UiPrefsObject | undefined,
   featuresEnabled: FeaturesEnabled | undefined,
-  legacy?: { showTools?: boolean; voiceInput?: boolean },
 ): ResolvedUiPrefs {
   const effective = {} as Record<UiPrefKey, boolean>;
   const locked = {} as Record<UiPrefKey, boolean>;
@@ -76,15 +81,8 @@ export function resolveUiPrefs(
       effective[key] = false; // gated off — but the override below is NOT deleted
       continue;
     }
-    const legacyVal =
-      key === "showTools"
-        ? legacy?.showTools
-        : key === "voiceInput"
-          ? legacy?.voiceInput
-          : undefined;
     effective[key] =
       userOverrides?.[key] ??
-      legacyVal ??
       adminDefaults?.[key] ??
       UI_PREF_CODE_DEFAULTS[key];
   }

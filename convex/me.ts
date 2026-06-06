@@ -89,7 +89,6 @@ export const getMe = query({
         profile?.uiPrefs as UiPrefsObject | undefined,
         meta?.uiPrefDefaults as UiPrefsObject | undefined,
         meta?.featuresEnabled as FeaturesEnabled | undefined,
-        { showTools: profile?.showTools, voiceInput: profile?.voiceInput },
       ),
     };
   },

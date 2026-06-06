@@ -2,8 +2,8 @@
 
 **Purpose of this file:** the single, durable, detailed snapshot to RESUME from
 after a context compaction. Read this first. It is kept current as work lands.
-Last verified-green: **2026-06-06** — `tsc src` 0, `tsc convex` 0, `vitest` 139
-(convex+routing, incl. UI-9 feedback 12 + UI-prefs 4) + mcp 36, `vite build` OK.
+Last verified-green: **2026-06-06** — `tsc src` 0, `tsc convex` 0, `vitest` 141
+(convex+routing, incl. UI-9 feedback 12 + UI-prefs 5 + integrations 17) + mcp 36, `vite build` OK.
 
 Companion docs (authoritative for their area): `OBSERVABILITY_PLATFORM_PLAN.md`
 (contract), `OBSERVABILITY_RESEARCH.md`, `OBSERVABILITY_REVIEW.md` (28-item
@@ -879,8 +879,9 @@ row status **complete** ("Bridge validé, je te reçois bien."). CAPTURED LIVE G
   `convex/lib/uiPrefs.ts` = single source of truth: UI_PREF_KEYS (showSource/showReport/copyAssistant/
   copyUser/showDelete/showTools/voiceInput) + CODE_DEFAULTS + UI_PREF_SYSTEM_GATE ({voiceInput}) +
   `resolveUiPrefs` (gates at READ time: a disabled feature -> effective false + locked, WITHOUT deleting the
-  user's override → re-enabling restores it). Schema (additive): profiles.uiPrefs + appMeta.uiPrefDefaults +
-  appMeta.featuresEnabled; legacy profiles.showTools/voiceInput kept READ-ONLY (resolver fallback).
+  user's override → re-enabling restores it). Resolution: user override -> admin default -> code default.
+  Schema (additive): profiles.uiPrefs + appMeta.uiPrefDefaults + appMeta.featuresEnabled; legacy
+  profiles.showTools/voiceInput are DEPRECATED (no longer read — see the fix below).
   SINGLE WRITE PATH: `me.setUiPref` (removed setShowTools/setVoiceInput; repointed the composer "Outils"
   toggle + UserMenu). The SERVER reject in setUiPref is the real gate (greying is cosmetic): enabling a gated
   feature throws unless featuresEnabled[gate]. getMe returns `ui` {effective, locked, userOverrides, defaults,
@@ -899,6 +900,41 @@ row status **complete** ("Bridge validé, je te reçois bien."). CAPTURED LIVE G
   closing can't unmount the dialog) → its getMe also rendered on the SIGNED-OUT screen, where requireUserId
   throws → guarded with `useQuery(api.me.getMe, open ? {} : "skip")` (only subscribes when the dialog is open
   = authenticated; Convex dedupes with the chrome's getMe → opens instantly, no Chargement flash). Verified.
+  **UI PREFS FIX — legacy field shadowed the admin default (Olivier) — DONE + LIVE-VERIFIED 2026-06-06:**
+  Olivier set the admin default "Cartes d'outils" = Activé but the user dialog showed it UNCHECKED + tagged
+  "DÉFAUT". Root cause: the resolver consulted the LEGACY `profiles.showTools` (the logged-in profile had a
+  stale `false` from the old composer toggle) at OVERRIDE priority → it shadowed the admin default, while the
+  "overridden" check only looked at `uiPrefs` → mislabeled "DÉFAUT". Fix (advisor reversed his own
+  keep-legacy advice once the downside was concrete): the resolver NO LONGER reads the legacy fields —
+  resolution is purely user-override (uiPrefs) -> admin default -> code default. legacy showTools/voiceInput
+  marked DEPRECATED in schema (kept as columns, not read; no migration). Test added (vitest 140):
+  resolveUiPrefs({}, {showTools:false/true}) → false/true (admin default surfaces with no override). Live:
+  signed in as the BROKEN profile (legacy showTools=false) → Cartes d'outils now CHECKED + "défaut" (admin
+  default true surfaces); admin default Désactivé → user unchecked, Activé → user checked (loop proven).
+  NOTED behavior: a user who had hidden tools via the old toggle now sees them again (inherits the admin
+  default) until they set their own override — correct.
+  **INTEGRATIONS CONFIG FORMS (Settings › Intégrations) — TTS/Talk/Langfuse/Opik + voice feasibility —
+  DONE + LIVE-VERIFIED 2026-06-06:** Olivier wanted forms to configure TTS, Talk/STS (gpt-realtime), Langfuse,
+  Opik + asked whether Talk/Voicewake can be wired into the webchat (deep research). Research done (OpenClaw
+  docs real + community) → docs/VOICE_INTEGRATION_RESEARCH.md. Architecture: forms store NON-SECRET knobs in
+  Convex; API KEYS stay in deployment env (D3) shown as a `configured` indicator — NEVER in Convex/browser.
+  Backend: `integrationConfig` singleton (langfuse{host,enabled} / opik{baseUrl,workspace,enabled} / tts{auto,
+  provider,model,voice,persona} / talk{enabled,realtime*,voice,transport,speechLocale,silenceTimeoutMs,
+  interruptOnSpeech}); `integrations/config.ts` gains an OVERRIDE param + `enabled` with precedence **Convex
+  value → env → default** (empty field does NOT clobber an env-set deployment — pinned by a test);
+  `integrations/ship.ts` reads overrides via a new `vendorOverrides` internalQuery (action has no ctx.db) +
+  ships only when `configured && enabled`; `integrations/status.ts` returns effective non-secret + stored
+  config + secret presence; `admin.setIntegrationConfig` (shallow-merge per section). Frontend: IntegrationsTab
+  rewritten with editable sections + HONEST status badges — Langfuse/Opik = "actif"/"en pause"/"clé manquante
+  (env)" (REAL consumer = trace shipper); TTS/Talk = "appliqué par le bridge (à venir)" (consumer = bridge,
+  not built; FLAT minimal shape since no bridge fixtures); Voice wake = "non câblable dans le navigateur"
+  (info note, no form). FEASIBILITY (in the doc + the form notes): TTS = server config + gateway RPC; Talk/STS
+  = browser WebRTC realtime IS wireable BUT needs a server-minted EPHEMERAL token (OPENAI_API_KEY never
+  reaches the client); Voicewake = browser not native (would need a client wake-word engine, e.g. Porcupine).
+  Tests: integrations 17 (incl. override precedence + empty-fallback + enabled) → vitest 141. Live: 5 sections
+  render with correct badges; writing Langfuse host persists to integrationConfig; clearing falls back. Files:
+  schema.ts, integrations/config.ts, integrations/ship.ts, integrations/status.ts, admin.ts, integrations.test.ts,
+  admin/IntegrationsTab.tsx, convexChat.css, docs/VOICE_INTEGRATION_RESEARCH.md. NEVER committed.
   **#53 INCREMENT 3 — COMPOSER POLISH BUILT + LIVE-VERIFIED 2026-06-05 (pure frontend, no live agent):**
   via assistant-ui 0.14 primitives in `ConvexChat.tsx` + `convexChat.css`: (1) EMPTY STATE
   (`ThreadPrimitive.Empty`) — OC avatar + "Comment puis-je aider ?" + 4 suggestion cards

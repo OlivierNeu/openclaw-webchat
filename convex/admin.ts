@@ -303,6 +303,77 @@ export const setFeatureEnabled = mutation({
   },
 });
 
+// --- Integrations: NON-SECRET config (Settings › Intégrations) -------------
+// Stores only non-secret knobs (host/baseUrl/workspace/enabled + tts/talk
+// settings). API KEYS are NEVER accepted here — they live in deployment env.
+// Each provided section is shallow-merged into the singleton so updating one
+// field never clears the others; an empty string clears a field (config.ts then
+// falls back to env -> default).
+const INTEGRATION_CONFIG_KEY = "singleton";
+
+export const setIntegrationConfig = mutation({
+  args: {
+    langfuse: v.optional(
+      v.object({
+        host: v.optional(v.string()),
+        enabled: v.optional(v.boolean()),
+      }),
+    ),
+    opik: v.optional(
+      v.object({
+        baseUrl: v.optional(v.string()),
+        workspace: v.optional(v.string()),
+        enabled: v.optional(v.boolean()),
+      }),
+    ),
+    tts: v.optional(
+      v.object({
+        auto: v.optional(v.string()),
+        provider: v.optional(v.string()),
+        model: v.optional(v.string()),
+        voice: v.optional(v.string()),
+        persona: v.optional(v.string()),
+      }),
+    ),
+    talk: v.optional(
+      v.object({
+        enabled: v.optional(v.boolean()),
+        realtimeProvider: v.optional(v.string()),
+        realtimeModel: v.optional(v.string()),
+        voice: v.optional(v.string()),
+        transport: v.optional(v.string()),
+        speechLocale: v.optional(v.string()),
+        silenceTimeoutMs: v.optional(v.number()),
+        interruptOnSpeech: v.optional(v.boolean()),
+      }),
+    ),
+  },
+  handler: async (ctx, args) => {
+    await requireAdmin(ctx);
+    const meta = await ctx.db
+      .query("integrationConfig")
+      .withIndex("by_key", (q) => q.eq("key", INTEGRATION_CONFIG_KEY))
+      .unique();
+    const merge = <T extends object>(
+      existing: T | undefined,
+      incoming: T | undefined,
+    ): T | undefined => (incoming ? { ...(existing ?? {}), ...incoming } : existing);
+
+    const next = {
+      key: INTEGRATION_CONFIG_KEY,
+      langfuse: merge(meta?.langfuse, args.langfuse),
+      opik: merge(meta?.opik, args.opik),
+      tts: merge(meta?.tts, args.tts),
+      talk: merge(meta?.talk, args.talk),
+    };
+    if (meta === null) {
+      await ctx.db.insert("integrationConfig", next);
+      return;
+    }
+    await ctx.db.patch(meta._id, next);
+  },
+});
+
 // --- Per-user routing override ---------------------------------------------
 
 export const setUserRouting = mutation({

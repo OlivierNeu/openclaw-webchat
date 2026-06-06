@@ -86,16 +86,13 @@ export default defineSchema({
     ),
     themeName: v.optional(v.string()),
 
-    // Per-user chat preference: show OpenClaw tool-execution cards in the thread.
-    // Toggled from the chat surface. OPTIONAL (additive); absent => shown (true).
+    // DEPRECATED — superseded by `uiPrefs.showTools`. No longer READ by the
+    // resolver (it shadowed the admin default + mislabeled as "default"); kept as
+    // a column only so existing rows validate. Safe to ignore / GC later.
     showTools: v.optional(v.boolean()),
 
-    // Per-user preference: surface the voice-input (mic) button in the composer.
-    // OPTIONAL (additive); absent => OFF (the mic is hidden by default — the
-    // talk.* voice pipeline is not wired yet, so the control only appears when a
-    // user explicitly opts in). Feature-flag for the composer mic.
-    // LEGACY: superseded by `uiPrefs.voiceInput` (read-fallback only; the UI
-    // preferences module is the single writer now — see convex/lib/uiPrefs.ts).
+    // DEPRECATED — superseded by `uiPrefs.voiceInput`. No longer READ by the
+    // resolver; kept as a column only so existing rows validate. Safe to GC later.
     voiceInput: v.optional(v.boolean()),
 
     // Unified per-user UI preferences (the interface-config module). Each toggle
@@ -665,4 +662,52 @@ export default defineSchema({
     lastError: v.optional(v.string()), // reason code (e.g. "send_failed") only
     lastErrorStatus: v.optional(v.number()), // vendor HTTP status when present
   }).index("by_vendor", ["vendor"]),
+
+  // Admin-editable NON-SECRET integration configuration (singleton, key
+  // "singleton"). SECRETS (API keys) NEVER live here — they stay in the
+  // deployment env (D3); these are only the non-secret knobs an admin sets via
+  // Settings › Intégrations. Resolution precedence in integrations/config.ts:
+  // Convex value (here) -> env -> built-in default.
+  integrationConfig: defineTable({
+    key: v.string(), // "singleton"
+    // Trace-shipping vendors (REAL consumer = integrations/ship flush).
+    langfuse: v.optional(
+      v.object({
+        host: v.optional(v.string()), // overrides LANGFUSE_HOST
+        enabled: v.optional(v.boolean()), // master pause switch (keys stay env)
+      }),
+    ),
+    opik: v.optional(
+      v.object({
+        baseUrl: v.optional(v.string()), // overrides OPIK_BASE_URL
+        workspace: v.optional(v.string()), // overrides OPIK_WORKSPACE
+        enabled: v.optional(v.boolean()),
+      }),
+    ),
+    // Voice tooling (consumer = the bridge worker — NOT built yet; stored here
+    // ready for it). Minimal FLAT shape on purpose: there are no bridge fixtures
+    // for these yet, so we do NOT mirror openclaw.json's deep providers/personas
+    // tree (would be painful to migrate once the gateway protocol is pinned).
+    tts: v.optional(
+      v.object({
+        auto: v.optional(v.string()), // off|always|inbound|tagged
+        provider: v.optional(v.string()), // e.g. openai|elevenlabs|microsoft
+        model: v.optional(v.string()),
+        voice: v.optional(v.string()),
+        persona: v.optional(v.string()),
+      }),
+    ),
+    talk: v.optional(
+      v.object({
+        enabled: v.optional(v.boolean()),
+        realtimeProvider: v.optional(v.string()), // openai|google
+        realtimeModel: v.optional(v.string()), // e.g. gpt-realtime-2
+        voice: v.optional(v.string()), // e.g. cedar|marin
+        transport: v.optional(v.string()), // webrtc|provider-websocket|gateway-relay
+        speechLocale: v.optional(v.string()), // BCP-47
+        silenceTimeoutMs: v.optional(v.number()),
+        interruptOnSpeech: v.optional(v.boolean()),
+      }),
+    ),
+  }).index("by_key", ["key"]),
 });

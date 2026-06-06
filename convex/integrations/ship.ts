@@ -39,7 +39,13 @@ import {
 } from "../_generated/server";
 import { internal } from "../_generated/api";
 import { Doc } from "../_generated/dataModel";
-import { langfuseConfig, opikConfig } from "./config";
+import {
+  langfuseConfig,
+  opikConfig,
+  readIntegrationConfig,
+  type LangfuseOverride,
+  type OpikOverride,
+} from "./config";
 import { ShippableEvent, SendResult } from "./shared";
 import * as langfuse from "./langfuse";
 import * as opik from "./opik";
@@ -298,29 +304,50 @@ export const flushToVendors = internalAction({
     const now = Date.now();
     const results: VendorFlushResult[] = [];
 
-    // Langfuse.
-    const lf = langfuseConfig();
+    // Non-secret admin overrides (host/baseUrl/workspace/enabled). An action has
+    // no ctx.db, so read them via an internalQuery; keys stay in env.
+    const ov = await ctx.runQuery(
+      internal.integrations.ship.vendorOverrides,
+      {},
+    );
+
+    // Langfuse — ship only when configured (keys present) AND not paused.
+    const lf = langfuseConfig(ov.langfuse);
     results.push(
       await flushOneVendor(ctx, {
         vendor: VENDOR_LANGFUSE,
-        configured: lf.configured,
+        configured: lf.configured && lf.enabled,
         now,
         sendBatch: (events) => langfuse.send(lf, events),
       }),
     );
 
     // Opik.
-    const op = opikConfig();
+    const op = opikConfig(ov.opik);
     results.push(
       await flushOneVendor(ctx, {
         vendor: VENDOR_OPIK,
-        configured: op.configured,
+        configured: op.configured && op.enabled,
         now,
         sendBatch: (events) => opik.send(op, events),
       }),
     );
 
     return { vendors: results };
+  },
+});
+
+/** Read the non-secret vendor overrides for the flush action (no ctx.db there). */
+export const vendorOverrides = internalQuery({
+  args: {},
+  handler: async (
+    ctx: QueryCtx,
+  ): Promise<{ langfuse: LangfuseOverride; opik: OpikOverride }> => {
+    const cfg = await readIntegrationConfig(ctx);
+    return {
+      langfuse: cfg?.langfuse ?? {},
+      opik: cfg?.opik ?? {},
+    };
   },
 });
 
