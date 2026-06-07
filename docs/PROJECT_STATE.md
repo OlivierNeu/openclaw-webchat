@@ -578,6 +578,23 @@ row status **complete** ("Bridge validé, je te reçois bien."). CAPTURED LIVE G
   release.yml (all YAML-validated). npm bootstrap reminder: login + first manual `npm publish --access public` into
   @lacneu, THEN add the Trusted Publisher (OlivierNeu/openclaw-webchat, release.yml) — same as his @lacneu/
   twenty-openclaw. Olivier must commit these 2 App workflow changes.
+  **PIPELINE LIVE-GREEN 2026-06-07.** Olivier committed the workflow restructure (App commit d53a282) + set up npm
+  Trusted Publishing (@lacneu/openclaw-webchat 0.1.0 published + OIDC link to release.yml, perm npm publish) + re-ran
+  the bridge Build-and-Push manually. RESULT: App "Build and Push" green on main push; bridge "Build and Push #2"
+  (manual dispatch) green; BOTH images verified PRESENT + pullable on Docker Hub (`docker manifest inspect`
+  neuolivier/openclaw-webchat:latest + neuolivier/openclaw-webchat-bridge:latest). The full componentized CI/CD
+  (npm + 2 Docker Hub images, 3 workflows × 2 repos) is operational end-to-end. ONLY remaining work = execute
+  DEPLOY.md on the NAS (3 CM projects: Convex up + admin key + npx convex deploy + convex env set; webchat pull+up;
+  Traefik route) + live-verify (Google domain reject, chat e2e, WS upgrade, trace-shipping). Needs NAS access (Olivier).
+  **CODEX REVIEW TAKEN INTO ACCOUNT 2026-06-07.** `/codex:review` (working-tree) flagged 4 issues — ALL against the
+  OLD `deploy/` folder, which was lingering STAGED in the index (state `AD`: staged-add but rm'd on disk; deploy/ was
+  NEVER in HEAD). The 4 (Convex blocked by bridge `:?` secrets, `COPY nginx.conf` outside ctx, `../bridge` build
+  context missing, `.env.nas.example` missing) are all RESOLVED in the C5 architecture — VERIFIED concretely: convex/
+  compose has 0 bridge refs (starts independently); image is caddy:2-alpine (no nginx, no COPY); webchat compose uses
+  `image: neuolivier/openclaw-webchat-bridge:latest` (no build ctx); both convex/.env.example + openclaw-webchat/
+  .env.example exist. CLEANED the dead staged files: `git rm -r --cached deploy local-openclaw` (index now = only
+  `M docs/PROJECT_STATE.md`). No commit made. The App HEAD is already the clean componentized state (legacy + bridge
+  deletions committed by Olivier in e2394c6/a18d2d3/d53a282).
   **SMOKE TEST PASSES ON BOTH VERSIONS + TYPE MATRIX 2026-06-05:** after bumping
   `CONNECT_TIMEOUT_MS` 10s→30s (a cold-start/emulated-amd64 gateway needs >10s for the WS device
   handshake; 10s dropped the first message after a restart) + a 20s settle in the script,
