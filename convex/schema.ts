@@ -48,6 +48,24 @@ export const messagePart = v.union(
   }),
 );
 
+// One target's health, flattened from the bridge's /health snapshot. Non-PHI:
+// curated state + last error CODE + non-secret host only — never tokens. Shared
+// by the `bridgeHealth` table and the poller's upsert args (one source of truth).
+export const bridgeHealthTarget = v.object({
+  key: v.string(),
+  instanceName: v.union(v.string(), v.null()),
+  canonical: v.string(),
+  agentId: v.string(), // the agent the bridge ACTUALLY uses (env), not a body claim
+  gatewayHost: v.string(),
+  state: v.string(), // idle | connected | error
+  lastOkAt: v.union(v.number(), v.null()),
+  lastErrorCode: v.union(v.string(), v.null()),
+  lastErrorAt: v.union(v.number(), v.null()),
+  attempts: v.number(),
+  okCount: v.number(),
+  errorCount: v.number(),
+});
+
 export default defineSchema({
   // @convex-dev/auth's own tables (authAccounts, authSessions, authRefreshTokens,
   // authVerificationCodes, ... AND its own `users` table). Spreading this is
@@ -111,6 +129,12 @@ export default defineSchema({
         voiceInput: v.optional(v.boolean()),
       }),
     ),
+
+    // Per-user ordering of the Settings tabs (drag-and-drop in SettingsNav). A
+    // list of tab keys; tabs absent from it (e.g. a newly added tab) fall back to
+    // their code order AFTER the saved ones. Unknown/stale keys are ignored on
+    // read. OPTIONAL → unset means the default code order.
+    settingsTabOrder: v.optional(v.array(v.string())),
 
     // --- Routing (valves) ---------------------------------------------------
     // Group membership drives routing by default (see `groups`). A per-user
@@ -709,5 +733,21 @@ export default defineSchema({
         interruptOnSpeech: v.optional(v.boolean()),
       }),
     ),
+  }).index("by_key", ["key"]),
+
+  // Bridge health snapshot (singleton, key "singleton"). Written by the periodic
+  // poller (bridgeHealth.pollBridgeHealth) that GETs the bridge's /health. NON-
+  // SECRET: reachability + per-target state + last error CODE + non-secret host.
+  // This is the REAL-TIME "is the bridge OK right now" source the Settings health
+  // badge and the chat availability gate read — distinct from `anomalies` (the
+  // historical incident log built by the trace-scan cron).
+  bridgeHealth: defineTable({
+    key: v.string(), // "singleton"
+    reachable: v.boolean(), // could Convex reach the bridge /health this poll?
+    status: v.optional(v.string()), // bridge process status when reachable ("ok")
+    startedAt: v.optional(v.number()), // bridge process start (for uptime)
+    checkedAt: v.number(), // last poll time (staleness = now - checkedAt)
+    lastError: v.optional(v.string()), // poll-level reason code when unreachable
+    targets: v.array(bridgeHealthTarget),
   }).index("by_key", ["key"]),
 });

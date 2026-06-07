@@ -49,4 +49,15 @@ crons.interval(
   {},
 );
 
+// Bridge health (active monitoring): every minute, GET the bridge /health and
+// upsert the singleton snapshot. This is the REAL-TIME source the Settings health
+// badge + the chat availability gate read — much fresher than the 5-min anomaly
+// scan, because "is the bridge up right now" must not lag.
+crons.interval(
+  "poll bridge health",
+  { minutes: 1 },
+  internal.bridgeHealth.pollBridgeHealth,
+  {},
+);
+
 export default crons;

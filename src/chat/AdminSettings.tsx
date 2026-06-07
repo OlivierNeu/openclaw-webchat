@@ -51,6 +51,7 @@ export const TABS = [
   "users",
   "groups",
   "instances",
+  "bridge",
   "serviceAccounts",
   "roles",
   "traces",
@@ -69,6 +70,7 @@ export const PARAMLESS_TABS = [
   "roles",
   "integrations",
   "instances",
+  "bridge",
   "theme",
   "uiprefs",
   "feedbacks",
@@ -86,6 +88,7 @@ export const TAB_LABELS: Partial<Record<Tab, string>> = {
   integrations: "Intégrations",
   feedbacks: "Feedbacks",
   uiprefs: "Préférences UI",
+  bridge: "Bridge",
 };
 
 export function UsersTab() {

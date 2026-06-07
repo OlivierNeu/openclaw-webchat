@@ -72,6 +72,8 @@ import { AnomaliesTab } from "./chat/admin/AnomaliesTab";
 import { IntegrationsTab } from "./chat/admin/IntegrationsTab";
 import { FeedbacksTab } from "./chat/admin/FeedbacksTab";
 import { UiPrefsTab } from "./chat/admin/UiPrefsTab";
+import { BridgeTab } from "./chat/admin/BridgeTab";
+import { SettingsNav } from "./chat/admin/SettingsNav";
 import { ThemeShowroom } from "./chat/ThemeShowroom";
 import {
   tracesSearchSchema,
@@ -314,7 +316,10 @@ function AppTopBar({
         >
           {collapsed ? <PanelLeftOpen /> : <PanelLeftClose />}
         </Button>
-        <span className="oc-topbar__brand">OpenClaw</span>
+        {/* Brand returns to the chat surface (leaving Settings). */}
+        <Link to="/" className="oc-topbar__brand">
+          OpenClaw
+        </Link>
       </div>
       {/* Center zone: global conversation search (⌘K palette). */}
       <div className="oc-topbar__search">
@@ -365,25 +370,25 @@ function AuthenticatedChrome({
             className="oc-sidebar-col"
             style={{ width, flex: `0 0 ${width}px` }}
           >
-            <ChatSidebar
-              activeChatId={
-                settingsActive
-                  ? null
-                  : ((params.chatId ?? null) as Id<"chats"> | null)
-              }
-              onSelect={(id) =>
-                void navigate({ to: "/chat/$chatId", params: { chatId: id } })
-              }
-            />
-            {isAdmin ? (
-              <Button
-                variant={settingsActive ? "secondary" : "ghost"}
-                className="m-2 justify-start"
-                asChild
-              >
-                <Link to="/settings/users">Settings</Link>
-              </Button>
-            ) : null}
+            {/* In Settings, the chat list is replaced by a VERTICAL settings nav
+                (the chat "disappears"); a top-bar / back link returns to chat. */}
+            {settingsActive ? (
+              <SettingsNav />
+            ) : (
+              <>
+                <ChatSidebar
+                  activeChatId={(params.chatId ?? null) as Id<"chats"> | null}
+                  onSelect={(id) =>
+                    void navigate({ to: "/chat/$chatId", params: { chatId: id } })
+                  }
+                />
+                {isAdmin ? (
+                  <Button variant="ghost" className="m-2 justify-start" asChild>
+                    <Link to="/settings/users">Settings</Link>
+                  </Button>
+                ) : null}
+              </>
+            )}
             {/* Resize handle on the right edge. */}
             <div
               className="oc-sidebar-resizer"
@@ -408,60 +413,8 @@ function AuthenticatedChrome({
 // tab's useToast() resolves (it previously wrapped the whole AdminSettings).
 // ===========================================================================
 
-// One tab-nav link. Paramless tabs route to the shared `$tab` route (with the
-// tab as a param); filtered tabs route to their own static path. Split into a
-// helper so each branch carries a LITERAL `to` — TanStack's `Link` is typed
-// against the route tree, and a computed template string can't be narrowed to a
-// valid route path. The active-tab style comes from `activeProps`.
-const TAB_CLASS = (t: Tab) =>
-  "oc-admin__tab" + (TAB_LABELS[t] ? " oc-admin__tab--labeled" : "");
-const TAB_ACTIVE_CLASS = (t: Tab) => TAB_CLASS(t) + " is-active";
-
-function TabLink({ tab }: { tab: Tab }) {
-  const label = TAB_LABELS[tab] ?? tab;
-  const className = TAB_CLASS(tab);
-  const activeProps = { className: TAB_ACTIVE_CLASS(tab) };
-  // The tab highlight tracks the PATH only. `includeSearch` defaults to true, so
-  // without this a filtered tab would lose its highlight the moment any filter
-  // is applied (the Link's bare path no longer matches the URL's search).
-  const activeOptions = { includeSearch: false };
-
-  if (PARAMLESS_TABS.includes(tab as ParamlessTab)) {
-    return (
-      <Link
-        to="/settings/$tab"
-        params={{ tab: tab as ParamlessTab }}
-        className={className}
-        activeProps={activeProps}
-        activeOptions={activeOptions}
-      >
-        {label}
-      </Link>
-    );
-  }
-  // Filtered tabs: literal `to` per tab so the type resolves to a real route.
-  return (
-    <Link
-      to={`/settings/${tab}` as FilteredTabPath}
-      className={className}
-      activeProps={activeProps}
-      activeOptions={activeOptions}
-    >
-      {label}
-    </Link>
-  );
-}
-
-// The static (filtered) settings routes — the valid `to` targets for a filtered
-// tab Link.
-type FilteredTabPath =
-  | "/settings/users"
-  | "/settings/groups"
-  | "/settings/serviceAccounts"
-  | "/settings/traces"
-  | "/settings/kpi"
-  | "/settings/anomalies"
-  | "/settings/audit";
+// TabLink, the FilteredTabPath union, and the (now drag-and-drop, per-user
+// persisted) vertical SettingsNav moved to ./chat/admin/SettingsNav.tsx.
 
 function SettingsLayout() {
   // Admin guard (Phase 2: component guard via api.me.getMe + redirect; the
@@ -480,17 +433,15 @@ function SettingsLayout() {
   }
   if (me.role !== "admin") return null; // redirecting
 
+  // The tab nav now lives in the VERTICAL SettingsNav (left column, rendered by
+  // AuthenticatedChrome). This layout keeps only the content: the always-on
+  // bridge health bar + the active tab.
+  // Bridge health moved OUT of an always-on banner into its own "Bridge" tab
+  // (badge on the tab + detailed view on click). The layout keeps only the
+  // active tab content.
   return (
     <ToastProvider>
       <div className="oc-admin">
-        <header className="oc-admin__header">
-          <h1>Settings</h1>
-          <nav className="oc-admin__tabs">
-            {TABS.map((t) => (
-              <TabLink key={t} tab={t} />
-            ))}
-          </nav>
-        </header>
         <div className="oc-admin__body">
           <Outlet />
         </div>
@@ -508,6 +459,8 @@ function SettingsParamlessScreen() {
       return <IntegrationsTab />;
     case "instances":
       return <InstancesTab />;
+    case "bridge":
+      return <BridgeTab />;
     case "theme":
       return <ThemeShowroom />;
     case "feedbacks":

@@ -371,6 +371,24 @@ export function TracesTab() {
             cell: (r) => <Badge variant="secondary">{r.kind}</Badge>,
           },
           {
+            // Failure marker — makes error rows (dispatch failed, stream
+            // error/aborted, ingest denied, HTTP >=400) jump out across kinds,
+            // with the curated cause code so the eye lands on what's wrong.
+            header: "Résultat",
+            cell: (r) => {
+              const fail = traceFailureCode(r);
+              return fail ? (
+                <span className="oc-traces__fail" title={fail}>
+                  ✕ {fail}
+                </span>
+              ) : (
+                <span className="oc-traces__ok" aria-label="ok">
+                  ✓
+                </span>
+              );
+            },
+          },
+          {
             header: "Direction",
             cell: (r) =>
               r.direction ? (
@@ -488,6 +506,36 @@ function statusClass(status: number): string {
 // First 8 chars is enough to recognize an id/correlationId at a glance.
 function shortId(id: string): string {
   return id.length > 8 ? id.slice(0, 8) : id;
+}
+
+// A trace row's failure code (curated, non-PHI) if it represents an error, else
+// null. Cross-kind: HTTP >=400, a failed dispatch (with its errorCode), a stream
+// error/aborted finalize, or an ingest denial. Drives the red "Résultat" marker.
+function traceFailureCode(r: TraceEventView): string | null {
+  if (typeof r.status === "number" && r.status >= 400) return String(r.status);
+  if (!r.meta) return null;
+  try {
+    const m = JSON.parse(r.meta) as {
+      dispatchStatus?: string;
+      errorCode?: string;
+      phase?: string;
+      streamStatus?: string;
+    };
+    if (r.kind === "openclaw.dispatch" && m.dispatchStatus === "failed") {
+      return m.errorCode ?? "failed";
+    }
+    if (
+      r.kind === "assistant.stream" &&
+      m.phase === "finalize" &&
+      (m.streamStatus === "error" || m.streamStatus === "aborted")
+    ) {
+      return m.streamStatus;
+    }
+    if (r.kind === "openclaw.ingest.denied") return "denied";
+  } catch {
+    // meta isn't JSON — not a failure we can classify
+  }
+  return null;
 }
 
 // Shared meta viewer: pretty-prints the row's JSON `meta` (falling back to the

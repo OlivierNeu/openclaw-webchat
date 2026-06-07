@@ -34,6 +34,22 @@ export function RunStatus() {
   const view = runStatusView(status, hasText);
   if (!view) return null;
 
+  // Error is rendered as a STANDARDIZED alert card (icon + title + message in a
+  // bordered, tinted block) rather than an inline red chip — a real, recognizable
+  // error presentation. The transient states (thinking/generating/aborted) stay
+  // as the lightweight inline chip.
+  if (view.kind === "error") {
+    return (
+      <div className="oc-error-card" role="alert" title={runId ? `run ${runId}` : undefined}>
+        <CircleAlert size={18} className="oc-error-card__icon" aria-hidden />
+        <div className="oc-error-card__body">
+          <span className="oc-error-card__title">{view.label}</span>
+          {error ? <span className="oc-error-card__msg">{error}</span> : null}
+        </div>
+      </div>
+    );
+  }
+
   return (
     <div
       className={`oc-run-status oc-run-status--${view.kind}`}
@@ -48,15 +64,10 @@ export function RunStatus() {
         </span>
       ) : view.kind === "generating" ? (
         <span className="oc-run-status__pulse" aria-hidden />
-      ) : view.kind === "aborted" ? (
-        <Square size={13} aria-hidden />
       ) : (
-        <CircleAlert size={14} aria-hidden />
+        <Square size={13} aria-hidden />
       )}
       <span className="oc-run-status__label">{view.label}</span>
-      {view.kind === "error" && error ? (
-        <span className="oc-run-status__error">{error}</span>
-      ) : null}
     </div>
   );
 }

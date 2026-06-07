@@ -13,6 +13,7 @@ import type * as anomalies from "../anomalies.js";
 import type * as apiKeys from "../apiKeys.js";
 import type * as auth from "../auth.js";
 import type * as bridge from "../bridge.js";
+import type * as bridgeHealth from "../bridgeHealth.js";
 import type * as bridge_ingest from "../bridge_ingest.js";
 import type * as chats from "../chats.js";
 import type * as crons from "../crons.js";
@@ -59,6 +60,7 @@ declare const fullApi: ApiFromModules<{
   apiKeys: typeof apiKeys;
   auth: typeof auth;
   bridge: typeof bridge;
+  bridgeHealth: typeof bridgeHealth;
   bridge_ingest: typeof bridge_ingest;
   chats: typeof chats;
   crons: typeof crons;

@@ -105,6 +105,9 @@ export const getMe = query({
         meta?.uiPrefDefaults as UiPrefsObject | undefined,
         meta?.featuresEnabled as FeaturesEnabled | undefined,
       ),
+      // Per-user Settings tab order (drag-and-drop). null = default code order;
+      // the client merges saved keys first, then any new/unknown tabs after.
+      settingsTabOrder: profile?.settingsTabOrder ?? null,
     };
   },
 });
@@ -135,6 +138,20 @@ export const setUiPref = mutation({
     if (value === null) delete next[key];
     else next[key] = value;
     await ctx.db.patch(profile._id, { uiPrefs: next });
+  },
+});
+
+// Persist the calling user's Settings tab ORDER (drag-and-drop in SettingsNav).
+// Identity-level (requireUserId): a user's own nav layout, not a privileged
+// action. We store the raw key list as-is; the client is the source of which keys
+// are valid and merges unknown/new tabs on read, so a stale key here is harmless.
+export const setSettingsTabOrder = mutation({
+  args: { order: v.array(v.string()) },
+  handler: async (ctx, { order }) => {
+    const userId = await requireUserId(ctx);
+    const profile = await getProfile(ctx, userId);
+    if (profile === null) return; // pre-bootstrap
+    await ctx.db.patch(profile._id, { settingsTabOrder: order });
   },
 });
 

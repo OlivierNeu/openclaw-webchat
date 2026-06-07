@@ -36,6 +36,7 @@ import {
   Trash2,
   Code,
   Search,
+  CircleAlert,
 } from "lucide-react";
 import {
   DropdownMenu,
@@ -172,6 +173,13 @@ function ChatThread({
   showTools: boolean;
   onToggleTools: () => void;
 }) {
+  // Chat availability gate: if the bridge is down/erroring (active health poll),
+  // grey out the composer and show a banner BEFORE a turn is persisted — the
+  // user never sends a message that cannot reach the agent. Fail-open: while
+  // health is unknown (undefined / known:false) we do NOT block. The
+  // failDispatch error bubble remains the backstop for a send that slips through.
+  const avail = useQuery(api.bridgeHealth.getBridgeAvailability, {});
+  const unavailable = avail && !avail.available ? avail : null;
   return (
     <ThreadPrimitive.Root className="oc-thread">
       <ChatHeader chatId={chatId} />
@@ -196,8 +204,29 @@ function ChatThread({
           <span>Derniers messages</span>
         </ThreadPrimitive.ScrollToBottom>
       </ThreadPrimitive.If>
-      <Composer showTools={showTools} onToggleTools={onToggleTools} />
+      {unavailable ? <BridgeUnavailableBanner /> : null}
+      <Composer
+        showTools={showTools}
+        onToggleTools={onToggleTools}
+        unavailable={unavailable !== null}
+      />
     </ThreadPrimitive.Root>
+  );
+}
+
+// Standardized, user-facing "chat unavailable" notice shown above a greyed-out
+// composer. Generic on purpose (the technical reason is admin-only, in Settings →
+// Santé / Traces); the user just needs to know not to type and to retry.
+function BridgeUnavailableBanner() {
+  return (
+    <div className="oc-chat-banner oc-chat-banner--error" role="status">
+      <CircleAlert size={16} aria-hidden />
+      <span>
+        Le service de chat est momentanément indisponible. L’envoi de message est
+        suspendu — réessayez dans un instant. Si cela persiste, contactez votre
+        administrateur.
+      </span>
+    </div>
   );
 }
 
@@ -861,9 +890,12 @@ function SystemMessage() {
 function Composer({
   showTools,
   onToggleTools,
+  unavailable = false,
 }: {
   showTools: boolean;
   onToggleTools: () => void;
+  /** Bridge down: disable input + send so no un-sendable turn is persisted. */
+  unavailable?: boolean;
 }) {
   // Voice-input feature flag: resolved via the UI-preferences module (gated by
   // system enablement + the user's override). The mic only renders when true.
@@ -875,7 +907,9 @@ function Composer({
   // layout. (Voice/dictation mic intentionally omitted until the talk.* phase —
   // a non-functional control would mislead.)
   return (
-    <ComposerPrimitive.Root className="oc-composer">
+    <ComposerPrimitive.Root
+      className={`oc-composer${unavailable ? " oc-composer--disabled" : ""}`}
+    >
       <ComposerPrimitive.Attachments components={{}} />
       {/* Content fidelity: disable the browser/OS conventions that MUTATE typed
           text (autocorrect, auto-capitalize, autocomplete) so a word is sent
@@ -885,9 +919,12 @@ function Composer({
           per-message "Source" view is the real, convention-free guarantee. */}
       <ComposerPrimitive.Input
         className="oc-composer__input"
-        placeholder="Message OpenClaw…"
+        placeholder={
+          unavailable ? "Chat indisponible…" : "Message OpenClaw…"
+        }
         autoFocus
         rows={1}
+        disabled={unavailable}
         autoCorrect="off"
         autoCapitalize="off"
         autoComplete="off"
@@ -929,16 +966,31 @@ function Composer({
               <Mic size={18} aria-hidden />
             </button>
           ) : null}
-          <ThreadPrimitive.If running={false}>
-            <ComposerPrimitive.Send className="oc-composer__send" aria-label="Envoyer">
+          {unavailable ? (
+            // Greyed, non-clickable send: the bridge is down, so persisting a
+            // turn would only produce an unanswerable message.
+            <button
+              type="button"
+              className="oc-composer__send"
+              disabled
+              aria-label="Envoi indisponible (service de chat hors ligne)"
+            >
               <ArrowUp size={18} aria-hidden />
-            </ComposerPrimitive.Send>
-          </ThreadPrimitive.If>
-          <ThreadPrimitive.If running>
-            <ComposerPrimitive.Cancel className="oc-composer__stop" aria-label="Arrêter la génération">
-              <Square size={15} aria-hidden />
-            </ComposerPrimitive.Cancel>
-          </ThreadPrimitive.If>
+            </button>
+          ) : (
+            <>
+              <ThreadPrimitive.If running={false}>
+                <ComposerPrimitive.Send className="oc-composer__send" aria-label="Envoyer">
+                  <ArrowUp size={18} aria-hidden />
+                </ComposerPrimitive.Send>
+              </ThreadPrimitive.If>
+              <ThreadPrimitive.If running>
+                <ComposerPrimitive.Cancel className="oc-composer__stop" aria-label="Arrêter la génération">
+                  <Square size={15} aria-hidden />
+                </ComposerPrimitive.Cancel>
+              </ThreadPrimitive.If>
+            </>
+          )}
         </div>
       </div>
     </ComposerPrimitive.Root>
