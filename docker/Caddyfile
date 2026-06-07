@@ -19,6 +19,15 @@
 	@assets path /assets/*
 	header @assets Cache-Control "public, max-age=31536000, immutable"
 
+	# The SPA shell (index.html, served for every non-asset route via the fallback
+	# below) must ALWAYS revalidate, so a new deploy is picked up without a manual
+	# hard-refresh. Everything that isn't a hashed asset or /config.json = the shell.
+	@html {
+		not path /assets/*
+		not path /config.json
+	}
+	header @html Cache-Control "no-cache"
+
 	# SPA routing: serve real files first (so /config.json and /assets are NOT
 	# shadowed), fall back to index.html for client-side routes.
 	try_files {path} /index.html
