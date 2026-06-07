@@ -9,8 +9,10 @@
 //             useQuery and requireUserId() throws).
 //   /                       chat home (empty pane)
 //   /chat/$chatId           a specific chat (deep-linkable)
-//   /settings               admin-guarded layout (tab nav + ToastProvider)
-//     /settings (index)     → redirect to /settings/users
+//   /settings               RBAC-guarded layout (per-tab permissions + Toast):
+//                           a user with no allowed tab → "/"; a tab they can't
+//                           see → in-app access-denied panel
+//     /settings (index)     → redirect to the user's FIRST allowed tab
 //     /settings/<filtered>  one STATIC route per filtered tab, each with its own
 //                           typed validateSearch (the only way to give a tab its
 //                           own search schema — validateSearch sees only search,
@@ -18,7 +20,7 @@
 //     /settings/$tab        shared route for the 4 PARAMLESS tabs
 //                           (roles/integrations/instances/theme)
 
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import {
   Authenticated,
   AuthLoading,
@@ -31,10 +33,10 @@ import {
   createRootRoute,
   createRoute,
   createRouter,
-  redirect,
   Outlet,
   useNavigate,
   useParams,
+  useLocation,
   type ErrorComponentProps,
 } from "@tanstack/react-router";
 import { z } from "zod";
@@ -54,13 +56,14 @@ import { UserMenu } from "./chat/UserMenu";
 import { NotificationBell } from "./chat/NotificationBell";
 import { GlobalSearch } from "./chat/GlobalSearch";
 import {
-  TABS,
-  TAB_LABELS,
   PARAMLESS_TABS,
   UsersTab,
   GroupsTab,
   InstancesTab,
   AuditTab,
+  visibleTabs,
+  tabFromPathname,
+  pathForTab,
   type Tab,
   type ParamlessTab,
 } from "./chat/AdminSettings";
@@ -102,6 +105,10 @@ type Me = {
   themeMode: ThemeMode | null;
   resolvedThemeMode: ThemeMode;
   defaultThemeMode: ThemeMode | null;
+  // EFFECTIVE permissions (role ∪ extraPermissions; admins = full superset).
+  // Drives which Settings tabs the user may open (per-tab RBAC); server queries
+  // enforce the same permissions independently.
+  permissions: string[];
 };
 
 // ===========================================================================
@@ -250,7 +257,7 @@ function RoleGate() {
       // key on ChatWorkspace. The navigate("/") effect above closes the
       // URL-points-at-foreign-chat hole that routing would otherwise open.
       key={me.userId}
-      isAdmin={me.role === "admin"}
+      canOpenSettings={visibleTabs(me.permissions ?? []).length > 0}
       userLabel={userLabel}
       themeMode={me.themeMode}
     />
@@ -338,11 +345,11 @@ function AppTopBar({
 // the PERSISTENT CHROME — it does not unmount on navigation, so the sidebar
 // layout + scroll position survive route changes (§3.5).
 function AuthenticatedChrome({
-  isAdmin,
+  canOpenSettings,
   userLabel,
   themeMode,
 }: {
-  isAdmin: boolean;
+  canOpenSettings: boolean;
   userLabel: string;
   themeMode: ThemeMode | null;
 }) {
@@ -382,9 +389,11 @@ function AuthenticatedChrome({
                     void navigate({ to: "/chat/$chatId", params: { chatId: id } })
                   }
                 />
-                {isAdmin ? (
+                {canOpenSettings ? (
                   <Button variant="ghost" className="m-2 justify-start" asChild>
-                    <Link to="/settings/users">Settings</Link>
+                    {/* Land on the settings index, which redirects to the user's
+                        FIRST allowed tab (not a hardcoded admin-only tab). */}
+                    <Link to="/settings">Settings</Link>
                   </Button>
                 ) : null}
               </>
@@ -417,37 +426,80 @@ function AuthenticatedChrome({
 // persisted) vertical SettingsNav moved to ./chat/admin/SettingsNav.tsx.
 
 function SettingsLayout() {
-  // Admin guard (Phase 2: component guard via api.me.getMe + redirect; the
-  // server requireAdmin is the real boundary regardless). While me is loading
-  // we render nothing destructive; a non-admin is redirected to "/".
+  // Per-tab RBAC guard (the server enforces requirePermission/requireAdmin on
+  // every tab query independently — this is the UX layer). A user with NO
+  // visible tab is bounced to "/"; a user landing on a tab they can't see gets a
+  // clean "access denied" panel instead of an empty/broken view. The active tab
+  // is read from the pathname (URL is always /settings/<tab>), which works for
+  // both the static (filtered) and the shared $tab routes.
   const me = useQuery(api.me.getMe) as Me | undefined;
   const navigate = useNavigate();
+  const pathname = useLocation({ select: (l) => l.pathname });
+  const visible = useMemo(
+    () => (me ? visibleTabs(me.permissions ?? []) : []),
+    [me],
+  );
+  const noAccess = me !== undefined && visible.length === 0;
   useEffect(() => {
-    if (me && me.role !== "admin") {
-      void navigate({ to: "/" });
-    }
-  }, [me, navigate]);
+    if (noAccess) void navigate({ to: "/" });
+  }, [noAccess, navigate]);
 
   if (me === undefined) {
     return <div className="oc-admin__hint" style={{ padding: 16 }}>Chargement…</div>;
   }
-  if (me.role !== "admin") return null; // redirecting
+  if (noAccess) return null; // redirecting (no settings access at all)
 
-  // The tab nav now lives in the VERTICAL SettingsNav (left column, rendered by
-  // AuthenticatedChrome). This layout keeps only the content: the always-on
-  // bridge health bar + the active tab.
-  // Bridge health moved OUT of an always-on banner into its own "Bridge" tab
-  // (badge on the tab + detailed view on click). The layout keeps only the
-  // active tab content.
+  const activeTab = tabFromPathname(pathname);
+  const denied = activeTab !== undefined && !visible.includes(activeTab);
+
+  // The tab nav lives in the VERTICAL SettingsNav (left column, rendered by
+  // AuthenticatedChrome). This layout keeps only the content: either the active
+  // tab (via <Outlet/>) or the access-denied panel when the tab isn't allowed.
   return (
     <ToastProvider>
       <div className="oc-admin">
         <div className="oc-admin__body">
-          <Outlet />
+          {denied ? <SettingsAccessDenied /> : <Outlet />}
         </div>
       </div>
     </ToastProvider>
   );
+}
+
+// Clean in-app "you can't see this tab" panel (a non-admin reached a tab their
+// permissions don't grant — e.g. by typing the URL). No raw error; the server
+// query would also refuse to return data.
+function SettingsAccessDenied() {
+  return (
+    <div className="oc-route-error" role="alert">
+      <div className="oc-route-error__icon" aria-hidden>
+        <AlertTriangle size={28} />
+      </div>
+      <h2 className="oc-route-error__title">Accès non autorisé</h2>
+      <p className="oc-route-error__body">
+        Vous n’avez pas la permission de consulter cet onglet. Choisissez un
+        onglet disponible dans le menu, ou contactez votre administrateur.
+      </p>
+    </div>
+  );
+}
+
+// Settings index: redirect to the user's FIRST allowed tab (admins → users; a
+// traces-only user → traces). No allowed tab → back to chat. This replaces the
+// old hardcoded /settings/users redirect, which would have dropped a non-admin
+// straight onto an access-denied panel.
+function SettingsIndexRedirect() {
+  const me = useQuery(api.me.getMe) as Me | undefined;
+  const navigate = useNavigate();
+  useEffect(() => {
+    if (me === undefined) return;
+    const visible = visibleTabs(me.permissions ?? []);
+    const dest = visible.length > 0 ? pathForTab(visible[0]) : "/";
+    // pathForTab returns a valid /settings/<tab> path; cast to satisfy the typed
+    // navigate `to` (runtime resolves the string against the route tree).
+    void navigate({ to: dest as "/settings/users", replace: true });
+  }, [me, navigate]);
+  return <div className="oc-admin__hint" style={{ padding: 16 }}>Chargement…</div>;
 }
 
 // Paramless tab dispatcher: the four tabs that carry no search params share one
@@ -511,9 +563,10 @@ const settingsRoute = createRoute({
 const settingsIndexRoute = createRoute({
   getParentRoute: () => settingsRoute,
   path: "/",
-  beforeLoad: () => {
-    throw redirect({ to: "/settings/users" });
-  },
+  // Dynamic landing: the component reads getMe and redirects to the user's first
+  // allowed tab (was a hardcoded beforeLoad redirect to /settings/users, which
+  // would dead-end a non-admin on access-denied).
+  component: SettingsIndexRedirect,
 });
 
 // One STATIC route per FILTERED tab → one typed validateSearch each.

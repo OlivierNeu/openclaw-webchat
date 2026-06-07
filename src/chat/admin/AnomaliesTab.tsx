@@ -109,6 +109,12 @@ export function AnomaliesTab() {
   const confirm = useConfirm();
   const toast = useToast();
   const resolveAnomaly = useMutation(api.anomalies.resolveAnomaly);
+  // Resolving/acknowledging is an admin-only WRITE (resolveAnomaly stays
+  // requireAdmin). A non-admin granted only `anomalies.read` can VIEW anomalies
+  // but must not see actions that would 403 — hide them. (admin.manage is held
+  // by admins via the wildcard.)
+  const me = useQuery(api.me.getMe);
+  const canResolve = (me?.permissions ?? []).includes("admin.manage");
 
   const rows = useQuery(api.anomalies.listAnomalies, {
     limit: LIST_LIMIT,
@@ -261,7 +267,7 @@ export function AnomaliesTab() {
             : "Aucune anomalie enregistrée."
         }
         rowActions={(r) =>
-          r.status === "open"
+          canResolve && r.status === "open"
             ? [
                 { label: "Résoudre", onSelect: () => void resolve(r) },
                 {

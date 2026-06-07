@@ -19,7 +19,8 @@ import {
 } from "./_generated/server";
 import { internal } from "./_generated/api";
 import { Doc } from "./_generated/dataModel";
-import { requireAdmin } from "./lib/access";
+import { requireAdmin, requirePermission } from "./lib/access";
+import { PERMISSIONS } from "./lib/rbac";
 import {
   applyFilter,
   filterValidator,
@@ -274,7 +275,10 @@ export const listEvents = query({
     filter: v.optional(filterValidator),
   },
   handler: async (ctx, { limit, kind, correlationId, filter }) => {
-    await requireAdmin(ctx);
+    // Per-tab RBAC: Traces is readable by any user GRANTED traces.read (already
+    // the observer/agent service-account perm — non-PHI D2 metadata), not only
+    // admins. The wildcard makes admins pass. Write/sensitive paths stay admin.
+    await requirePermission(ctx, PERMISSIONS.TRACES_READ);
     return await fetchRecentEvents(ctx, { limit, kind, correlationId, filter });
   },
 });

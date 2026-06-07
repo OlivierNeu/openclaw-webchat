@@ -31,7 +31,8 @@ import {
   QueryCtx,
 } from "./_generated/server";
 import { Doc, Id } from "./_generated/dataModel";
-import { getActor, requireAdmin } from "./lib/access";
+import { getActor, requireAdmin, requirePermission } from "./lib/access";
+import { PERMISSIONS } from "./lib/rbac";
 import { recordAudit } from "./lib/audit";
 import {
   applyFilter,
@@ -547,7 +548,9 @@ export const listAnomalies = query({
     filter: v.optional(filterValidator),
   },
   handler: async (ctx, { status, limit, since, filter }) => {
-    await requireAdmin(ctx);
+    // Per-tab RBAC: Anomalies readable by any user granted anomalies.read (admins
+    // via wildcard). Resolve/acknowledge stays requireAdmin (mutation below).
+    await requirePermission(ctx, PERMISSIONS.ANOMALIES_READ);
     return await fetchAnomalies(ctx, { status, limit, since, filter });
   },
 });

@@ -16,7 +16,8 @@ import {
 } from "./_generated/server";
 import { Doc } from "./_generated/dataModel";
 import { internal } from "./_generated/api";
-import { requireAdmin, requireActive } from "./lib/access";
+import { requireActive, requirePermission } from "./lib/access";
+import { PERMISSIONS } from "./lib/rbac";
 import { bridgeHealthTarget } from "./schema";
 
 const HEALTH_KEY = "singleton";
@@ -186,7 +187,9 @@ export const upsertBridgeHealth = internalMutation({
 export const getBridgeHealth = query({
   args: {},
   handler: async (ctx) => {
-    await requireAdmin(ctx);
+    // Per-tab RBAC: Bridge tab readable by any user granted bridge.read (admins
+    // via wildcard). getBridgeAvailability stays requireActive (chat gate).
+    await requirePermission(ctx, PERMISSIONS.BRIDGE_READ);
     const doc = await readDoc(ctx);
     if (doc === null) return null;
     return {

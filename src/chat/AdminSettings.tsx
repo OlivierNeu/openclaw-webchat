@@ -10,6 +10,15 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
+import { Button } from "@/components/ui/button";
+import { Checkbox } from "@/components/ui/checkbox";
+import {
+  DropdownMenu,
+  DropdownMenuTrigger,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuLabel,
+} from "@/components/ui/dropdown-menu";
 import { DataTableShell } from "./admin/DataTableShell";
 import { EntitySheet } from "./admin/EntitySheet";
 import { useToast } from "@/components/ui/toast";
@@ -91,6 +100,116 @@ export const TAB_LABELS: Partial<Record<Tab, string>> = {
   bridge: "Bridge",
 };
 
+// --- Per-tab RBAC ----------------------------------------------------------
+// Which permission gates each Settings tab. Admins hold EVERY permission (the
+// "*" wildcard expands to all), so they see every tab; a non-admin sees only the
+// tabs whose permission was explicitly granted (profile.extraPermissions). This
+// is UI convenience ONLY — every tab's Convex queries enforce the SAME
+// permission server-side (requirePermission / requireAdmin), which is the real
+// boundary. Keep this map total over TABS (Record<Tab,...> enforces that).
+export const TAB_PERMISSION: Record<Tab, string> = {
+  users: "admin.manage",
+  groups: "admin.manage",
+  instances: "admin.manage",
+  bridge: "bridge.read",
+  serviceAccounts: "admin.manage",
+  roles: "admin.manage",
+  traces: "traces.read",
+  kpi: "kpi.read",
+  anomalies: "anomalies.read",
+  integrations: "admin.manage",
+  theme: "admin.manage",
+  uiprefs: "admin.manage",
+  audit: "admin.manage",
+  feedbacks: "admin.manage",
+};
+
+// The Settings tabs an admin may grant to a NON-admin. Mirrors the server-side
+// GRANTABLE_USER_PERMISSIONS whitelist in convex/lib/rbac.ts — a consistency
+// test (tabAccess.test.ts) keeps the two in lockstep so the grant editor can
+// never offer a permission the server would reject.
+export const GRANTABLE_TABS: readonly Tab[] = [
+  "traces",
+  "kpi",
+  "anomalies",
+  "bridge",
+];
+
+// The tabs a holder of `perms` may see, in canonical TABS (nav) order.
+export function visibleTabs(perms: readonly string[]): Tab[] {
+  const set = new Set(perms);
+  return TABS.filter((t) => set.has(TAB_PERMISSION[t]));
+}
+
+// URL for a tab. The user-facing form is always `/settings/<tab>` (filtered and
+// paramless tabs share the same surface). Used for programmatic navigation.
+export function pathForTab(tab: Tab): string {
+  return `/settings/${tab}`;
+}
+
+// The tab key embedded in a `/settings/<tab>` pathname, validated to the closed
+// TABS set (undefined for `/settings` itself or an unknown segment).
+export function tabFromPathname(pathname: string): Tab | undefined {
+  const seg = pathname.split("/")[2];
+  return (TABS as readonly string[]).includes(seg) ? (seg as Tab) : undefined;
+}
+
+// Per-row editor for the observability tabs an admin grants to a non-admin user.
+// A dropdown of checkboxes (the GRANTABLE_TABS); toggling persists immediately
+// via admin.setUserPermissions (which re-validates against the server whitelist).
+// onSelect is preventDefault'd so the menu stays open while toggling several.
+function SettingsAccessCell({
+  granted,
+  onToggle,
+}: {
+  granted: string[];
+  onToggle: (perm: string) => void;
+}) {
+  const current = new Set(granted);
+  const count = GRANTABLE_TABS.filter((t) =>
+    current.has(TAB_PERMISSION[t]),
+  ).length;
+  return (
+    <DropdownMenu>
+      <DropdownMenuTrigger asChild>
+        <Button
+          variant="outline"
+          size="sm"
+          className="h-8 w-36 justify-start font-normal"
+        >
+          {count === 0
+            ? "Aucun onglet"
+            : `${count} onglet${count > 1 ? "s" : ""}`}
+        </Button>
+      </DropdownMenuTrigger>
+      <DropdownMenuContent align="start" className="w-52">
+        <DropdownMenuLabel>Onglets Settings autorisés</DropdownMenuLabel>
+        {GRANTABLE_TABS.map((t) => {
+          const perm = TAB_PERMISSION[t];
+          return (
+            <DropdownMenuItem
+              key={t}
+              className="gap-2"
+              onSelect={(e) => {
+                e.preventDefault();
+                onToggle(perm);
+              }}
+            >
+              <Checkbox
+                checked={current.has(perm)}
+                aria-hidden
+                tabIndex={-1}
+                className="pointer-events-none"
+              />
+              <span>{TAB_LABELS[t] ?? t}</span>
+            </DropdownMenuItem>
+          );
+        })}
+      </DropdownMenuContent>
+    </DropdownMenu>
+  );
+}
+
 export function UsersTab() {
   const search = useSearch({ from: "/settings/users" });
   const navigate = useNavigate({ from: "/settings/users" });
@@ -114,6 +233,7 @@ export function UsersTab() {
   const me = useQuery(api.me.getMe);
   const setRole = useMutation(api.admin.setRole);
   const setRouting = useMutation(api.admin.setUserRouting);
+  const setPerms = useMutation(api.admin.setUserPermissions);
   const startImpersonation = useMutation(api.admin.startImpersonation);
   const toast = useToast();
 
@@ -146,6 +266,15 @@ export function UsersTab() {
       await setRouting(args);
     } catch (err) {
       toast.error("Mise à jour du routage refusée", err);
+    }
+  }
+
+  async function changePerms(args: Parameters<typeof setPerms>[0]) {
+    try {
+      await setPerms(args);
+    } catch (err) {
+      // Server rejects any non-grantable permission (whitelist) — surface it.
+      toast.error("Mise à jour des permissions refusée", err);
     }
   }
 
@@ -217,6 +346,23 @@ export function UsersTab() {
               </SelectContent>
             </Select>
           ),
+        },
+        {
+          header: "Accès Settings",
+          cell: (u) =>
+            u.role === "admin" ? (
+              <span className="text-muted-foreground text-xs">Tous (admin)</span>
+            ) : (
+              <SettingsAccessCell
+                granted={u.extraPermissions ?? []}
+                onToggle={(perm) => {
+                  const cur = new Set(u.extraPermissions ?? []);
+                  if (cur.has(perm)) cur.delete(perm);
+                  else cur.add(perm);
+                  void changePerms({ profileId: u._id, permissions: [...cur] });
+                }}
+              />
+            ),
         },
         {
           header: "Group",

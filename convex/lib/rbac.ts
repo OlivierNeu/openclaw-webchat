@@ -31,12 +31,34 @@ export const PERMISSIONS = {
   OPENCLAW_QUERY: "openclaw.query", // query OpenClaw via the bridge
   ANOMALIES_READ: "anomalies.read",
   ANOMALIES_REPORT: "anomalies.report",
+  BRIDGE_READ: "bridge.read", // read bridge health (Settings → Bridge tab)
   CHATS_READ: "chats.read", // read conversational data
   ADMIN_MANAGE: "admin.manage", // superset; UI/admin only
 } as const;
 
 /** The closed set of valid permission keys. */
 export type Permission = (typeof PERMISSIONS)[keyof typeof PERMISSIONS];
+
+/**
+ * Permissions an admin may GRANT to a human (non-admin) user as `extraPermissions`
+ * to open specific READ-ONLY Settings tabs. DELIBERATELY excludes admin.manage and
+ * any write/sensitive permission: these are exactly the read perms already held by
+ * the `observer`/`agent` service-account roles (data already classified
+ * observer-readable — D2 metadata-only, non-PHI), so extending them to human users
+ * is consistent with the existing sensitivity model, NOT a new exposure. The
+ * grant mutation enforces this set SERVER-SIDE (UI hiding is not enforcement).
+ */
+export const GRANTABLE_USER_PERMISSIONS: readonly Permission[] = [
+  PERMISSIONS.TRACES_READ,
+  PERMISSIONS.KPI_READ,
+  PERMISSIONS.ANOMALIES_READ,
+  PERMISSIONS.BRIDGE_READ,
+] as const;
+
+/** True if `perm` is one an admin may grant to a non-admin user (server gate). */
+export function isGrantableUserPermission(perm: string): perm is Permission {
+  return (GRANTABLE_USER_PERMISSIONS as readonly string[]).includes(perm);
+}
 
 /** Wildcard sentinel: a role carrying it grants every permission. */
 export const WILDCARD = "*" as const;

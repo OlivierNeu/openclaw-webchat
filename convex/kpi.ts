@@ -24,7 +24,8 @@ import {
   MutationCtx,
 } from "./_generated/server";
 import { Doc } from "./_generated/dataModel";
-import { requireAdmin } from "./lib/access";
+import { requirePermission } from "./lib/access";
+import { PERMISSIONS } from "./lib/rbac";
 import { filterValidator, type Filter } from "./lib/filters";
 
 // How many full hours back the rollup recomputes. The cutoff is snapped to an
@@ -324,7 +325,8 @@ export const listKpis = query({
     filter: v.optional(filterValidator),
   },
   handler: async (ctx, { limit, metric, since, filter }) => {
-    await requireAdmin(ctx);
+    // Per-tab RBAC: KPI readable by any user granted kpi.read (admins via wildcard).
+    await requirePermission(ctx, PERMISSIONS.KPI_READ);
     return await fetchKpis(ctx, { limit, metric, since, filter });
   },
 });

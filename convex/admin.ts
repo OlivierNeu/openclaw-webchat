@@ -8,6 +8,7 @@ import { v } from "convex/values";
 import { mutation, query, MutationCtx } from "./_generated/server";
 import { Id } from "./_generated/dataModel";
 import { getProfile, requireAdmin, roleOf } from "./lib/access";
+import { isGrantableUserPermission } from "./lib/rbac";
 import { recordAudit } from "./lib/audit";
 import {
   isUiPrefKey,
@@ -73,6 +74,9 @@ export const listUsers = query({
       overrideInstance: p.overrideInstance ?? null,
       overrideAgentId: p.overrideAgentId ?? null,
       canonical: p.canonical ?? null,
+      // Granted per-tab Settings permissions (for the grant editor; admins hold
+      // every permission via the wildcard regardless of this field).
+      extraPermissions: p.extraPermissions ?? [],
     }));
     // Filter in-memory over the bounded view set (the per-resource subset).
     return applyFilter(views, filter, USERS_FILTER_CFG);
@@ -399,6 +403,29 @@ export const setUserRouting = mutation({
         args.overrideAgentId === null ? undefined : args.overrideAgentId;
     if (args.canonical !== undefined) patch.canonical = args.canonical;
     await ctx.db.patch(args.profileId, patch);
+  },
+});
+
+// --- Per-user Settings tab permissions (per-tab RBAC grants) -----------------
+
+// Grant a user the read-only permissions that open specific Settings tabs to a
+// non-admin. The GRANTABLE whitelist is enforced HERE (server-side) — the real
+// boundary; UI hiding is cosmetic. admin.manage and any sensitive/write perm are
+// rejected, so a non-admin can never gain a sensitive-tab grant, even via a
+// malformed or replayed call. `permissions` REPLACES the user's grant set.
+export const setUserPermissions = mutation({
+  args: { profileId: v.id("profiles"), permissions: v.array(v.string()) },
+  handler: async (ctx, { profileId, permissions }) => {
+    await requireAdmin(ctx);
+    const invalid = permissions.filter((p) => !isGrantableUserPermission(p));
+    if (invalid.length > 0) {
+      throw new Error(`Permissions not grantable: ${invalid.join(", ")}`);
+    }
+    const target = await ctx.db.get(profileId);
+    if (target === null) throw new Error("Not found: profile");
+    await ctx.db.patch(profileId, {
+      extraPermissions: [...new Set(permissions)],
+    });
   },
 });
 

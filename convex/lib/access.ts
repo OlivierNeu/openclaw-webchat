@@ -19,6 +19,11 @@ import { getAuthUserId } from "@convex-dev/auth/server";
 import { Doc, Id } from "../_generated/dataModel";
 import { MutationCtx, QueryCtx } from "../_generated/server";
 import { anonAuthEnabled, emailDomainAllowed } from "./authDomains";
+import {
+  permissionsForRoleKey,
+  roleHasPermission,
+  type Permission,
+} from "./rbac";
 
 export type Role = "pending" | "user" | "admin";
 const APP_META_KEY = "singleton";
@@ -254,6 +259,41 @@ export async function requireAdmin(
   const profile = await getProfile(ctx, userId);
   if (roleOf(profile) !== "admin") {
     throw new Error("Forbidden: admin role required");
+  }
+  return userId;
+}
+
+/**
+ * The EFFECTIVE permission set of a user: their role's permissions (via the
+ * roles matrix — admins carry the wildcard) UNION any per-user `extraPermissions`
+ * an admin granted (the per-tab RBAC grants). Used by requirePermission + getMe.
+ */
+export async function effectiveUserPermissions(
+  ctx: QueryCtx | MutationCtx,
+  userId: Id<"users">,
+): Promise<Set<string>> {
+  const profile = await getProfile(ctx, userId);
+  const perms = await permissionsForRoleKey(ctx, roleOf(profile));
+  for (const p of (profile?.extraPermissions as string[] | undefined) ?? []) {
+    perms.add(p);
+  }
+  return perms;
+}
+
+/**
+ * Require the REAL signed-in user (NEVER impersonation — tab/data access is about
+ * who is actually logged in, same rule as requireAdmin) to hold `perm`. Admins
+ * pass via the wildcard. Throws "Forbidden: missing permission ..." otherwise.
+ * This is the AUTHORITATIVE server-side gate; frontend tab hiding is cosmetic.
+ */
+export async function requirePermission(
+  ctx: QueryCtx | MutationCtx,
+  perm: Permission,
+): Promise<Id<"users">> {
+  const userId = await rawUserId(ctx);
+  const perms = await effectiveUserPermissions(ctx, userId);
+  if (!roleHasPermission(perms, perm)) {
+    throw new Error(`Forbidden: missing permission ${perm}`);
   }
   return userId;
 }

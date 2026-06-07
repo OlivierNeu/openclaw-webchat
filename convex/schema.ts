@@ -136,6 +136,13 @@ export default defineSchema({
     // read. OPTIONAL → unset means the default code order.
     settingsTabOrder: v.optional(v.array(v.string())),
 
+    // Per-user GRANTED permissions on top of the role (per-tab RBAC). An admin
+    // grants read-only observability perms here to open specific Settings tabs to
+    // a non-admin. The write path (admin.setUserPermissions) enforces the
+    // GRANTABLE_USER_PERMISSIONS whitelist server-side, so admin.manage / sensitive
+    // perms can NEVER land here. Effective perms = role ∪ this (see access.ts).
+    extraPermissions: v.optional(v.array(v.string())),
+
     // --- Routing (valves) ---------------------------------------------------
     // Group membership drives routing by default (see `groups`). A per-user
     // OVERRIDE wins over the group when set.

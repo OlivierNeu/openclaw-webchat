@@ -25,6 +25,7 @@ import {
   PARAMLESS_TABS,
   TABS,
   TAB_LABELS,
+  visibleTabs,
   type ParamlessTab,
   type Tab,
 } from "../AdminSettings";
@@ -137,6 +138,18 @@ export function SettingsNav() {
   const [order, setOrder] = useState<Tab[]>(serverOrder);
   useEffect(() => setOrder(serverOrder), [serverOrder]);
 
+  // Per-tab RBAC: only render the tabs this user may open (admins see all). The
+  // drag list (DnD + persistence) operates on this VISIBLE subset, so a
+  // non-admin never reorders into a tab they can't see.
+  const visibleSet = useMemo(
+    () => new Set(visibleTabs(me?.permissions ?? [])),
+    [me?.permissions],
+  );
+  const visibleOrder = useMemo(
+    () => order.filter((t) => visibleSet.has(t)),
+    [order, visibleSet],
+  );
+
   // Pointer (distance constraint so a grip click doesn't start a spurious drag)
   // + KEYBOARD: the grip announces space/arrow reordering, so it must actually
   // work for keyboard users (a11y) — and it makes reordering deterministically
@@ -149,10 +162,15 @@ export function SettingsNav() {
   function onDragEnd(e: DragEndEvent) {
     const { active, over } = e;
     if (!over || active.id === over.id) return;
-    const from = order.indexOf(active.id as Tab);
-    const to = order.indexOf(over.id as Tab);
+    const from = visibleOrder.indexOf(active.id as Tab);
+    const to = visibleOrder.indexOf(over.id as Tab);
     if (from < 0 || to < 0) return;
-    const next = arrayMove(order, from, to);
+    const nextVisible = arrayMove(visibleOrder, from, to);
+    // Persist the full per-user order: reordered visible tabs first, then the
+    // hidden (not-permitted) tabs in their existing relative order. For an admin
+    // (all tabs visible) this is simply the full reorder.
+    const hidden = order.filter((t) => !visibleSet.has(t));
+    const next = [...nextVisible, ...hidden];
     setOrder(next); // optimistic
     void saveOrder({ order: next });
   }
@@ -169,9 +187,12 @@ export function SettingsNav() {
         modifiers={[restrictToVerticalAxis]}
         onDragEnd={onDragEnd}
       >
-        <SortableContext items={order} strategy={verticalListSortingStrategy}>
+        <SortableContext
+          items={visibleOrder}
+          strategy={verticalListSortingStrategy}
+        >
           <div className="oc-settings-nav__list">
-            {order.map((t) => (
+            {visibleOrder.map((t) => (
               <SortableTab key={t} tab={t} />
             ))}
           </div>

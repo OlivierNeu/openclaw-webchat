@@ -16,6 +16,7 @@ import { v } from "convex/values";
 import { mutation, query } from "./_generated/server";
 import type { MutationCtx, QueryCtx } from "./_generated/server";
 import {
+  effectiveUserPermissions,
   ensureProfile,
   getActor,
   getProfile,
@@ -108,6 +109,11 @@ export const getMe = query({
       // Per-user Settings tab order (drag-and-drop). null = default code order;
       // the client merges saved keys first, then any new/unknown tabs after.
       settingsTabOrder: profile?.settingsTabOrder ?? null,
+      // EFFECTIVE permissions (role ∪ extraPermissions; admins = full superset).
+      // The client uses this to gate which Settings tabs are visible/landable.
+      // This is convenience for the UI — the SERVER guard on each query is the
+      // real boundary.
+      permissions: [...(await effectiveUserPermissions(ctx, userId))],
     };
   },
 });
