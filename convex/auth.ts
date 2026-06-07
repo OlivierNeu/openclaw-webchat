@@ -50,11 +50,15 @@ const google = Google({
     if (!emailDomainAllowed(email)) {
       throw new Error("Domaine de courriel non autorisé.");
     }
+    // NOTE: return undefined (NOT null) for absent fields. The users table
+    // (authTables) validates name/image as v.optional(v.string()), which accepts
+    // "string or ABSENT" but REJECTS null — a Google account with no `picture`
+    // would otherwise crash the OAuth user upsert ("Path .image ... v.string()").
     return {
       id: p.sub as string,
-      name: (p.name as string | undefined) ?? null,
-      email: email ?? null,
-      image: (p.picture as string | undefined) ?? null,
+      name: (p.name as string | undefined) ?? undefined,
+      email,
+      image: (p.picture as string | undefined) ?? undefined,
     };
   },
 });
@@ -82,11 +86,13 @@ const microsoft = MicrosoftEntraID({
     if (!emailDomainAllowed(email)) {
       throw new Error("Domaine de courriel non autorisé.");
     }
+    // undefined (NOT null) for absent fields — see the Google note above. Entra
+    // has no picture → image omitted (undefined), never null.
     return {
       id: p.sub as string,
-      name: (p.name as string | undefined) ?? null,
-      email: email ?? null,
-      image: null,
+      name: (p.name as string | undefined) ?? undefined,
+      email,
+      image: undefined,
     };
   },
 });
