@@ -142,7 +142,6 @@ function SignIn() {
     !providers.anonymous;
   return (
     <div className="oc-signin">
-      <h1 className="oc-signin__title">OpenClaw webchat</h1>
       {providers?.google ? (
         <button type="button" className="oc-signin__btn" onClick={() => void oauth("google")}>
           Se connecter avec Google
