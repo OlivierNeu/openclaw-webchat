@@ -567,6 +567,17 @@ row status **complete** ("Bridge validé, je te reçois bien."). CAPTURED LIVE G
   `https://convex-site.<domain>/api/auth/callback/google` (SITE_URL stays the app origin). Minors added to DEPLOY.md:
   npm-bootstrap-before-first-tag is MANDATORY-FIRST; confirm WS upgrade reaches the cloud origin. C1–C6
   verified-complete. NOTHING committed.
+  **POST-PUSH CI FIXES 2026-06-07 (Olivier committed+pushed the 3 repos; DOCKERHUB_USERNAME=neuolivier confirmed —
+  compose image refs correct).** (1) Bridge "Build and Push" run FAILED = STALE: it ran on his push at 00:39 but he
+  added the DOCKERHUB_* secrets ~17min later → "Username and password required". Fix = just RE-RUN (secrets now
+  present; build verified-good locally). (2) Olivier asked how to trigger image builds on demand (openclaw-docker
+  habit). The bridge already had `workflow_dispatch`; the App did NOT (its image was bundled in release.yml,
+  tag-only). RESTRUCTURED the App workflows to match openclaw-docker + the bridge: NEW `.github/workflows/
+  build-and-push.yml` (image → Docker Hub+ghcr; triggers: push main → :latest, tag v* → semver, **workflow_dispatch**
+  = "Run workflow" button) + TRIMMED `release.yml` to npm-only (tag v*). App now = ci.yml + build-and-push.yml +
+  release.yml (all YAML-validated). npm bootstrap reminder: login + first manual `npm publish --access public` into
+  @lacneu, THEN add the Trusted Publisher (OlivierNeu/openclaw-webchat, release.yml) — same as his @lacneu/
+  twenty-openclaw. Olivier must commit these 2 App workflow changes.
   **SMOKE TEST PASSES ON BOTH VERSIONS + TYPE MATRIX 2026-06-05:** after bumping
   `CONNECT_TIMEOUT_MS` 10s→30s (a cold-start/emulated-amd64 gateway needs >10s for the WS device
   handshake; 10s dropped the first message after a restart) + a 20s settle in the script,

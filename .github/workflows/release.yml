@@ -1,9 +1,9 @@
 name: Release
 
-# Tag-driven release: one CI builds BOTH artifacts the deployment consumes —
-#   • npm  @lacneu/openclaw-webchat  (versioned community artifact)
-#   • Docker image  <dockerhub-user>/openclaw-webchat + ghcr  (the static-server
-#     image the NAS pulls and serves; see docker/Dockerfile)
+# Tag-driven npm release of @lacneu/openclaw-webchat (versioned community artifact).
+# The Docker image is built separately by build-and-push.yml (also runs on tags,
+# plus main + manual "Run workflow") — so the image is decoupled from npm and can
+# be regenerated on demand.
 on:
   push:
     tags:
@@ -47,52 +47,6 @@ jobs:
         run: npm run build
       # NOTE: the FIRST publish of a brand-new package cannot use OIDC — bootstrap
       # @lacneu/openclaw-webchat once manually (npm publish --access public), then
-      # enable Trusted Publishing for it. See deploy runbook (C6).
+      # enable Trusted Publishing for it. See deploy runbook (DEPLOY.md, Stage 0).
       - name: Publish to npm
         run: npm publish --access public
-
-  # ---- Docker image (static-server, origin-agnostic) --------------------------
-  publish-image:
-    needs: test
-    runs-on: ubuntu-latest
-    permissions:
-      contents: read
-      packages: write
-    steps:
-      - uses: actions/checkout@v4
-
-      - name: Log in to GitHub Container Registry
-        uses: docker/login-action@v3
-        with:
-          registry: ghcr.io
-          username: ${{ github.actor }}
-          password: ${{ secrets.GITHUB_TOKEN }}
-
-      - name: Log in to Docker Hub
-        uses: docker/login-action@v3
-        with:
-          username: ${{ secrets.DOCKERHUB_USERNAME }}
-          password: ${{ secrets.DOCKERHUB_TOKEN }}
-
-      - name: Extract metadata (tags, labels)
-        id: meta
-        uses: docker/metadata-action@v5
-        with:
-          images: |
-            ${{ secrets.DOCKERHUB_USERNAME }}/openclaw-webchat
-            ghcr.io/${{ github.repository }}
-          tags: |
-            type=semver,pattern={{version}}
-            type=semver,pattern={{major}}.{{minor}}
-            type=raw,value=latest
-
-      - name: Build and push
-        uses: docker/build-push-action@v5
-        with:
-          context: .
-          file: docker/Dockerfile
-          push: true
-          # No VITE_CONVEX_URL build-arg ON PURPOSE — the image stays
-          # origin-agnostic; the URL is injected at run time via /config.json.
-          tags: ${{ steps.meta.outputs.tags }}
-          labels: ${{ steps.meta.outputs.labels }}
