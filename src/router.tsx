@@ -156,12 +156,6 @@ function SignIn() {
           Se connecter avec Microsoft
         </button>
       ) : null}
-      {providers?.google || providers?.microsoft ? (
-        <p className="oc-signin__hint">
-          Réservé aux comptes <strong>@lacneu.com</strong> et{" "}
-          <strong>@ataraxis-coaching.com</strong>.
-        </p>
-      ) : null}
       {error ? <p className="oc-signin__error">{error}</p> : null}
       {noneEnabled ? (
         <p className="oc-signin__error">Aucun mode de connexion configuré.</p>
