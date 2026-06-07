@@ -544,6 +544,29 @@ row status **complete** ("Bridge validé, je te reçois bien."). CAPTURED LIVE G
   Surfaced, NOT built (avoid rabbit hole). (3) NAS = `docs/NAS_CONFIG_CHECKLIST.md` (artifacts +
   commands, UNVERIFIED — can't drive the NAS; API-mode `MEDIA:` surfacing equivalence marked an
   ASSUMPTION to confirm on the NAS). #58 NOT marked complete.
+  **COMPONENTIZATION C6 DONE 2026-06-06 — ALL OF C1–C6 COMPLETE.** Runbook =
+  `openclaw-notes/openclaw-webchat/DEPLOY.md` (staged: Stage0 CI build/publish [npm Trusted-Publishing first-publish
+  bootstrap + DOCKERHUB_* secrets — Olivier ADDED DOCKERHUB_USERNAME/TOKEN to BOTH repos], Stage1 Convex up+admin
+  key+`npx convex deploy`+`convex env set` [fresh JWKS/JWT, Google+domains, BRIDGE_URL=http://192.168.1.49:8787
+  host-IP, BRIDGE_* secrets, Langfuse/Opik], Stage2 webchat pull+up+Traefik route, Stage3 trace-shipping
+  re-validate + per-version smoke; multi-tenant jerome; security/backups; update flow). Image namespace assumed
+  `neuolivier` (= his DOCKERHUB_USERNAME, from neuolivier/openclaw-docker) — the 2 compose `image:` lines hardcode
+  it. NET STATE of the pivot: App repo `openclaw-webchat` = front+convex/+mcp/+docs+docker/+.github (origin-agnostic
+  via /config.json; CI npm+image); Bridge repo `openclaw-webchat-bridge` (own GH repo, ws dep + vendored fixture
+  fixed, .idea NOT committed per Olivier); deploy = 3 CM projects in openclaw-notes (convex/ + openclaw-webchat/).
+  All gates green throughout (App 151 tests, bridge 55 tests, both Docker images build+run-verified, both deploy
+  composes `docker compose config` OK). NOTHING committed/pushed/published — Olivier does that. PENDING (Olivier):
+  commit+push the 3 repos, first npm publish + Trusted-Publishing link, cut `v*` tags, then execute DEPLOY.md on the NAS.
+  **FINAL REVIEW (advisor) 2026-06-06 — 2 prod-only gaps closed:** (1) The CENTERPIECE runtime-`/config.json` BOOT
+  path (never browser-verified — C1 hit env-fallback, C2 only curled config.json) is now BROWSER-VERIFIED: built the
+  App image, `docker run -e CONVEX_URL=http://127.0.0.1:3212 -p 8090:80`, navigated chrome-devtools → the
+  origin-agnostic bundle fetched /config.json, built the Convex client from it, CONNECTED (sign-in screen rendered =
+  authProviders query resolved), ZERO console errors. The pivot's core path works end-to-end. (2) OAUTH CALLBACK
+  ORIGIN BUG in DEPLOY.md: `@convex-dev/auth` routes (`auth.addHttpRoutes`) are served on the **`.site` origin**, not
+  cloud — VERIFIED locally (`/api/v1/*` → cloud:3212 404 vs site:3213 401). Fixed the Google redirect URI to
+  `https://convex-site.<domain>/api/auth/callback/google` (SITE_URL stays the app origin). Minors added to DEPLOY.md:
+  npm-bootstrap-before-first-tag is MANDATORY-FIRST; confirm WS upgrade reaches the cloud origin. C1–C6
+  verified-complete. NOTHING committed.
   **SMOKE TEST PASSES ON BOTH VERSIONS + TYPE MATRIX 2026-06-05:** after bumping
   `CONNECT_TIMEOUT_MS` 10s→30s (a cold-start/emulated-amd64 gateway needs >10s for the WS device
   handshake; 10s dropped the first message after a restart) + a 20s settle in the script,
