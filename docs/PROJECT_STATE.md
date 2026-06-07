@@ -586,6 +586,26 @@ row status **complete** ("Bridge validé, je te reçois bien."). CAPTURED LIVE G
   (npm + 2 Docker Hub images, 3 workflows × 2 repos) is operational end-to-end. ONLY remaining work = execute
   DEPLOY.md on the NAS (3 CM projects: Convex up + admin key + npx convex deploy + convex env set; webchat pull+up;
   Traefik route) + live-verify (Google domain reject, chat e2e, WS upgrade, trace-shipping). Needs NAS access (Olivier).
+  **NAS GO-LIVE 2026-06-07 — webchat auth WORKS in prod (Olivier signed in as admin). 5 real bugs fixed live, each
+  one a "local-green ≠ prod" miss (see [[surface-known-gaps-before-prod]]):** (1) JWT key pair MISMATCH (JWT_PRIVATE_KEY
+  vs JWKS set across different keygen runs) → token signed-but-unverifiable → bounced to login. Fix: regenerate the
+  PAIR + set BOTH from the SAME generation. (2) `convex env set JWT_PRIVATE_KEY "<pem>"` → "unknown option '-----BEGIN…'"
+  (PEM starts with `-` → parsed as a flag). Fix: `npx convex env set -- JWT_PRIVATE_KEY "$(cat …)"`. (3) `image: null`
+  in auth.ts profile() (Google/Microsoft) → users-table validator `v.optional(v.string())` REJECTS null (accepts
+  string-or-absent) → OAuth user upsert crashed. Fix: return `undefined` not `null` (convex/auth.ts both providers).
+  (4) **THE deploy-blocker:** `ensureProfile` gated on `ctx.auth.getUserIdentity().email`, but @convex-dev/auth's JWT
+  carries NO `email` claim → undefined → "Forbidden: identity has no email" (anon off) → bootstrap (transactional)
+  rolled back → profiles+appMeta empty → every real user stuck `pending` forever. Fix: resolve email (and name) from
+  the `users` ROW (convex/lib/access.ts ensureProfile). Local tests missed it (anon-on + mocked identity.email + they
+  pre-insert profiles, never running the ensureProfile OAuth gate). NOW COVERED: `convex/authBootstrap.test.ts` (3
+  tests: no-email-claim+users.email-allowed→admin, disallowed→reject, anon-on→exempt). (5) pending users saw the full
+  account menu (theme + UI Préférences) — cosmetic only (backend RBAC pending=permissions:[], no data) but wrong
+  surface → UserMenu `minimal` prop, pending = Sign-out only (src/chat/UserMenu.tsx + router.tsx). Other live fixes:
+  sign-in layout (no title, flex-centered, no domain hint) + Caddyfile no-cache on index.html (deploys apply without
+  hard-refresh). Dashboard is 127.0.0.1-only (Synology sshd blocks TCP-forwarding → temp-expose `6791:6791` for admin
+  DB ops, then revert). OAuth redirect = `https://convex-site.<domain>/api/auth/callback/google` (the `.site` origin).
+  Suite: 154 tests green. Olivier to COMMIT: convex/auth.ts, convex/lib/access.ts, convex/authBootstrap.test.ts,
+  src/router.tsx, src/chat/UserMenu.tsx, src/chat/convexChat.css, docker/Caddyfile. NEXT: the BRIDGE (live agent chat).
   **CODEX REVIEW TAKEN INTO ACCOUNT 2026-06-07.** `/codex:review` (working-tree) flagged 4 issues — ALL against the
   OLD `deploy/` folder, which was lingering STAGED in the index (state `AD`: staged-add but rm'd on disk; deploy/ was
   NEVER in HEAD). The 4 (Convex blocked by bridge `:?` secrets, `COPY nginx.conf` outside ctx, `../bridge` build
