@@ -133,7 +133,15 @@ export async function ensureProfile(ctx: MutationCtx): Promise<Id<"users">> {
   //     identity — e.g. a flaky Microsoft Entra token with no mapped email — is
   //     REFUSED, never silently provisioned.
   const identity = await ctx.auth.getUserIdentity();
-  const email = (identity?.email as string | undefined) ?? undefined;
+  // @convex-dev/auth's JWT does NOT carry the `email` claim, so identity.email is
+  // undefined on a real OAuth session. The verified email lives on the users row
+  // (written by the provider profile()), which is the source of truth — resolve
+  // from there, falling back to identity for any provider that does include it.
+  const userDoc = await ctx.db.get(userId);
+  const email =
+    (identity?.email as string | undefined) ??
+    (userDoc?.email as string | undefined) ??
+    undefined;
   if (email === undefined) {
     if (!anonAuthEnabled()) {
       throw new Error("Forbidden: identity has no email");
@@ -174,8 +182,12 @@ export async function ensureProfile(ctx: MutationCtx): Promise<Id<"users">> {
     role = "pending";
   }
 
-  // Display name from the auth identity (email already resolved + gated above).
-  const name = (identity?.name as string | undefined) ?? undefined;
+  // Display name from the auth identity, falling back to the users row (same
+  // reason as email: the JWT may not carry `name`).
+  const name =
+    (identity?.name as string | undefined) ??
+    (userDoc?.name as string | undefined) ??
+    undefined;
 
   await ctx.db.insert("profiles", {
     userId,
