@@ -9,6 +9,78 @@
   color: var(--muted-foreground);
 }
 
+/* In-application empty/error states (not-found chat, unknown route, route error).
+   Centered inside the chat pane / shell outlet — the app chrome stays intact. */
+.oc-notfound,
+.oc-route-error {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 0.75rem;
+  height: 100%;
+  min-height: 60vh;
+  padding: 2rem;
+  text-align: center;
+}
+.oc-notfound__icon,
+.oc-route-error__icon {
+  display: grid;
+  place-items: center;
+  width: 3.5rem;
+  height: 3.5rem;
+  border-radius: 999px;
+  background: var(--muted);
+  color: var(--muted-foreground);
+}
+.oc-notfound__title,
+.oc-route-error__title {
+  margin: 0;
+  font-size: 1.05rem;
+  font-weight: 600;
+  color: var(--foreground);
+}
+.oc-notfound__body,
+.oc-route-error__body {
+  margin: 0;
+  max-width: 32rem;
+  font-size: 0.9rem;
+  line-height: 1.5;
+  color: var(--muted-foreground);
+}
+.oc-route-error__actions {
+  display: flex;
+  gap: 0.5rem;
+  margin-top: 0.25rem;
+}
+.oc-notfound__cta,
+.oc-route-error__cta {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.4rem;
+  padding: 0.5rem 0.9rem;
+  border-radius: var(--radius, 0.5rem);
+  border: 1px solid transparent;
+  background: var(--primary);
+  color: var(--primary-foreground);
+  font-size: 0.875rem;
+  font-weight: 500;
+  cursor: pointer;
+  transition: background-color 0.15s ease;
+}
+.oc-notfound__cta:hover,
+.oc-route-error__cta:hover {
+  background: color-mix(in srgb, var(--primary) 88%, black);
+}
+.oc-route-error__cta--ghost {
+  background: transparent;
+  border-color: var(--border);
+  color: var(--foreground);
+}
+.oc-route-error__cta--ghost:hover {
+  background: var(--muted);
+}
+
 /* Visually hidden but exposed to assistive tech (the standard SR-only clip). */
 .oc-sr-only {
   position: absolute;
@@ -966,15 +1038,27 @@
    legible French label. Driven by the pure `runStatusView` mapping. ─────────── */
 .oc-run-status {
   display: inline-flex;
-  align-items: center;
-  gap: 0.45rem;
+  align-items: flex-start;
+  flex-wrap: wrap; /* a long error message wraps to a new line instead of
+                      squeezing the "Erreur" label into "Erre/ur" */
+  gap: 0.25rem 0.45rem;
   margin-top: 0.45rem;
   font-size: 0.8rem;
   line-height: 1.3;
   color: var(--muted-foreground);
 }
+.oc-run-status > svg {
+  flex-shrink: 0; /* never crush the status icon */
+  margin-top: 0.05rem;
+}
 .oc-run-status__label {
   font-variant-numeric: tabular-nums;
+  white-space: nowrap; /* the short label is atomic — never break it mid-word */
+  flex-shrink: 0;
+}
+.oc-run-status__error {
+  flex: 1 1 12rem;
+  min-width: 0;
 }
 /* "Réflexion…" — three dots bouncing in sequence (the typing indicator). */
 .oc-dots {
@@ -1931,6 +2015,46 @@
   font-size: 0.85rem; line-height: 1.4;
   display: inline-block; max-width: 28rem;
   overflow-wrap: anywhere;
+}
+
+/* Root cause + actionable fix hint + drill-down (dispatch_failures anomalies). */
+.oc-anomaly__cause {
+  display: flex;
+  flex-direction: column;
+  gap: 0.25rem;
+  max-width: 30rem;
+}
+.oc-anomaly__cause-head {
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+  flex-wrap: wrap;
+}
+.oc-anomaly__cause-label {
+  font-size: 0.85rem;
+  font-weight: 600;
+  color: var(--foreground);
+}
+.oc-anomaly__cause-hint {
+  margin: 0;
+  font-size: 0.78rem;
+  line-height: 1.4;
+  color: var(--muted-foreground);
+  overflow-wrap: anywhere;
+}
+.oc-anomaly__drill {
+  align-self: flex-start;
+  padding: 0.1rem 0.45rem;
+  border: 1px solid var(--border);
+  border-radius: var(--radius, 0.4rem);
+  background: transparent;
+  color: var(--primary);
+  font-size: 0.75rem;
+  font-weight: 500;
+  cursor: pointer;
+}
+.oc-anomaly__drill:hover {
+  background: var(--muted);
 }
 
 /* --- Integrations tab (D-3) ------------------------------------------------ */

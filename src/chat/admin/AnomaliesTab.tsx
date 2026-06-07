@@ -11,6 +11,7 @@ import { decodeRange, encodeRange } from "@/lib/routing/searchSchemas";
 import { useConfirm } from "@/components/ConfirmDialog";
 import { useToast } from "@/components/ui/toast";
 import { Badge } from "@/components/ui/badge";
+import { dispatchErrorInfo } from "@/lib/dispatchErrorInfo";
 import {
   Select,
   SelectContent,
@@ -300,6 +301,10 @@ export function AnomaliesTab() {
             cell: (r) => <span className="oc-anomaly__msg">{r.message}</span>,
           },
           {
+            header: "Cause & correctif",
+            cell: (r) => <CauseCell row={r} />,
+          },
+          {
             header: "Corrélation",
             cell: (r) =>
               r.correlationId ? (
@@ -313,6 +318,63 @@ export function AnomaliesTab() {
         ]}
       />
     </>
+  );
+}
+
+// Parse the dispatch-failure evidence (root cause + drill-down anchor). Only the
+// dispatch_failures detector carries this; other kinds return empty -> "—".
+function parseDispatchEvidence(r: AnomalyView): {
+  dominantCode?: string;
+  sampleCorrelationId?: string;
+} {
+  if (r.kind !== "openclaw.dispatch_failures" || !r.evidence) return {};
+  try {
+    const e = JSON.parse(r.evidence) as {
+      dominantCode?: string;
+      sampleCorrelationId?: string;
+    };
+    return {
+      dominantCode: e.dominantCode,
+      sampleCorrelationId: e.sampleCorrelationId,
+    };
+  } catch {
+    return {};
+  }
+}
+
+// Root cause + actionable fix hint + one-click drill-down into the failing turn's
+// traces. This is what turns "N dispatch failures" into something an admin can
+// actually fix (the user's explicit ask: "comprendre l'origine pour la fixer").
+function CauseCell({ row }: { row: AnomalyView }) {
+  const navigate = useNavigate();
+  const ev = parseDispatchEvidence(row);
+  if (!ev.dominantCode) return <span className="oc-traces__muted">—</span>;
+  const info = dispatchErrorInfo(ev.dominantCode);
+  const corr = ev.sampleCorrelationId;
+  return (
+    <div className="oc-anomaly__cause">
+      <div className="oc-anomaly__cause-head">
+        <span className="oc-anomaly__cause-label">{info.label}</span>
+        <code className="oc-traces__mono">{ev.dominantCode}</code>
+      </div>
+      <p className="oc-anomaly__cause-hint">{info.hint}</p>
+      {corr ? (
+        <button
+          type="button"
+          className="oc-anomaly__drill"
+          onClick={() =>
+            // Drill into the failing turn's traces. `limit` is required by the
+            // traces search schema (100 = its default window).
+            void navigate({
+              to: "/settings/traces",
+              search: { q: corr, limit: 100 },
+            })
+          }
+        >
+          ↗ Voir la trace
+        </button>
+      ) : null}
+    </div>
   );
 }
 

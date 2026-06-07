@@ -54,6 +54,10 @@ async function traceDispatch(
     dispatchStatus: "sent" | "failed";
     target?: { instanceName?: string; agentId?: string };
     reason?: string;
+    // Curated root-cause code (non-PHI enum). For a gateway refusal it comes from
+    // the bridge's classified 502 body; for the pre-bridge branches it is a fixed
+    // local code. NEVER the raw gateway message (that stays in the bridge log).
+    errorCode?: string;
   },
 ): Promise<void> {
   try {
@@ -73,11 +77,40 @@ async function traceDispatch(
         instanceName: args.target?.instanceName,
         agentId: args.target?.agentId,
         ...(args.reason ? { reason: args.reason } : {}),
+        ...(args.errorCode ? { errorCode: args.errorCode } : {}),
       }),
     });
   } catch {
     // Best-effort: never break the dispatch flow on a trace error.
   }
+}
+
+/**
+ * Extract the curated error CODE from the bridge's 502 response, tolerant of BOTH
+ * shapes so a Convex deploy can land BEFORE the new bridge image is pulled:
+ *   - new bridge: { ok:false, error: { code } }  -> returns code
+ *   - old bridge: { ok:false, error: "..." }     -> returns undefined (no code)
+ * The `response.json()` is itself guarded: a 502 with an empty/non-JSON body must
+ * never throw here, or the dispatch would crash and regress to a SILENT failure
+ * (the very bug we are fixing). Returns undefined on any parse problem.
+ */
+export async function readErrorCode(
+  response: Response,
+): Promise<string | undefined> {
+  try {
+    const body = (await response.json()) as { error?: unknown };
+    const err = body?.error;
+    if (
+      err !== null &&
+      typeof err === "object" &&
+      typeof (err as { code?: unknown }).code === "string"
+    ) {
+      return (err as { code: string }).code;
+    }
+  } catch {
+    // empty / non-JSON body -> no structured cause; never throw
+  }
+  return undefined;
 }
 
 // Read a single outbox row (used by the dispatch action, which has no db
@@ -101,6 +134,62 @@ export const markOutbox = internalMutation({
       return; // row gone; nothing to do
     }
     await ctx.db.patch(outboxId, { status });
+  },
+});
+
+// User-facing message shown when a turn could NOT be dispatched. FR (the app is
+// mono-lingual; the message `error` field already carries free-text). Each ends
+// with a short non-secret `(réf. …)` so a user has something concrete to tell
+// their admin and the admin a key to grep traces/logs by — no gateway detail,
+// token, or PHI ever crosses into this user-visible string.
+const DISPATCH_FAILURE_MESSAGE: Record<string, string> = {
+  not_configured:
+    "Le service de chat n’est pas encore configuré. Contactez votre administrateur. (réf. bridge-config)",
+  unrouted:
+    "Votre compte n’est rattaché à aucun assistant. Contactez votre administrateur. (réf. routing)",
+  send_failed:
+    "Le service de chat est momentanément indisponible. Réessayez ; si le problème persiste, contactez votre administrateur. (réf. bridge)",
+};
+
+// Terminal FAILURE transition for a dispatch, in ONE transaction: mark the outbox
+// row failed AND surface the failure to the user as an assistant `error` turn (the
+// frontend's RunStatus renders status:"error" + the `error` text). Before this, a
+// dispatch that never reached/was-refused-by the bridge left the user staring at
+// their own message with no reply and no signal — the silent failure we are
+// killing. Idempotent + retry-safe: an action may re-run after a partial commit,
+// so the whole patch+insert is gated on the row still being `pending` inside the
+// transaction — a second run sees `failed` and inserts no duplicate bubble.
+export const failDispatch = internalMutation({
+  args: {
+    outboxId: v.id("outbox"),
+    reason: v.union(
+      v.literal("not_configured"),
+      v.literal("unrouted"),
+      v.literal("send_failed"),
+    ),
+  },
+  handler: async (ctx, { outboxId, reason }) => {
+    const row = await ctx.db.get(outboxId);
+    if (row === null || row.status !== "pending") {
+      return; // already terminal (or gone) — never double-fire
+    }
+    await ctx.db.patch(outboxId, { status: "failed" });
+
+    // Resilient to a chat deleted mid-turn: no chat -> nothing to render.
+    const chat = await ctx.db.get(row.chatId);
+    if (chat === null) return;
+    const now = Date.now();
+    await ctx.db.insert("messages", {
+      chatId: row.chatId,
+      userId: row.userId,
+      role: "assistant",
+      status: "error",
+      text: "",
+      error: DISPATCH_FAILURE_MESSAGE[reason] ?? DISPATCH_FAILURE_MESSAGE.send_failed,
+      updatedAt: now,
+    });
+    // Keep the chat sorted-to-top so the failed turn is visible in the sidebar.
+    await ctx.db.patch(row.chatId, { updatedAt: now });
   },
 });
 
@@ -151,15 +240,16 @@ export const dispatch = internalAction({
       console.error(
         "bridge.dispatch: BRIDGE_URL / BRIDGE_SHARED_SECRET not configured",
       );
-      await ctx.runMutation(internal.bridge.markOutbox, {
+      await ctx.runMutation(internal.bridge.failDispatch, {
         outboxId,
-        status: "failed",
+        reason: "not_configured",
       });
       await traceDispatch(ctx, {
         outboxId,
         chatId: row.chatId,
         dispatchStatus: "failed",
         reason: "not_configured",
+        errorCode: "NOT_CONFIGURED",
       });
       return;
     }
@@ -173,15 +263,16 @@ export const dispatch = internalAction({
     // rather than send to a wrong/absent target.
     if (!routing || routing.target === null) {
       console.error("bridge.dispatch: user is unrouted (no valve target)");
-      await ctx.runMutation(internal.bridge.markOutbox, {
+      await ctx.runMutation(internal.bridge.failDispatch, {
         outboxId,
-        status: "failed",
+        reason: "unrouted",
       });
       await traceDispatch(ctx, {
         outboxId,
         chatId: row.chatId,
         dispatchStatus: "failed",
         reason: "unrouted",
+        errorCode: "UNROUTED",
       });
       return;
     }
@@ -227,6 +318,9 @@ export const dispatch = internalAction({
     // safe; retry/reconciliation is the operator's explicit action on a failed
     // row, not an implicit re-fire.
     let ok = false;
+    // Curated root-cause code for a failed send (non-PHI). From the bridge's 502
+    // body when reachable; a fixed local code when the bridge can't be reached.
+    let errorCode: string | undefined;
     try {
       const response = await fetch(`${bridgeUrl.replace(/\/$/, "")}/send`, {
         method: "POST",
@@ -258,16 +352,29 @@ export const dispatch = internalAction({
       ok = response.ok;
       if (!ok) {
         console.error(`bridge POST /send -> HTTP ${response.status}`);
+        // Parse the curated cause from the 502 body (tolerant of old/new bridge).
+        errorCode = await readErrorCode(response);
       }
     } catch (err) {
       console.error("bridge POST /send failed:", err);
       ok = false;
+      // Network-level: the request never reached the bridge (down / wrong URL).
+      errorCode = "BRIDGE_UNREACHABLE";
     }
 
-    await ctx.runMutation(internal.bridge.markOutbox, {
-      outboxId,
-      status: ok ? "sent" : "failed",
-    });
+    if (ok) {
+      await ctx.runMutation(internal.bridge.markOutbox, {
+        outboxId,
+        status: "sent",
+      });
+    } else {
+      // The bridge accepted the POST shape but the gateway refused the turn
+      // (502): surface it to the user instead of leaving the message unanswered.
+      await ctx.runMutation(internal.bridge.failDispatch, {
+        outboxId,
+        reason: "send_failed",
+      });
+    }
     await traceDispatch(ctx, {
       outboxId,
       chatId: row.chatId,
@@ -278,6 +385,7 @@ export const dispatch = internalAction({
         instanceName: routing.target.instanceName,
         agentId: routing.target.agentId,
       },
+      ...(ok ? {} : { reason: "send_failed", errorCode }),
     });
   },
 });

@@ -15,6 +15,7 @@ import {
   type ReactNode,
 } from "react";
 import { useQuery, useMutation, useConvex } from "convex/react";
+import { useNavigate } from "@tanstack/react-router";
 import { api } from "./convexApi";
 import type { Id } from "./convexApi";
 import type { ConvexId, ConvexMessageView } from "./convexTypes";
@@ -34,6 +35,7 @@ import {
   Mic,
   Trash2,
   Code,
+  Search,
 } from "lucide-react";
 import {
   DropdownMenu,
@@ -97,24 +99,67 @@ export function ConvexChat({ chatId }: ConvexChatProps) {
   const showTools = ui.showTools;
   const setUiPref = useMutation(api.me.setUiPref);
 
+  // Not-found detection for a deep-linked chat. getSessionMeta returns `null` once
+  // LOADED for a malformed/deleted chat (and `undefined` while still loading), so
+  // `meta === null` with a chatId present means "this conversation does not exist"
+  // — we render a clean in-shell message instead of an empty thread. (The backend
+  // queries tolerate a malformed id via normalizeId, so this never throws.)
+  const meta = useQuery(
+    api.messages.getSessionMeta,
+    chatId ? { chatId: chatId as Id<"chats"> } : "skip",
+  );
+  const notFound = chatId !== null && meta === null;
+
   return (
     <AssistantRuntimeProvider runtime={runtime}>
       <UiPrefsContext.Provider value={ui}>
         <div className={`oc-chat${showTools ? "" : " oc-hide-tools"}`}>
           {chatId ? (
-            <ChatThread
-              chatId={chatId}
-              showTools={showTools}
-              onToggleTools={() =>
-                void setUiPref({ key: "showTools", value: !showTools })
-              }
-            />
+            notFound ? (
+              <ChatNotFound />
+            ) : (
+              <ChatThread
+                chatId={chatId}
+                showTools={showTools}
+                onToggleTools={() =>
+                  void setUiPref({ key: "showTools", value: !showTools })
+                }
+              />
+            )
           ) : (
             <div className="oc-empty">Select or create a chat to begin.</div>
           )}
         </div>
       </UiPrefsContext.Provider>
     </AssistantRuntimeProvider>
+  );
+}
+
+// Clean, in-application "conversation not found" state for a stale/typo'd deep
+// link (the backend returns not-found rather than throwing, so the user never
+// sees the router's raw error screen). Stays inside the app shell (sidebar +
+// top bar remain) and offers a way forward.
+function ChatNotFound() {
+  const navigate = useNavigate();
+  return (
+    <div className="oc-notfound" role="status">
+      <div className="oc-notfound__icon" aria-hidden>
+        <Search size={28} />
+      </div>
+      <h2 className="oc-notfound__title">Conversation introuvable</h2>
+      <p className="oc-notfound__body">
+        Ce lien ne correspond à aucune conversation. Elle a peut-être été
+        supprimée, ou l’adresse est incomplète.
+      </p>
+      <button
+        type="button"
+        className="oc-notfound__cta"
+        onClick={() => void navigate({ to: "/" })}
+      >
+        <Plus size={16} aria-hidden />
+        Nouvelle conversation
+      </button>
+    </div>
   );
 }
 

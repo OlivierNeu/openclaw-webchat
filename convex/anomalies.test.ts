@@ -29,6 +29,7 @@ async function seedTrace(
     at?: number;
     status?: number;
     meta?: Record<string, unknown>;
+    correlationId?: string;
   },
 ): Promise<void> {
   await ctx.db.insert("traceEvents", {
@@ -37,11 +38,51 @@ async function seedTrace(
     principalType: "system",
     status: e.status,
     redacted: true,
+    correlationId: e.correlationId,
     meta: e.meta ? JSON.stringify(e.meta) : undefined,
   });
 }
 
 describe("anomaly detection", () => {
+  test("a SINGLE dispatch failure trips a WARN anomaly with root cause + drill-down anchor (threshold 1)", async () => {
+    const t = convexTest(schema, modules);
+    const now = Date.now();
+    await t.run(async (ctx) => {
+      // ONE failed dispatch, carrying the curated root-cause code (errorCode) and
+      // the failing turn's correlationId — exactly what bridge.ts now writes.
+      await seedTrace(ctx, {
+        kind: "openclaw.dispatch",
+        at: now - 1000,
+        correlationId: "chat123:outbox456",
+        meta: { dispatchStatus: "failed", errorCode: "AGENT_NOT_FOUND" },
+      });
+    });
+
+    const r = await t.mutation(internal.anomalies.detectAnomalies, {});
+    expect(r.detected).toContain("openclaw.dispatch_failures");
+
+    const row = await t.run(async (ctx) =>
+      ctx.db
+        .query("anomalies")
+        .withIndex("by_status_kind", (q) =>
+          q.eq("status", "open").eq("kind", "openclaw.dispatch_failures"),
+        )
+        .first(),
+    );
+    expect(row).not.toBeNull();
+    // 1 failure is a WARN (CRITICAL only at >=10) — so a self-repair signal keyed
+    // on criticalCount is NOT tripped by a single failure.
+    expect(row!.severity).toBe("warn");
+    const ev = JSON.parse(row!.evidence!) as {
+      dispatchFailures: number;
+      dominantCode: string;
+      sampleCorrelationId: string;
+    };
+    expect(ev.dispatchFailures).toBe(1);
+    expect(ev.dominantCode).toBe("AGENT_NOT_FOUND"); // the actionable root cause
+    expect(ev.sampleCorrelationId).toBe("chat123:outbox456"); // drill-down anchor
+  });
+
   test("detects, de-dupes, resolves, and heartbeats", async () => {
     const t = convexTest(schema, modules);
 

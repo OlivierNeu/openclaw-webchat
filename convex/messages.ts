@@ -39,20 +39,29 @@ type ClientPart =
   | { kind: "reasoning"; text: string };
 
 export const listByChat = query({
-  args: { chatId: v.id("chats") },
+  // v.string (NOT v.id): the chatId comes straight from the URL (/chat/$chatId)
+  // and may be malformed (a truncated/typo'd deep link). With v.id, a bad value
+  // throws an ArgumentValidationError that surfaces as the router's raw
+  // "Something went wrong" screen — the opposite of a clean app-shell message.
+  // We accept a string and validate via normalizeId instead.
+  args: { chatId: v.string() },
   handler: async (ctx, { chatId }) => {
     const { userId } = await requireActive(ctx);
-    // Resilient to a just-deleted chat (e.g. the active chat was removed while
-    // still selected): return empty instead of throwing, so the reactive query
-    // does not error in the client. A chat owned by someone else still throws.
-    const chat = await ctx.db.get(chatId);
+    // normalizeId validates the id FORMAT for this table WITHOUT throwing (null on
+    // a malformed shape). A well-formed-but-deleted id passes here, then db.get
+    // returns null — so malformed AND deleted both funnel to the same clean empty
+    // result the client renders as "conversation introuvable". A chat owned by
+    // someone else still throws (an IDOR signal, handled by the route fallback).
+    const id = ctx.db.normalizeId("chats", chatId);
+    if (id === null) return [];
+    const chat = await ctx.db.get(id);
     if (chat === null) return [];
     if (chat.userId !== userId) throw new Error("Forbidden: chat not owned by user");
 
     // Bounded read: most-recent MESSAGE_WINDOW messages, newest first.
     const recentDesc = await ctx.db
       .query("messages")
-      .withIndex("by_chat", (q) => q.eq("chatId", chatId))
+      .withIndex("by_chat", (q) => q.eq("chatId", id))
       .order("desc")
       .take(MESSAGE_WINDOW);
 
@@ -136,10 +145,15 @@ export const listByChat = query({
 // to a just-deleted chat (returns null instead of throwing, so the reactive
 // header does not error while the active chat is being removed).
 export const getSessionMeta = query({
-  args: { chatId: v.id("chats") },
+  // v.string + normalizeId (same rationale as listByChat): tolerate a malformed
+  // URL chatId. Returns null for a malformed/deleted chat so the header renders
+  // the clean "introuvable" state instead of throwing the router error screen.
+  args: { chatId: v.string() },
   handler: async (ctx, { chatId }) => {
     const { userId } = await requireActive(ctx);
-    const chat = await ctx.db.get(chatId);
+    const id = ctx.db.normalizeId("chats", chatId);
+    if (id === null) return null;
+    const chat = await ctx.db.get(id);
     if (chat === null) return null;
     if (chat.userId !== userId) {
       throw new Error("Forbidden: chat not owned by user");

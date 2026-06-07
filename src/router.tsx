@@ -35,9 +35,16 @@ import {
   Outlet,
   useNavigate,
   useParams,
+  type ErrorComponentProps,
 } from "@tanstack/react-router";
 import { z } from "zod";
-import { Eye, PanelLeftClose, PanelLeftOpen } from "lucide-react";
+import {
+  Eye,
+  PanelLeftClose,
+  PanelLeftOpen,
+  AlertTriangle,
+  Compass,
+} from "lucide-react";
 import { api } from "./chat/convexApi";
 import type { Id } from "./chat/convexApi";
 import type { ConvexId } from "./chat/convexTypes";
@@ -610,6 +617,66 @@ const settingsTabRoute = createRoute({
   component: SettingsParamlessScreen,
 });
 
+// Router-wide error fallback (the safety net). TanStack renders this IN the
+// nearest parent route boundary — i.e. inside RootShell's <Outlet> — so the app
+// shell (sidebar + top bar) survives and the user never sees the raw
+// "Something went wrong" screen with a thrown stack. We deliberately do NOT
+// render `error.message` (it can carry "Forbidden: chat not owned by user" or
+// other internal detail) — the message stays generic; details live in logs.
+function RouteError({ reset }: ErrorComponentProps) {
+  const navigate = useNavigate();
+  return (
+    <div className="oc-route-error" role="alert">
+      <div className="oc-route-error__icon" aria-hidden>
+        <AlertTriangle size={28} />
+      </div>
+      <h2 className="oc-route-error__title">Une erreur est survenue</h2>
+      <p className="oc-route-error__body">
+        Cette page n’a pas pu être affichée. Réessayez, ou revenez à l’accueil. Si
+        le problème persiste, contactez votre administrateur.
+      </p>
+      <div className="oc-route-error__actions">
+        <button type="button" className="oc-route-error__cta" onClick={() => reset()}>
+          Réessayer
+        </button>
+        <button
+          type="button"
+          className="oc-route-error__cta oc-route-error__cta--ghost"
+          onClick={() => void navigate({ to: "/" })}
+        >
+          Accueil
+        </button>
+      </div>
+    </div>
+  );
+}
+
+// Unknown URL fallback (also rendered inside the shell). Same friendly, in-app
+// treatment as a not-found chat rather than a bare router default.
+function RouteNotFound() {
+  const navigate = useNavigate();
+  return (
+    <div className="oc-route-error" role="status">
+      <div className="oc-route-error__icon" aria-hidden>
+        <Compass size={28} />
+      </div>
+      <h2 className="oc-route-error__title">Page introuvable</h2>
+      <p className="oc-route-error__body">
+        Cette adresse ne correspond à aucune page de l’application.
+      </p>
+      <div className="oc-route-error__actions">
+        <button
+          type="button"
+          className="oc-route-error__cta"
+          onClick={() => void navigate({ to: "/" })}
+        >
+          Accueil
+        </button>
+      </div>
+    </div>
+  );
+}
+
 const routeTree = rootRoute.addChildren([
   indexRoute,
   chatRoute,
@@ -626,7 +693,15 @@ const routeTree = rootRoute.addChildren([
   ]),
 ]);
 
-export const router = createRouter({ routeTree, defaultPreload: "intent" });
+export const router = createRouter({
+  routeTree,
+  defaultPreload: "intent",
+  // App-shell-preserving fallbacks (see RouteError / RouteNotFound). Without
+  // these, an unexpected throw in any route surfaces TanStack's raw default
+  // error screen outside the application chrome.
+  defaultErrorComponent: RouteError,
+  defaultNotFoundComponent: RouteNotFound,
+});
 
 // Global type registration — makes the whole app type-safe against the tree.
 declare module "@tanstack/react-router" {

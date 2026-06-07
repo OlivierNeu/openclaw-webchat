@@ -54,8 +54,13 @@ const API_ERROR_MIN_CALLS = 10;
 const API_ERROR_RATIO_WARN = 0.25;
 const API_ERROR_RATIO_CRITICAL = 0.5;
 
-// openclaw.dispatch_failures: repeated outbound dispatch failures in the window.
-const DISPATCH_FAIL_WARN = 3;
+// openclaw.dispatch_failures: outbound dispatch failures in the window. WARN at 1
+// (operator decision 2026-06-07): for a chat platform a single failed dispatch =
+// a user who got no reply, which is notable, not noise — and auto-resolve clears
+// it once the 15m window empties. It stays a WARN until CRITICAL (heartbeat
+// exposes bySeverity, so a self-repair signal keyed on criticalCount is NOT
+// tripped by an isolated failure). Each occurrence is also in Traces in real time.
+const DISPATCH_FAIL_WARN = 1;
 const DISPATCH_FAIL_CRITICAL = 10;
 
 // assistant.stream_errors: error/aborted finalize bursts in the window.
@@ -111,11 +116,45 @@ function isDispatchFailure(row: Doc<"traceEvents">): boolean {
   }
 }
 
+/**
+ * Curated root-cause code carried on a failed-dispatch trace (meta.errorCode,
+ * written by bridge.ts). Non-PHI by construction (a stable enum, never the raw
+ * gateway text). Absent on traces written before this feature shipped, or when an
+ * old bridge image returned no code — callers fall back to "UNKNOWN".
+ */
+function dispatchFailureCode(row: Doc<"traceEvents">): string | undefined {
+  if (row.meta === undefined) return undefined;
+  try {
+    const m = JSON.parse(row.meta) as { errorCode?: string };
+    return typeof m.errorCode === "string" ? m.errorCode : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
+/** Key with the highest count (the dominant root cause). Undefined if empty. */
+function topKey(counts: Record<string, number>): string | undefined {
+  let best: string | undefined;
+  let max = -1;
+  for (const [k, n] of Object.entries(counts)) {
+    if (n > max) {
+      max = n;
+      best = k;
+    }
+  }
+  return best;
+}
+
 /** Window aggregates folded over the scan, used by the detectors. */
 type WindowAgg = {
   apiCalls: number;
   apiErrors: number;
   dispatchFailures: number;
+  // Root-cause breakdown of the dispatch failures (errorCode -> count) so the
+  // anomaly can name the DOMINANT cause, not just a bare count. Plus the most
+  // recent failed-turn correlationId, for a one-click drill-down into Traces.
+  dispatchCodes: Record<string, number>;
+  dispatchSampleCorrelation?: string;
   streamErrors: number;
   ingestDenied: number;
 };
@@ -234,6 +273,7 @@ export const detectAnomalies = internalMutation({
       apiCalls: 0,
       apiErrors: 0,
       dispatchFailures: 0,
+      dispatchCodes: {},
       streamErrors: 0,
       ingestDenied: 0,
     };
@@ -245,7 +285,14 @@ export const detectAnomalies = internalMutation({
           break;
         }
         case "openclaw.dispatch": {
-          if (isDispatchFailure(row)) agg.dispatchFailures += 1;
+          if (isDispatchFailure(row)) {
+            agg.dispatchFailures += 1;
+            const code = dispatchFailureCode(row) ?? "UNKNOWN";
+            agg.dispatchCodes[code] = (agg.dispatchCodes[code] ?? 0) + 1;
+            // rows are scanned oldest -> newest, so the last write wins = the most
+            // recent failed turn (the one an admin most likely wants to inspect).
+            if (row.correlationId) agg.dispatchSampleCorrelation = row.correlationId;
+          }
           break;
         }
         case "assistant.stream": {
@@ -290,16 +337,25 @@ export const detectAnomalies = internalMutation({
       }
     }
 
-    // 2) Repeated openclaw.dispatch failures.
+    // 2) openclaw.dispatch failures (WARN at 1). The anomaly names the DOMINANT
+    //    root cause and carries a sample correlationId so the admin can jump
+    //    straight to the failing turn in Traces — turning "N failures" into an
+    //    actionable, fixable signal.
     if (agg.dispatchFailures >= DISPATCH_FAIL_WARN) {
       const severity: Severity =
         agg.dispatchFailures >= DISPATCH_FAIL_CRITICAL ? "critical" : "warn";
+      const dominantCode = topKey(agg.dispatchCodes);
       await upsertDetectorAnomaly(ctx, {
         kind: ANOMALY_KINDS.DISPATCH_FAILURES,
         severity,
-        message: `Repeated OpenClaw dispatch failures: ${agg.dispatchFailures} over ${windowMin}m`,
+        message: dominantCode
+          ? `OpenClaw dispatch failures: ${agg.dispatchFailures} over ${windowMin}m — dominant cause: ${dominantCode}`
+          : `OpenClaw dispatch failures: ${agg.dispatchFailures} over ${windowMin}m`,
         evidence: {
           dispatchFailures: agg.dispatchFailures,
+          dominantCode,
+          codeCounts: agg.dispatchCodes,
+          sampleCorrelationId: agg.dispatchSampleCorrelation,
           windowMs: DETECT_WINDOW_MS,
           warnThreshold: DISPATCH_FAIL_WARN,
           criticalThreshold: DISPATCH_FAIL_CRITICAL,
