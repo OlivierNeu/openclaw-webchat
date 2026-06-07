@@ -220,7 +220,7 @@ function RoleGate() {
         <header className="oc-topbar">
           <span className="oc-topbar__brand">OpenClaw</span>
           <div className="oc-topbar__actions">
-            <UserMenu label={userLabel} mode={me.themeMode} />
+            <UserMenu label={userLabel} mode={me.themeMode} minimal />
           </div>
         </header>
         <div className="oc-pending">

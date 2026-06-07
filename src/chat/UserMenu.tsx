@@ -23,9 +23,14 @@ import type { ThemeMode } from "@/lib/useTheme";
 export function UserMenu({
   label,
   mode,
+  minimal = false,
 }: {
   label: string;
   mode: ThemeMode | null;
+  // Minimal surface for an UNAPPROVED (pending) account: ONLY sign out — no
+  // theme controls, no UI preferences. A pending user has zero app permissions,
+  // so it must not see any app config either.
+  minimal?: boolean;
 }) {
   const { signOut } = useAuthActions();
   const setThemeMode = useMutation(api.me.setThemeMode);
@@ -42,42 +47,52 @@ export function UserMenu({
         </Button>
       </DropdownMenuTrigger>
       <DropdownMenuContent align="end" className="w-52">
-        <DropdownMenuLabel>Préférences</DropdownMenuLabel>
-        <DropdownMenuRadioGroup
-          value={value}
-          onValueChange={(v) =>
-            void setThemeMode({ mode: v === "default" ? null : (v as ThemeMode) })
-          }
-        >
-          <DropdownMenuRadioItem value="light">
-            <Sun /> Clair
-          </DropdownMenuRadioItem>
-          <DropdownMenuRadioItem value="dark">
-            <Moon /> Sombre
-          </DropdownMenuRadioItem>
-          <DropdownMenuRadioItem value="system">
-            <Monitor /> Système
-          </DropdownMenuRadioItem>
-          <DropdownMenuRadioItem value="default">
-            Défaut de l’app
-          </DropdownMenuRadioItem>
-        </DropdownMenuRadioGroup>
-        <DropdownMenuSeparator />
-        {/* Detailed UI preferences (source/report/copy/delete/tools/voice…). The
-            dialog is mounted app-level (PreferencesProvider), so the menu closing
-            here does not unmount it. */}
-        <DropdownMenuItem
-          onSelect={(e) => {
-            e.preventDefault();
-            openPreferences();
-          }}
-        >
-          <SlidersHorizontal /> Préférences…
-        </DropdownMenuItem>
-        <DropdownMenuSeparator />
-        <DropdownMenuItem onClick={() => void signOut()}>
-          <LogOut /> Sign out
-        </DropdownMenuItem>
+        {minimal ? (
+          <DropdownMenuItem onClick={() => void signOut()}>
+            <LogOut /> Sign out
+          </DropdownMenuItem>
+        ) : (
+          <>
+            <DropdownMenuLabel>Préférences</DropdownMenuLabel>
+            <DropdownMenuRadioGroup
+              value={value}
+              onValueChange={(v) =>
+                void setThemeMode({
+                  mode: v === "default" ? null : (v as ThemeMode),
+                })
+              }
+            >
+              <DropdownMenuRadioItem value="light">
+                <Sun /> Clair
+              </DropdownMenuRadioItem>
+              <DropdownMenuRadioItem value="dark">
+                <Moon /> Sombre
+              </DropdownMenuRadioItem>
+              <DropdownMenuRadioItem value="system">
+                <Monitor /> Système
+              </DropdownMenuRadioItem>
+              <DropdownMenuRadioItem value="default">
+                Défaut de l’app
+              </DropdownMenuRadioItem>
+            </DropdownMenuRadioGroup>
+            <DropdownMenuSeparator />
+            {/* Detailed UI preferences (source/report/copy/delete/tools/voice…).
+                The dialog is mounted app-level (PreferencesProvider), so the menu
+                closing here does not unmount it. */}
+            <DropdownMenuItem
+              onSelect={(e) => {
+                e.preventDefault();
+                openPreferences();
+              }}
+            >
+              <SlidersHorizontal /> Préférences…
+            </DropdownMenuItem>
+            <DropdownMenuSeparator />
+            <DropdownMenuItem onClick={() => void signOut()}>
+              <LogOut /> Sign out
+            </DropdownMenuItem>
+          </>
+        )}
       </DropdownMenuContent>
     </DropdownMenu>
   );
