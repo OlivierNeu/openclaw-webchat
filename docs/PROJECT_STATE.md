@@ -994,6 +994,131 @@ row status **complete** ("Bridge validé, je te reçois bien."). CAPTURED LIVE G
   microsoft-entra-id + AUTH_ALLOWED_EMAIL_DOMAINS = the tenant domains. Files: auth.ts, lib/authDomains.ts
   (anonAuthEnabled + extractEntraEmail), lib/access.ts (no-email gate), me.ts (authProviders), router.tsx
   (SignIn), authDomains.test.ts. NEVER committed. (Magic-link email auth NOT requested — user chose Microsoft.)
+  **NAS DEPLOYMENT PACKAGE — Convex self-hosted + app + bridge (Container Manager) — PRODUCED + COMPOSE-
+  VALIDATED 2026-06-06 (not live-deployed — no NAS access):** Olivier: install Convex self-hosted on the NAS,
+  then the webchat + backend. Chosen topology (AskUserQuestion): OpenClaw CO-LOCATED (shared media volume),
+  PUBLIC domain + HTTPS (2 subdomains), SQLite volume. Produced `deploy/`: `docker-compose.nas.yml`
+  (convex-backend ghcr.io/get-convex/convex-backend:latest 3210/3211 + convex-dashboard 6791 [127.0.0.1 only,
+  never public] + openclaw [neuolivier/openclaw-docker, shared media-outbound RW] + bridge [→ convex-backend:3211
+  internal, media RO] + frontend [nginx]), `frontend.Dockerfile` (+ nginx.conf SPA fallback), `.env.nas.example`,
+  `README.md` (staged runbook). KEY DECISIONS (advisor): (1) **VITE_CONVEX_URL is BUILD-TIME** → frontend image
+  origin-pinned, built with the PUBLIC cloud origin as a build-arg (can't inject at runtime — the silent
+  breaker). (2) **CONVEX_CLOUD_ORIGIN/SITE_ORIGIN = public HTTPS** (2 stable subdomains api.→3210 / site.→3211
+  via Synology reverse proxy + WS upgrade; NOT path-routing). (3) **TWO ENV SCOPES** kept separate: compose
+  .env (INSTANCE_*, origins, bridge wiring, frontend build-arg) vs `npx convex env set` (auth JWT keys, Google,
+  Langfuse/Opik, BRIDGE_* [same values both sides], BRIDGE_URL=http://bridge:8787). (4) **Auth on self-hosted
+  is MANUAL** — generate FRESH JWKS/JWT_PRIVATE_KEY/SITE_URL(=public app origin); the convex-auth-local-jwt-keys
+  gotchas (real newlines, raw JWKS) recur. (5) **OPENCLAW_ENABLE_ANON_AUTH must be UNSET in prod** (the
+  no-email-reject gate). (6) Security: dashboard + INSTANCE_SECRET + admin key = root creds (LAN/tunnel only,
+  back up INSTANCE_SECRET, backups via `npx convex export`). Staged runbook: backend+dashboard → admin key →
+  `npx convex deploy` (CONVEX_SELF_HOSTED_URL+ADMIN_KEY) → set deployment env → frontend (public origin) →
+  openclaw+bridge. `docker compose -f deploy/docker-compose.nas.yml config` = OK (validated). LEGACY marked
+  (root docker-compose.yml/Dockerfile = Firebase/FastAPI, backend/Dockerfile = FastAPI) "superseded by deploy/"
+  — NOT deleted. NOT live-verified (no NAS access) → templates + runbook; pin convex images off :latest once a
+  working tag is confirmed on-device. NEVER committed.
+  **NAS DEPLOY CORRECTED 2026-06-06 (Olivier: "j'ai déjà mes instances OpenClaw, pourquoi tu en installes ?"
+  — pointed to `openclaw-notes/docker-compose.yml`):** the topology above was WRONG on two points.
+  (1) The package now INTEGRATES WITH the EXISTING OpenClaw — it does NOT install one. His real stack:
+  `openclaw-olivier` (neuolivier/openclaw-docker:openclaw-2026.5.19, gateway host port **18789**,
+  `OPENCLAW_GATEWAY_BIND=lan`, VPN off) + `openclaw-jerome` (**18791**, ataraxis-coaching.com) +
+  postgres/hindsight/n8n/lightrag/neo4j/litellm; state on HOST BINDS `/volume3/openclaw/instances/<tenant>/.openclaw`;
+  fronted by **Traefik FILE-PROVIDER** (`gateway.lacneu.com` → `http://192.168.1.49:18789`, NO docker labels).
+  So `docker-compose.nas.yml` now = convex-backend + convex-dashboard + bridge + frontend (**openclaw service
+  REMOVED**; `media-outbound` named volume REMOVED). Bridge → existing gateway `ws://192.168.1.49:18789` (host IP,
+  same backend Traefik uses) + READ-ONLY host-bind of `…/olivier/.openclaw/media/outbound`. (2) Reverse proxy =
+  **Traefik file-provider routes** (api./site./app → host ports), NOT the Synology Login Portal. README Stage 0
+  (Traefik) + Stage 3 (bridge↔existing gateway, incl. the transport-trust caveat AUTH_TOKEN_MISMATCH→loopback/
+  network-join, + multi-tenant jerome) rewritten. `.env.nas.example` updated (gateway 18789, media host-bind,
+  no OPENCLAW_VERSION). `docker compose config` re-validated = OK (4 services, no openclaw, gateway+media bind
+  resolved). #58 (NAS config aligned with the local-validated chain) → DONE. Still NOT live-verified.
+  **COMPONENTIZATION PIVOT 2026-06-06 (Olivier: stop the monorepo `deploy/` approach; split into independent
+  repos + Docker Hub images + npm, 3 Container Manager projects). SUPERSEDES the `deploy/` folder (to be deleted
+  in C5).** Target = 3 independent units, 2 NEW Docker Hub images:
+  • **App repo** = the CURRENT `openclaw-webchat` repurposed = `src/` (front) + `convex/` (functions) + `mcp/`
+    (HTTP client of /api/v1) + docs. Coupling front↔convex = codegen (`_generated`) → MUST stay same repo.
+    CI on tag `v*`: codegen+typecheck+test → publish `@lacneu/openclaw-webchat` (npm, Trusted Publishing OIDC,
+    pattern from hindsight-openclaw-plugin/.github/workflows/release.yml) + build&push a STATIC-SERVER image
+    `lacneu/openclaw-webchat` (Docker Hub + ghcr, pattern from openclaw-docker/.github/workflows/build-and-push.yml).
+    Functions deployed by each operator via `npx convex deploy` (NOT an image).
+  • **Bridge repo** = NEW `openclaw-webchat-bridge` (git init, NO history — Olivier's call). Already standalone
+    (own package.json/Dockerfile, talks Convex over HTTP via its own `convex-writer` — NO `_generated` import →
+    decoupled). `local-openclaw/` MOVES here (it's the bridge's live harness; its scripts `cd ../bridge` → fix to
+    repo root). CI = build-and-push Docker Hub `lacneu/openclaw-webchat-bridge`.
+  • **Convex engine + dashboard** = published images (ghcr.io/get-convex/convex-backend + convex-dashboard) →
+    compose `openclaw-notes/convex/docker-compose.yml` (CM project #2). Front+bridge → `openclaw-notes/openclaw-webchat/
+    docker-compose.yml` (CM project #3, pulls the 2 Docker Hub images). OpenClaw = existing CM project #1.
+  3 CM projects = 3 Docker networks → ALL cross-project links use HOST-IP/public origin, NEVER service names:
+  bridge→Convex `http://192.168.1.49:3211` (or https://site.), bridge→gateway `ws://192.168.1.49:18789`,
+  front→Convex `https://api.` (browser, via config.json). Traefik file-provider routes api./site./chat. → host ports.
+  Tasks #77–82 (C1–C6). **C1 DONE + LIVE-VERIFIED 2026-06-06:** runtime-config refactor — `VITE_CONVEX_URL`
+  build-time bake → `src/lib/runtimeConfig.ts` `resolveConvexUrl()` (fetch `/config.json` {convexUrl} → fallback
+  `import.meta.env.VITE_CONVEX_URL`); `main.tsx` async-boot (splash → resolve → client → app, or BootMessage on
+  error). Makes the bundle ORIGIN-AGNOSTIC (the prerequisite for a distributable artifact). typecheck✓ build✓
+  151 tests✓ + browser smoke at :5174 (app boots, Convex connects, NO console errors). KEY C2 NOTE: the PROD image
+  build must NOT pass VITE_CONVEX_URL (else it bakes a fallback) → only /config.json drives it; the static server
+  must serve /config.json as a REAL file (entrypoint writes it from env) and NOT shadow it with the SPA fallback.
+  NEVER committed.
+  **C2 DONE + DOCKER-VERIFIED 2026-06-06 (App CI + static image):** `docker/Dockerfile` (multi-stage node:24
+  build → **caddy:2-alpine** serve, NOT nginx — Olivier decommissioned nginx & wants minimal/100%-CI/served-from-NAS)
+  + `docker/Caddyfile` (`admin off`, `auto_https off`, no-store on /config.json, immutable on /assets, `try_files
+  {path} /index.html` so /config.json + /assets are NOT shadowed) + `docker/docker-entrypoint.sh` (writes
+  /srv/config.json from $CONVEX_URL, **fails fast if unset**). `.github/workflows/ci.yml` (push/PR, node 22+24,
+  typecheck+build+test on committed _generated) + `release.yml` (tag v* → test gate → npm publish OIDC Trusted
+  Publishing `@lacneu/openclaw-webchat` + build&push image to Docker Hub `${DOCKERHUB_USERNAME}/openclaw-webchat`
+  + ghcr, NO VITE_CONVEX_URL build-arg). `package.json` made publishable (name `@lacneu/openclaw-webchat`, dropped
+  `private`, files [dist,README], publishConfig public). `.dockerignore` rewritten (was tuned for the legacy build;
+  now excludes root node_modules/dist + bridge/mcp/docs/deploy/backend/frontend). **LOCKFILE CROSS-PLATFORM FIX
+  (important):** the root lock was macOS-generated → `npm ci` failed on linux ("Missing @emnapi/core@1.10.0",
+  the wasm-fallback peer of @tailwindcss/oxide). Fixed by REGENERATING the lock inside node:24-alpine
+  (`docker run … npm install --package-lock-only`) → now linux-ci-valid (NO dep bumps, only transitive wasm
+  entries rooted). VERIFIED: image builds; `docker run -e CONVEX_URL=…` → /config.json injected (+no-store),
+  / serves index.html, unknown route→200 fallback, no-CONVEX_URL→fail-fast, **origin-agnostic** (my 127.0.0.1:3212
+  NOT baked — only convex-lib doc strings present). Host App still green (build✓ 151 tests✓). Image name on Docker
+  Hub = `<DOCKERHUB_USERNAME>/openclaw-webchat` (e.g. neuolivier), npm scope = @lacneu. NEVER committed.
+  **C3 DONE + VERIFIED 2026-06-06 (bridge extracted to its own repo):** Olivier had ALREADY created the GitHub
+  repo `OlivierNeu/openclaw-webchat-bridge` + cloned it locally (remote `origin` set, "Initial commit" w/ LICENSE,
+  opened in IntelliJ) → so NO `git init`; populated it instead. Copied `bridge/` → repo ROOT + `local-openclaw/` →
+  subdir (rsync, **NO secrets**: excluded .env/.env.bak/.token/local.env/node_modules/dist; kept .env.example +
+  local.env.example). Fixed paths (bridge is now repo root): `cd ../bridge`→`cd ..` (up.sh, pair.sh), `cd "$REPO/
+  bridge"`→`cd "$REPO"` (test-fileexchange.sh, test-stability.sh, REPO=`$(cd .. && pwd)`), + a README line. Added
+  `.gitignore` (IntelliJ+Node+secrets), README.md, `.github/workflows/{ci.yml, build-and-push.yml}` (Docker Hub
+  `<DOCKERHUB_USERNAME>/openclaw-webchat-bridge` + ghcr). **TWO EXTRACTION GOTCHAS fixed (both were hoisting/
+  shared-state hidden couplings):** (1) PHANTOM DEP — `src/providers/openclaw/openclaw-client.ts` imports `ws` but
+  it was NOT in bridge/package.json (resolved from the App's hoisted node_modules); added `"ws": "^8.18.0"` to
+  dependencies. (2) SHARED FIXTURE — 3 tests (normalizer/multiplex/run-manager) read `../../backend/tests/fixtures/
+  openclaw_frames.json` (the App's legacy backend, which C4 deletes); VENDORED it to the bridge repo at
+  `test/fixtures/openclaw_frames.json` + repointed the 3 paths to `./fixtures/...`. Lock regenerated on linux
+  (node:24-alpine, same cross-platform npm-ci trap as the App). VERIFIED: host `npm ci`+typecheck+**55 tests ✓**;
+  Docker image builds (linux npm ci OK) + runtime image has dist/index.js + ws. **C4 NOTE:** before deleting the
+  App's `backend/`, the bridge fixture is now safe (vendored) — but verify nothing ELSE in the App references
+  `backend/tests/fixtures/`. USER ACTIONS: `.idea/` is staged in the new repo but now gitignored → `git rm -r
+  --cached .idea` before commit; set `DOCKERHUB_USERNAME`/`DOCKERHUB_TOKEN` secrets on the repo; commit+push
+  (Claude did NOT). NEVER committed. (Also: Olivier WANTS the bridge repo's IntelliJ files committed → bridge
+  `.gitignore` no longer ignores `.idea/`/`*.iml`; IntelliJ's own `.idea/.gitignore` excludes the volatile ones.)
+  **C4 DONE + VERIFIED 2026-06-06 (App cleaned).** Safety scan first (nothing in convex/src/mcp reads
+  `backend/tests/fixtures` — only the now-removed bridge tests did; `dev.sh` launches only Convex+Vite, NOT the
+  bridge). REMOVED from the App (plain `rm` → shows in git status for Olivier to commit): `bridge/`, `local-openclaw/`
+  (both → bridge repo), `frontend/` (Firebase legacy), `backend/` (FastAPI legacy), root `Dockerfile` +
+  `docker-compose.yml` (legacy; replaced by `docker/Dockerfile` from C2), `firebase.json`, `.firebaserc.example`.
+  `config.example.json` (the multi-tenant instance↔user registry template for the bridge multiplex #50 — read by
+  NOBODY currently) MOVED to the bridge repo (its domain). `.gitignore` rewritten (dropped Python/Firebase/
+  frontend/bridge sections; kept Convex/Node + public/config.json + worktrees). App still green: typecheck✓ build✓
+  151 tests✓. App root now = convex/ src/ mcp/ docs/ scripts/ deploy/ docker/ .github/ + configs. NOTE: `deploy/`
+  now has a DANGLING `context: ../bridge` (bridge gone) — harmless (not used live) and `deploy/` is deleted in C5.
+  NEVER committed.
+  **C5 DONE + COMPOSE-VALIDATED 2026-06-06 (deployment composes in openclaw-notes; deploy/ removed).** Created
+  TWO independent Container Manager projects (Olivier's topology: OpenClaw=#1 existing, Convex=#2, Webchat=#3):
+  • `openclaw-notes/convex/` = `docker-compose.yml` (convex-backend 3210/3211 LAN-published + convex-dashboard
+    127.0.0.1:6791 tunnel-only) + `.env.example` + `README.md` — published Convex images, nothing built.
+  • `openclaw-notes/openclaw-webchat/` = `docker-compose.yml` (frontend `neuolivier/openclaw-webchat:latest` 8080:80
+    + bridge `neuolivier/openclaw-webchat-bridge:latest` 8787:8787, both PULLED from Docker Hub) + `.env.example` +
+    `README.md` + `traefik-openclaw-webchat.yml` (file-provider routes matching his openclaw-stable.yml schema:
+    websecure + certResolver letsencrypt-wildcard + security-headers@file/compress-default@file, backend
+    `http://192.168.1.49:<port>`). CROSS-PROJECT (3 Docker networks) = ALL host-IP: bridge→gateway
+    ws://192.168.1.49:18789, bridge→Convex http://192.168.1.49:3211, Convex→bridge BRIDGE_URL=http://192.168.1.49:8787
+    (set via convex env), browser→Convex via /config.json. DOMAINS: chat.lacneu.com is TAKEN (open-webui) → used
+    free placeholders convex./convex-site./webchat..lacneu.com (wildcard cert covers them, no ACME). Both composes
+    pass `docker compose config`. App's `deploy/` (Synology-RP-era, superseded) DELETED. NEVER committed.
   **#53 INCREMENT 3 — COMPOSER POLISH BUILT + LIVE-VERIFIED 2026-06-05 (pure frontend, no live agent):**
   via assistant-ui 0.14 primitives in `ConvexChat.tsx` + `convexChat.css`: (1) EMPTY STATE
   (`ThreadPrimitive.Empty`) — OC avatar + "Comment puis-je aider ?" + 4 suggestion cards

@@ -7,6 +7,7 @@ import { router } from "./router";
 import { DialogsProvider } from "@/components/ConfirmDialog";
 import { FeedbackProvider } from "./chat/FeedbackDialog";
 import { PreferencesProvider } from "./chat/PreferencesDialog";
+import { resolveConvexUrl } from "@/lib/runtimeConfig";
 import "./index.css";
 import "./chat/convexChat.css";
 
@@ -20,39 +21,75 @@ const RouterDevtools = import.meta.env.DEV
     )
   : () => null;
 
-// Convex local (anonymous) for now; NAS self-hosted later. URL from .env.local.
-//
-// This app wires @convex-dev/auth (see convex/auth.ts + convex/schema.ts's
-// ...authTables). Per the Convex auth guidelines, a client for an auth-enabled
-// deployment MUST use ConvexAuthProvider (the @convex-dev/auth wrapper around
-// ConvexProviderWithAuth). With a plain <ConvexProvider>, ctx.auth has no token
-// source, so ctx.auth.getUserIdentity() returns null on the server and every
-// requireUserId()/getAuthUserId() throws "Unauthorized" — the whole chat surface
-// (chats, messages, send, uploads) is gated behind that identity.
-//
-// Provider composition (docs/ROUTING_RESEARCH.md §2): ConvexAuthProvider stays
-// the OUTERMOST provider (its token source is mandatory); RouterProvider nests
-// inside it; DialogsProvider (the app-wide confirm/prompt modals) wraps the
-// router so any route can call useConfirm/usePrompt. The single
-// ConvexReactClient is created once → the WebSocket persists across client-side
-// navigations (no reconnection thrash).
-const convex = new ConvexReactClient(import.meta.env.VITE_CONVEX_URL as string);
+// Minimal, dependency-free boot state (no Convex/router) so it renders even when
+// config resolution fails. Theme is already applied by the inline script in
+// index.html, so currentColor/inherited colors are correct in light/dark.
+function BootMessage({ children }: { children: React.ReactNode }) {
+  return (
+    <div
+      style={{
+        display: "flex",
+        minHeight: "100vh",
+        alignItems: "center",
+        justifyContent: "center",
+        padding: "2rem",
+        textAlign: "center",
+        font: "14px system-ui, sans-serif",
+        opacity: 0.6,
+      }}
+    >
+      {children}
+    </div>
+  );
+}
 
-ReactDOM.createRoot(document.getElementById("root")!).render(
+const root = ReactDOM.createRoot(document.getElementById("root")!);
+
+// Splash immediately to avoid a blank flash while the runtime config resolves
+// (a fast static fetch; see lib/runtimeConfig).
+root.render(
   <React.StrictMode>
-    <ConvexAuthProvider client={convex}>
-      <DialogsProvider>
-        <FeedbackProvider>
-          <PreferencesProvider>
-            <RouterProvider router={router} />
-          </PreferencesProvider>
-        </FeedbackProvider>
-        <React.Suspense fallback={null}>
-          {/* Dev-only. Toggle button bottom-RIGHT so it doesn't overlap the
-              sidebar's Settings button (default is bottom-left). */}
-          <RouterDevtools router={router} position="bottom-right" />
-        </React.Suspense>
-      </DialogsProvider>
-    </ConvexAuthProvider>
+    <BootMessage>Chargement…</BootMessage>
   </React.StrictMode>,
 );
+
+// The Convex client is created ONCE, after the runtime config resolves, so the
+// built bundle is origin-agnostic. Provider composition is unchanged
+// (docs/ROUTING_RESEARCH.md §2): ConvexAuthProvider is OUTERMOST (its token
+// source is mandatory for the whole auth-gated chat surface), RouterProvider
+// nests inside, DialogsProvider wraps the router. The single ConvexReactClient
+// keeps its WebSocket alive across client-side navigations.
+resolveConvexUrl()
+  .then((convexUrl) => {
+    const convex = new ConvexReactClient(convexUrl);
+    root.render(
+      <React.StrictMode>
+        <ConvexAuthProvider client={convex}>
+          <DialogsProvider>
+            <FeedbackProvider>
+              <PreferencesProvider>
+                <RouterProvider router={router} />
+              </PreferencesProvider>
+            </FeedbackProvider>
+            <React.Suspense fallback={null}>
+              {/* Dev-only. Toggle button bottom-RIGHT so it doesn't overlap the
+                  sidebar's Settings button (default is bottom-left). */}
+              <RouterDevtools router={router} position="bottom-right" />
+            </React.Suspense>
+          </DialogsProvider>
+        </ConvexAuthProvider>
+      </React.StrictMode>,
+    );
+  })
+  .catch((err: unknown) => {
+    // eslint-disable-next-line no-console
+    console.error("Boot failed:", err);
+    root.render(
+      <React.StrictMode>
+        <BootMessage>
+          Configuration manquante&nbsp;:{" "}
+          {err instanceof Error ? err.message : String(err)}
+        </BootMessage>
+      </React.StrictMode>,
+    );
+  });

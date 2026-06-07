@@ -1,2 +1,0 @@
-"""OpenClaw WebChat bridge backend."""
-

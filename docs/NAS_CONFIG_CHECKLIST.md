@@ -41,8 +41,12 @@ on the NAS. The local proof is `docs/MEDIA_TRANSFER_DESIGN.md` +
    ask the agent to produce a file + attach it → it must render as a downloadable
    attachment whose bytes match. This simultaneously confirms the API-mode `MEDIA:`
    assumption (step's purpose).
-5. **Multi-instance**: every OpenClaw instance writes to ONE shared `media/outbound`
-   (UUID-suffixed names avoid collisions); the bridge mounts that one dir (docs/DEPLOYMENT.md).
+5. **Multi-instance**: each tenant has its OWN media dir
+   (`/volume3/openclaw/instances/<tenant>/.openclaw/media/outbound`) — NOT one shared dir.
+   The bridge serves ONE gateway and binds the MATCHING tenant dir read-only
+   (`OPENCLAW_MEDIA_OUTBOUND_HOST_DIR`). To bridge both olivier (:18789) and jerome
+   (:18791), run a second bridge or finish the multiplex registry (task #50). See
+   `deploy/README.md` "Multi-tenant".
 6. **Per-version**: re-run the local `local-openclaw/test-fileexchange.sh <version>`
    on each bump BEFORE promoting the NAS image (catches frame/schema/codex drift).
 

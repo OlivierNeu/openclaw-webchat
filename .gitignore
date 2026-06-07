@@ -1,52 +1,34 @@
-# Python
-__pycache__/
-*.py[cod]
-.pytest_cache/
-.coverage
-coverage.xml
-coverage.json
-htmlcov/
-backend/.venv/
+# Node / Vite / Convex
+node_modules/
+dist/
+.convex/
+nanobanana-output/
 
-# Node / Vite
-frontend/node_modules/
-frontend/dist/
-frontend/.env
-frontend/.env.*
-!frontend/.env.example
-
-# Local configuration and secrets
+# Local configuration and secrets — never commit
 .env
 .env.*
-!frontend/.env.example
+!.env.example
 *.local.json
 config.local.json
 secrets/
-firebase-service-account.json
+
+# Runtime config: written by the static-server image (prod) or dropped locally;
+# never committed. The bundle reads it at boot (src/lib/runtimeConfig.ts), with a
+# VITE_CONVEX_URL fallback for local dev.
+public/config.json
+
+# NOTE: convex/_generated/ is COMMITTED on purpose (Convex convention) so the
+# repo typechecks on a fresh clone before the first `convex dev`.
 
 # OpenClaw diagnostics
 openclaw-frame-captures/
 *.ndjson
 *.log
-# ...but committed regression fixtures (frame captures replayed by the test
-# suite) must stay tracked despite the *.ndjson / *.log globs above.
-!backend/tests/fixtures/
-!backend/tests/fixtures/**
 
 # OS / editors
 .DS_Store
 .idea/
 .vscode/
-
-# Node / Vite / Convex (claude-monitor-style root app)
-node_modules/
-dist/
-bridge/node_modules/
-bridge/dist/
-.convex/
-nanobanana-output/
-# NOTE: convex/_generated/ is COMMITTED on purpose (Convex convention) so the
-# repo typechecks on a fresh clone before the first `convex dev`.
 
 # Ephemeral git worktrees created by `isolation: "worktree"` workflow agents —
 # disposable checkouts of THIS repo, never source. (The .claude/skills/* symlinks

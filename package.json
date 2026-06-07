@@ -1,8 +1,16 @@
 {
-  "name": "openclaw-webchat",
-  "private": true,
+  "name": "@lacneu/openclaw-webchat",
   "version": "0.1.0",
+  "description": "OpenClaw WebChat — public, self-hostable Convex-backed chat UI for OpenClaw. Ships an origin-agnostic static bundle (Convex URL injected at runtime via /config.json).",
+  "license": "MIT",
   "type": "module",
+  "files": [
+    "dist",
+    "README.md"
+  ],
+  "publishConfig": {
+    "access": "public"
+  },
   "scripts": {
     "dev": "vite",
     "dev:convex": "convex dev",

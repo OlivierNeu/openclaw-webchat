@@ -1,0 +1,98 @@
+name: Release
+
+# Tag-driven release: one CI builds BOTH artifacts the deployment consumes —
+#   • npm  @lacneu/openclaw-webchat  (versioned community artifact)
+#   • Docker image  <dockerhub-user>/openclaw-webchat + ghcr  (the static-server
+#     image the NAS pulls and serves; see docker/Dockerfile)
+on:
+  push:
+    tags:
+      - "v*"
+
+jobs:
+  # ---- Gate: never publish a broken build --------------------------------------
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+      - run: npm ci || npm install
+      - run: npm run typecheck
+      - run: npm run build
+      - run: npm test
+
+  # ---- npm (Trusted Publishing via OIDC — no NODE_AUTH_TOKEN) ------------------
+  publish-npm:
+    needs: test
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      id-token: write # required for npm Trusted Publishing (OIDC)
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          registry-url: "https://registry.npmjs.org"
+      - name: Upgrade npm (>=11.5.1 required for Trusted Publishing)
+        run: npm install -g npm@latest
+      - name: Stamp version from tag
+        run: |
+          VERSION="${GITHUB_REF#refs/tags/v}"
+          npm version "$VERSION" --no-git-tag-version --allow-same-version
+      - run: npm ci || npm install
+      - name: Build dist (the published artifact)
+        run: npm run build
+      # NOTE: the FIRST publish of a brand-new package cannot use OIDC — bootstrap
+      # @lacneu/openclaw-webchat once manually (npm publish --access public), then
+      # enable Trusted Publishing for it. See deploy runbook (C6).
+      - name: Publish to npm
+        run: npm publish --access public
+
+  # ---- Docker image (static-server, origin-agnostic) --------------------------
+  publish-image:
+    needs: test
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Log in to GitHub Container Registry
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Log in to Docker Hub
+        uses: docker/login-action@v3
+        with:
+          username: ${{ secrets.DOCKERHUB_USERNAME }}
+          password: ${{ secrets.DOCKERHUB_TOKEN }}
+
+      - name: Extract metadata (tags, labels)
+        id: meta
+        uses: docker/metadata-action@v5
+        with:
+          images: |
+            ${{ secrets.DOCKERHUB_USERNAME }}/openclaw-webchat
+            ghcr.io/${{ github.repository }}
+          tags: |
+            type=semver,pattern={{version}}
+            type=semver,pattern={{major}}.{{minor}}
+            type=raw,value=latest
+
+      - name: Build and push
+        uses: docker/build-push-action@v5
+        with:
+          context: .
+          file: docker/Dockerfile
+          push: true
+          # No VITE_CONVEX_URL build-arg ON PURPOSE — the image stays
+          # origin-agnostic; the URL is injected at run time via /config.json.
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
