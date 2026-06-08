@@ -23,6 +23,15 @@ export function runStatusView(
   status: string | undefined,
   hasText: boolean,
 ): RunStatusView | null {
+  // `undefined` status is the assistant-ui core's OPTIMISTIC placeholder (the
+  // upcoming-message it injects while `isRunning` before any real assistant doc
+  // exists) — it carries no `metadata.custom.status`. Render the SAME "thinking"
+  // indicator so this placeholder fills the send->first-token gap, then hands off
+  // seamlessly to the real streaming doc (identical label). Handled BEFORE the
+  // switch so a real "complete" message still maps to null (no chip). Real
+  // messages always carry a schema-required status, so this only ever matches
+  // the placeholder.
+  if (status === undefined) return { kind: "thinking", label: "Réflexion…" };
   switch (status) {
     case "streaming":
       return hasText

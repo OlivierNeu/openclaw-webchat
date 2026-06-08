@@ -36,8 +36,17 @@ describe("runStatusView", () => {
     expect(runStatusView("complete", false)).toBeNull();
   });
 
-  it("unknown/absent status -> no chip", () => {
-    expect(runStatusView(undefined, false)).toBeNull();
+  it("undefined status -> thinking (the core's optimistic placeholder fills the gap)", () => {
+    // The assistant-ui upcoming-message placeholder carries no status; it must
+    // render the SAME thinking indicator so the send->first-token gap is covered
+    // and hands off seamlessly to the real streaming doc.
+    expect(runStatusView(undefined, false)).toEqual({
+      kind: "thinking",
+      label: "Réflexion…",
+    });
+  });
+
+  it("unknown (non-empty) status -> no chip", () => {
     expect(runStatusView("weird", true)).toBeNull();
   });
 });

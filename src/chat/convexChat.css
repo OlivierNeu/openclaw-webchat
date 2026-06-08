@@ -295,6 +295,19 @@
 .oc-chip__chev {
   opacity: 0.55;
 }
+/* Agent-identity chip (the "which agent is this conversation on" indicator,
+   shown only when the user has more than one agent). Visually IDENTICAL to the
+   neutral capability chips (model/reasoning) — the info just needs to be present,
+   not emphasized. Only a genuinely problematic agent state (deleted/stale) gets a
+   subtle warning tint. */
+.oc-chip--agent.is-warn {
+  background: color-mix(in srgb, var(--destructive) 12%, var(--muted));
+  border-color: color-mix(in srgb, var(--destructive) 40%, var(--border));
+}
+.oc-chip__emoji {
+  font-size: 0.95rem;
+  line-height: 1;
+}
 /* "défaut" marker inside the reasoning radio list. */
 .oc-menu__hint {
   margin-left: auto;
@@ -1712,6 +1725,40 @@
   flex: 1; min-width: 0; text-align: left; background: transparent; cursor: pointer;
   padding: 0.375rem 0.25rem; font-size: 0.875rem; color: var(--sidebar-foreground);
   overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+/* Compact relative age (OpenWebUI-style), right-aligned, muted; fades out on row
+   hover/focus so the kebab menu reads cleanly in its place. */
+.oc-chatitem__age {
+  flex-shrink: 0;
+  font-size: 0.7rem;
+  color: var(--muted-foreground);
+  font-variant-numeric: tabular-nums;
+  padding-right: 0.125rem;
+  transition: opacity 0.12s ease;
+}
+/* Bridge badge — only rendered when conversations span >1 provider. A small,
+   low-key pill; a subtle per-bridge tint helps tell them apart at a glance
+   without shouting. */
+.oc-chatitem__bridge {
+  flex-shrink: 0;
+  font-size: 0.62rem;
+  font-weight: 600;
+  line-height: 1;
+  padding: 0.12rem 0.32rem;
+  border-radius: var(--radius-sm);
+  white-space: nowrap;
+  color: var(--muted-foreground);
+  background: var(--muted);
+  border: 1px solid var(--border);
+  transition: opacity 0.12s ease;
+}
+.oc-chatitem__bridge--openclaw {
+  color: color-mix(in srgb, var(--primary) 75%, var(--foreground));
+  border-color: color-mix(in srgb, var(--primary) 30%, var(--border));
+}
+.oc-chatitem__bridge--hermes {
+  color: color-mix(in srgb, var(--chart-4, var(--primary)) 75%, var(--foreground));
+  border-color: color-mix(in srgb, var(--chart-4, var(--primary)) 30%, var(--border));
 }
 
 .oc-colorgrid {

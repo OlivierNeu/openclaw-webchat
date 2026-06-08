@@ -16,6 +16,8 @@ export const UI_PREF_KEYS = [
   "showDelete",
   "showTools",
   "voiceInput",
+  "showChatAge",
+  "showChatProvider",
 ] as const;
 
 export type UiPrefKey = (typeof UI_PREF_KEYS)[number];
@@ -31,6 +33,8 @@ export const UI_PREF_CODE_DEFAULTS: Record<UiPrefKey, boolean> = {
   showDelete: true,
   showTools: true,
   voiceInput: false, // the voice pipeline is not wired yet
+  showChatAge: true, // compact relative age in the sidebar (OpenWebUI-style)
+  showChatProvider: true, // bridge badge in the sidebar — self-hides unless chats span >1 provider
 };
 
 // Pref key -> the `featuresEnabled` key that must be true before a user may turn

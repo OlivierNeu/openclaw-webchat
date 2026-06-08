@@ -50,6 +50,7 @@ import { useConfirm, usePrompt } from "@/components/ConfirmDialog";
 import { api } from "./convexApi";
 import type { Id } from "./convexApi";
 import { AgentPickerDialog, type PickableAgent } from "./AgentPicker";
+import { relativeAge } from "./relativeAge";
 
 // Preset chat colors (token-driven, list display only). Value matches the
 // backend `chatColorValidator`. The dot uses oklch hues that read in both modes.
@@ -80,6 +81,10 @@ export type ChatRow = {
   sortKey: number;
   pinned: boolean;
   color: string | null;
+  updatedAt: number; // for the compact relative-age label (gated by showChatAge)
+  // The bridge this chat routes to (bound instance, else the user's default).
+  // Drives the self-hiding provider badge (shown only when chats span >1 kind).
+  providerKind: "openclaw" | "hermes" | null;
 };
 type Project = { _id: Id<"projects">; name: string; collapsed: boolean };
 
@@ -94,6 +99,29 @@ export function ChatSidebar({
   const projects = useQuery(api.projects.listProjects, {}) as
     | Project[]
     | undefined;
+  // Self-hiding bridge badge: only meaningful when the user's conversations span
+  // MORE THAN ONE provider (today everything is OpenClaw → distinct kinds = 1 →
+  // hidden; lights up automatically once Hermes chats exist). Gated ALSO by the
+  // `showChatProvider` pref. Computed once here and threaded to each row.
+  const effectivePrefs = useQuery(api.me.getMe)?.ui?.effective as
+    | Record<string, boolean>
+    | undefined;
+  const showProviderPref = effectivePrefs?.showChatProvider ?? true;
+  const showAgePref = effectivePrefs?.showChatAge ?? true;
+  const providerKinds = new Set(
+    (chats ?? []).map((c) => c.providerKind).filter((k): k is "openclaw" | "hermes" => k != null),
+  );
+  const showProviderBadge = showProviderPref && providerKinds.size > 1;
+
+  // The relative-age labels read `Date.now()` at render — without a tick an idle
+  // session would freeze a chat at "maintenant". Re-render on a minute cadence so
+  // the ages advance. Only armed when the age labels are actually shown.
+  const [, setMinuteTick] = useState(0);
+  useEffect(() => {
+    if (!showAgePref) return;
+    const id = window.setInterval(() => setMinuteTick((t) => t + 1), 60_000);
+    return () => window.clearInterval(id);
+  }, [showAgePref]);
   const createChat = useMutation(api.chats.createChat);
   const createProject = useMutation(api.projects.createProject);
   const setProjectCollapsed = useMutation(api.projects.setProjectCollapsed);
@@ -307,6 +335,7 @@ export function ChatSidebar({
                   active={c._id === activeChatId}
                   projects={projects ?? []}
                   onSelect={onSelect}
+                  showProviderBadge={showProviderBadge}
                 />
               ))}
             </Section>
@@ -340,6 +369,7 @@ export function ChatSidebar({
                       active={c._id === activeChatId}
                       projects={projects ?? []}
                       onSelect={onSelect}
+                      showProviderBadge={showProviderBadge}
                     />
                   ))
                 )}
@@ -363,6 +393,7 @@ export function ChatSidebar({
                     active={c._id === activeChatId}
                     projects={projects ?? []}
                     onSelect={onSelect}
+                    showProviderBadge={showProviderBadge}
                   />
                 ))
               : null}
@@ -484,16 +515,23 @@ function Section({
   );
 }
 
+const PROVIDER_LABEL: Record<"openclaw" | "hermes", string> = {
+  openclaw: "OpenClaw",
+  hermes: "Hermes",
+};
+
 function ChatItem({
   chat,
   active,
   projects: _projects,
   onSelect,
+  showProviderBadge,
 }: {
   chat: ChatRow;
   active: boolean;
   projects: Project[];
   onSelect: (id: Id<"chats">) => void;
+  showProviderBadge: boolean;
 }) {
   const { attributes, listeners, setNodeRef, transform, transition, isDragging } =
     useSortable({ id: chat._id });
@@ -501,6 +539,14 @@ function ChatItem({
   const deleteChat = useMutation(api.chats.deleteChat);
   const pinChat = useMutation(api.chats.pinChat);
   const setColor = useMutation(api.chats.setChatColor);
+  // Compact relative age (OpenWebUI-style), gated by the `showChatAge` UI pref.
+  // getMe is deduped by Convex across every item — one shared subscription.
+  const showAge =
+    (
+      useQuery(api.me.getMe)?.ui?.effective as
+        | Record<string, boolean>
+        | undefined
+    )?.showChatAge ?? true;
   const confirm = useConfirm();
   const [renameOpen, setRenameOpen] = useState(false);
   const [renameValue, setRenameValue] = useState(chat.title ?? "");
@@ -538,6 +584,26 @@ function ChatItem({
         <button className="oc-chatitem__label" onClick={() => onSelect(chat._id)}>
           {chat.title || "Untitled"}
         </button>
+        {showProviderBadge && chat.providerKind ? (
+          // Self-hiding: the parent only sets showProviderBadge when chats span
+          // >1 bridge. Fades on hover (like the age) to make room for the kebab.
+          <span
+            className={`oc-chatitem__bridge oc-chatitem__bridge--${chat.providerKind} group-hover/row:opacity-0 group-focus-within/row:opacity-0`}
+            title={`Bridge : ${PROVIDER_LABEL[chat.providerKind]}`}
+          >
+            {PROVIDER_LABEL[chat.providerKind]}
+          </span>
+        ) : null}
+        {showAge ? (
+          // Visible at rest; fades out on row hover/focus so it never collides
+          // with the kebab menu that fades in (same swap as OpenWebUI).
+          <span
+            className="oc-chatitem__age group-hover/row:opacity-0 group-focus-within/row:opacity-0"
+            title={new Date(chat.updatedAt).toLocaleString("fr-FR")}
+          >
+            {relativeAge(chat.updatedAt, Date.now())}
+          </span>
+        ) : null}
         <DropdownMenu>
           <DropdownMenuTrigger asChild>
             <Button

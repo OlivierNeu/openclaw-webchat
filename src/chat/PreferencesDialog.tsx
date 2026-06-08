@@ -42,6 +42,14 @@ export const PREF_LABELS: Record<string, { label: string; help?: string }> = {
     label: "Saisie vocale (micro)",
     help: "Le bouton micro dans le composeur.",
   },
+  showChatAge: {
+    label: "Âge des conversations",
+    help: "Afficher l'ancienneté de chaque conversation (ex. « 3j », « 2sem ») dans la liste à gauche.",
+  },
+  showChatProvider: {
+    label: "Bridge des conversations",
+    help: "Marquer le bridge (OpenClaw / Hermes) de chaque conversation dans la liste à gauche. Apparaît uniquement si vos conversations utilisent plusieurs bridges.",
+  },
 };
 
 type UiState = {

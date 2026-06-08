@@ -291,7 +291,35 @@ type EnrichedUserAgent = {
   state: "ok" | "deleted" | "stale" | "unknown";
 };
 
-async function enrichUserAgents(
+/** SINGLE resolver for "which agent does this chat route to" — used by BOTH the
+ *  header chip (getChatAgent) AND the sidebar bridge badge (messages.listChats),
+ *  so they can never drift from each other or from dispatch. Mirrors dispatch's
+ *  resolveTargetForChat EXACTLY: honor the chat's binding unless that agent is
+ *  DELETED, else fall back to the default (skipping a deleted default) → first
+ *  non-deleted assignment. `null` only when every assigned agent is deleted.
+ *  Pure (operates on already-enriched agents); batch `enrichUserAgents` ONCE and
+ *  map many chats through this — never call it per-chat with its own reads. */
+export function resolveAgentForChat(
+  agents: EnrichedUserAgent[],
+  chat: { instanceName?: string; agentId?: string },
+): EnrichedUserAgent | null {
+  const bound =
+    chat.instanceName && chat.agentId
+      ? agents.find(
+          (a) =>
+            a.instanceName === chat.instanceName &&
+            a.agentId === chat.agentId &&
+            a.state !== "deleted",
+        )
+      : undefined;
+  const fallback =
+    [...agents]
+      .sort((a, b) => (a.isDefault === b.isDefault ? 0 : a.isDefault ? -1 : 1))
+      .find((a) => a.state !== "deleted") ?? null;
+  return bound ?? fallback;
+}
+
+export async function enrichUserAgents(
   ctx: QueryCtx,
   userId: Id<"users">,
 ): Promise<EnrichedUserAgent[]> {
@@ -348,6 +376,64 @@ export const listMyAgents = query({
   handler: async (ctx) => {
     const { userId } = await requireActive(ctx);
     return enrichUserAgents(ctx, userId);
+  },
+});
+
+/** The agent a chat is (or will be) routed to + whether the user has a CHOICE.
+ *  Powers the chat-header agent chip, which the frontend shows ONLY when
+ *  `multiAgent` (the user's explicit requirement: surface "which agent" only
+ *  when more than one is associated — a single-agent user never sees clutter).
+ *
+ *  `agent` mirrors dispatch's resolveTargetForChat default fallback: the chat's
+ *  bound agent when set AND still in the user's list, else the user's default —
+ *  so the chip names the agent the NEXT turn actually dispatches to (a legacy/
+ *  unbound chat shows the default, not "none"). Owner-scoped; impersonation-aware
+ *  (effective user, like listMyAgents); tolerant of a malformed/deleted chatId
+ *  (returns null, never throws — same contract as messages.getSessionMeta). */
+export const getChatAgent = query({
+  args: { chatId: v.string() },
+  handler: async (ctx, { chatId }) => {
+    const { userId } = await requireActive(ctx);
+    const id = ctx.db.normalizeId("chats", chatId);
+    if (id === null) return null;
+    const chat = await ctx.db.get(id);
+    if (chat === null) return null;
+    if (chat.userId !== userId) {
+      throw new Error("Forbidden: chat not owned by user");
+    }
+
+    const agents = await enrichUserAgents(ctx, userId);
+    // The chip exists ONLY to disambiguate between several agents. With 0 or 1
+    // agent there is nothing to disambiguate -> never surface it.
+    if (agents.length <= 1) {
+      return { multiAgent: false as const, agent: null };
+    }
+
+    // The agent the NEXT turn will actually dispatch to (shared with the sidebar
+    // badge — see resolveAgentForChat: honors a non-deleted binding, else the
+    // default, skipping any deleted agent).
+    const resolved = resolveAgentForChat(agents, chat);
+    // Inherited when the resolved agent is NOT the chat's own (live) binding — a
+    // legacy/unbound chat, or a chat whose binding was deleted and re-bound.
+    const inheritedDefault = !(
+      resolved &&
+      chat.instanceName === resolved.instanceName &&
+      chat.agentId === resolved.agentId
+    );
+    return {
+      multiAgent: true as const,
+      agent: resolved
+        ? {
+            instanceName: resolved.instanceName,
+            agentId: resolved.agentId,
+            displayName: resolved.displayName,
+            emoji: resolved.emoji,
+            state: resolved.state,
+            isDefault: resolved.isDefault,
+            inheritedDefault,
+          }
+        : null,
+    };
   },
 });
 

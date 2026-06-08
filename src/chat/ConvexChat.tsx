@@ -31,12 +31,12 @@ import {
   Download,
   Plus,
   ArrowUp,
-  Square,
   Mic,
   Trash2,
   Code,
   Search,
   CircleAlert,
+  Bot,
 } from "lucide-react";
 import {
   DropdownMenu,
@@ -308,19 +308,29 @@ function ChatHeader({ chatId }: { chatId: ConvexId<"chats"> }) {
   const meta = useQuery(api.messages.getSessionMeta, {
     chatId: chatId as Id<"chats">,
   });
+  // Which agent this conversation is bound to — surfaced ONLY when the user has
+  // more than one agent (server-decided `multiAgent`), so a single-agent user
+  // never sees disambiguation they don't need. Read-only: the binding is
+  // write-once after the first dispatch (swapping forks the gateway session).
+  const agentInfo = useQuery(api.agents.getChatAgent, {
+    chatId: chatId as Id<"chats">,
+  });
   const sm = meta?.sessionMeta ?? null;
-  if (!sm) return null;
+  const agent = agentInfo?.multiAgent ? agentInfo.agent : null;
+  // Render the strip when there is EITHER session meta OR a multi-agent chip to
+  // show (a returning chat with no meta yet must still name its agent).
+  if (!sm && !agent) return null;
 
   const pct =
-    sm.totalTokens != null && sm.contextTokens && sm.contextTokens > 0
+    sm && sm.totalTokens != null && sm.contextTokens && sm.contextTokens > 0
       ? Math.round((sm.totalTokens / sm.contextTokens) * 100)
       : null;
   // "Spotted" meter color: calm until the context window fills, then escalates.
   const meterLevel =
     pct == null ? "" : pct >= 90 ? "is-critical" : pct >= 75 ? "is-warn" : "is-ok";
   const inherited =
-    !!sm.thinkingLevel &&
-    !!sm.thinkingDefault &&
+    !!sm?.thinkingLevel &&
+    !!sm?.thinkingDefault &&
     sm.thinkingLevel === sm.thinkingDefault;
 
   return (
@@ -329,7 +339,32 @@ function ChatHeader({ chatId }: { chatId: ConvexId<"chats"> }) {
         {meta?.title || "Conversation"}
       </div>
       <div className="oc-chathead__meta">
-        {sm.model ? (
+        {agent ? (
+          <span
+            className={`oc-chip oc-chip--agent${
+              agent.state !== "ok" ? " is-warn" : ""
+            }`}
+            title={
+              `Agent de cette conversation : ${agent.displayName ?? agent.agentId}` +
+              (agent.inheritedDefault ? " (agent par défaut)" : "") +
+              (agent.state === "deleted"
+                ? " — cet agent n’existe plus sur la gateway"
+                : agent.state === "stale"
+                  ? " — état non confirmé (gateway injoignable)"
+                  : "")
+            }
+          >
+            {agent.emoji ? (
+              <span className="oc-chip__emoji" aria-hidden>
+                {agent.emoji}
+              </span>
+            ) : (
+              <Bot size={13} aria-hidden />
+            )}
+            {agent.displayName ?? agent.agentId}
+          </span>
+        ) : null}
+        {sm?.model ? (
           <span
             className="oc-chip"
             title={`Modèle${sm.modelProvider ? ` · ${sm.modelProvider}` : ""}`}
@@ -338,7 +373,7 @@ function ChatHeader({ chatId }: { chatId: ConvexId<"chats"> }) {
             {sm.model}
           </span>
         ) : null}
-        {sm.thinkingLevel ? (
+        {sm?.thinkingLevel ? (
           <span
             className="oc-chip"
             title={
@@ -352,7 +387,7 @@ function ChatHeader({ chatId }: { chatId: ConvexId<"chats"> }) {
             {inherited ? <span className="oc-chip__hint">héritée</span> : null}
           </span>
         ) : null}
-        {pct != null ? (
+        {sm && pct != null ? (
           <span
             className={`oc-meter ${meterLevel}`}
             title={`Contexte utilisé : ${pct}% (${formatTokens(
@@ -372,7 +407,7 @@ function ChatHeader({ chatId }: { chatId: ConvexId<"chats"> }) {
           </span>
         ) : null}
         <ExportMenu chatId={chatId} title={meta?.title ?? null} />
-        <SessionKnobsMenu chatId={chatId} sm={sm} />
+        {sm ? <SessionKnobsMenu chatId={chatId} sm={sm} /> : null}
       </div>
     </header>
   );
@@ -887,6 +922,14 @@ function SystemMessage() {
   );
 }
 
+// NOTE: the send->first-token "thinking" gap is filled by assistant-ui's own
+// upcoming-message placeholder (it injects an assistant frame whenever the
+// runtime is `isRunning` and the last message is not an assistant). That
+// placeholder carries no status, so RunStatus renders it as "Réflexion…" (see
+// runStatusView's `undefined` case) and hands off seamlessly to the real
+// streaming doc. We deliberately do NOT render a second gap-filler frame here —
+// doing so double-stacks the assistant avatar/name during every gap.
+
 function Composer({
   showTools,
   onToggleTools,
@@ -985,9 +1028,22 @@ function Composer({
                 </ComposerPrimitive.Send>
               </ThreadPrimitive.If>
               <ThreadPrimitive.If running>
-                <ComposerPrimitive.Cancel className="oc-composer__stop" aria-label="Arrêter la génération">
-                  <Square size={15} aria-hidden />
-                </ComposerPrimitive.Cancel>
+                {/* A turn is in flight. We have no gateway-abort endpoint, so a
+                    "Stop" control would be a DEAD affordance (cancel capability
+                    is absent → assistant-ui renders it disabled, implying you can
+                    interrupt when you can't). Show an HONEST disabled send instead
+                    ("réponse en cours") — the input stays usable for type-ahead,
+                    but Enter is blocked while running (assistant-ui), so this also
+                    keeps the double-send hole closed. */}
+                <button
+                  type="button"
+                  className="oc-composer__send"
+                  disabled
+                  aria-label="Réponse en cours…"
+                  title="Réponse en cours…"
+                >
+                  <ArrowUp size={18} aria-hidden />
+                </button>
               </ThreadPrimitive.If>
             </>
           )}

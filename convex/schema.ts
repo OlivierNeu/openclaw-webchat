@@ -127,6 +127,8 @@ export default defineSchema({
         showDelete: v.optional(v.boolean()),
         showTools: v.optional(v.boolean()),
         voiceInput: v.optional(v.boolean()),
+        showChatAge: v.optional(v.boolean()),
+        showChatProvider: v.optional(v.boolean()),
       }),
     ),
 
@@ -270,6 +272,8 @@ export default defineSchema({
         showDelete: v.optional(v.boolean()),
         showTools: v.optional(v.boolean()),
         voiceInput: v.optional(v.boolean()),
+        showChatAge: v.optional(v.boolean()),
+        showChatProvider: v.optional(v.boolean()),
       }),
     ),
     // System-level feature enablement. A gated UI pref (e.g. voiceInput) stays

@@ -388,3 +388,204 @@ describe("deleteInstance cascade (Codex P2 — no orphan grants)", () => {
     expect((await agentsOf(t, "prod")).length).toBe(1); // agents kept
   });
 });
+
+describe("getChatAgent — the multi-agent header chip (UX-A)", () => {
+  // Seed an instance + N discovered/present agents + grant them to a fresh user
+  // (the FIRST granted becomes the default). Returns the identity + a chat factory.
+  async function seedUserWithAgents(
+    t: ReturnType<typeof convexTest>,
+    agentIds: string[],
+  ) {
+    const userId = await t.run(async (ctx) => {
+      const uid = await ctx.db.insert("users", {});
+      await ctx.db.insert("profiles", { userId: uid, role: "user", canonical: "u" });
+      await ctx.db.insert("instances", {
+        name: "prod",
+        gatewayUrl: "ws://x",
+        kind: "openclaw",
+      });
+      await ctx.db.insert("instanceDiscovery", {
+        instanceName: "prod",
+        lastPollAt: 1,
+        lastPollOk: true,
+        lastOkAt: 1,
+      });
+      for (let i = 0; i < agentIds.length; i++) {
+        await ctx.db.insert("agents", {
+          instanceName: "prod",
+          agentId: agentIds[i],
+          source: "discovered",
+          presentInLastOk: true,
+          displayName: agentIds[i].toUpperCase(),
+          firstSeenAt: 1,
+          lastSeenAt: 1,
+        });
+        await ctx.db.insert("userAgents", {
+          userId: uid,
+          instanceName: "prod",
+          agentId: agentIds[i],
+          isDefault: i === 0, // first granted = default
+          source: "manual",
+          createdAt: i,
+        });
+      }
+      return uid;
+    });
+    const as = t.withIdentity({ subject: `${userId}|session` });
+    const mkChat = (bind?: { agentId: string }) =>
+      t.run((ctx) =>
+        ctx.db.insert("chats", {
+          userId,
+          updatedAt: 1,
+          ...(bind
+            ? { instanceName: "prod", agentId: bind.agentId }
+            : {}),
+        }),
+      );
+    return { as, mkChat };
+  }
+
+  test("single-agent user: multiAgent=false, no chip (the explicit requirement)", async () => {
+    const t = convexTest(schema, modules);
+    const { as, mkChat } = await seedUserWithAgents(t, ["solo"]);
+    const chatId = await mkChat();
+    const res = await as.query(api.agents.getChatAgent, { chatId });
+    expect(res?.multiAgent).toBe(false);
+    expect(res?.agent).toBeNull();
+  });
+
+  test("multi-agent, BOUND chat: chip names the bound (non-default) agent", async () => {
+    const t = convexTest(schema, modules);
+    const { as, mkChat } = await seedUserWithAgents(t, ["main", "pissey"]);
+    const chatId = await mkChat({ agentId: "pissey" }); // bound to the non-default
+    const res = await as.query(api.agents.getChatAgent, { chatId });
+    expect(res?.multiAgent).toBe(true);
+    expect(res?.agent?.agentId).toBe("pissey");
+    expect(res?.agent?.displayName).toBe("PISSEY");
+    expect(res?.agent?.inheritedDefault).toBe(false);
+    expect(res?.agent?.state).toBe("ok");
+  });
+
+  test("multi-agent, UNBOUND chat: chip shows the DEFAULT (what the next turn binds to)", async () => {
+    const t = convexTest(schema, modules);
+    const { as, mkChat } = await seedUserWithAgents(t, ["main", "pissey"]);
+    const chatId = await mkChat(); // legacy/unbound
+    const res = await as.query(api.agents.getChatAgent, { chatId });
+    expect(res?.multiAgent).toBe(true);
+    expect(res?.agent?.agentId).toBe("main"); // the default (first granted)
+    expect(res?.agent?.inheritedDefault).toBe(true);
+  });
+
+  test("a malformed/foreign chatId returns null (no throw for malformed)", async () => {
+    const t = convexTest(schema, modules);
+    const { as } = await seedUserWithAgents(t, ["main", "pissey"]);
+    expect(await as.query(api.agents.getChatAgent, { chatId: "not-an-id" })).toBeNull();
+  });
+
+  test("bound agent DELETED on the gateway → chip falls back to the default (mirrors dispatch)", async () => {
+    // The chip must name the agent the NEXT turn actually dispatches to. Dispatch
+    // (resolveTargetForChat) refuses a deleted binding and rebinds to the default,
+    // so a chip bound to a deleted agent must show the DEFAULT, not the dead agent.
+    const t = convexTest(schema, modules);
+    const userId = await t.run(async (ctx) => {
+      const uid = await ctx.db.insert("users", {});
+      await ctx.db.insert("profiles", { userId: uid, role: "user" as const, canonical: "u" });
+      await ctx.db.insert("instances", { name: "prod", gatewayUrl: "ws://x", kind: "openclaw" });
+      // Successful poll → presentInLastOk:false means KNOWN-deleted (not stale).
+      await ctx.db.insert("instanceDiscovery", {
+        instanceName: "prod",
+        lastPollAt: 1,
+        lastPollOk: true,
+        lastOkAt: 1,
+      });
+      await ctx.db.insert("agents", {
+        instanceName: "prod",
+        agentId: "main",
+        source: "discovered",
+        presentInLastOk: true,
+        displayName: "MAIN",
+        firstSeenAt: 1,
+        lastSeenAt: 1,
+      });
+      await ctx.db.insert("agents", {
+        instanceName: "prod",
+        agentId: "pissey",
+        source: "discovered",
+        presentInLastOk: false, // deleted on the gateway
+        displayName: "PISSEY",
+        firstSeenAt: 1,
+        lastSeenAt: 1,
+      });
+      await ctx.db.insert("userAgents", {
+        userId: uid,
+        instanceName: "prod",
+        agentId: "main",
+        isDefault: true,
+        source: "manual" as const,
+        createdAt: 0,
+      });
+      await ctx.db.insert("userAgents", {
+        userId: uid,
+        instanceName: "prod",
+        agentId: "pissey",
+        isDefault: false,
+        source: "manual" as const,
+        createdAt: 1,
+      });
+      // Chat BOUND to the now-deleted pissey.
+      return uid;
+    });
+    const chatId = await t.run((ctx) =>
+      ctx.db.insert("chats", {
+        userId,
+        updatedAt: 1,
+        instanceName: "prod",
+        agentId: "pissey",
+      }),
+    );
+    const as = t.withIdentity({ subject: `${userId}|session` });
+    const res = await as.query(api.agents.getChatAgent, { chatId });
+    expect(res?.multiAgent).toBe(true);
+    expect(res?.agent?.agentId).toBe("main"); // NOT the dead "pissey"
+    expect(res?.agent?.inheritedDefault).toBe(true);
+  });
+
+  test("DELETED default → chip falls to the first non-deleted agent (mirrors pickFallback)", async () => {
+    // An unbound chat resolves to the user's default — but if the DEFAULT is
+    // deleted on the gateway, dispatch routes to the next present agent, so the
+    // chip must name THAT one, not the dead default (Codex P2).
+    const t = convexTest(schema, modules);
+    const userId = await t.run(async (ctx) => {
+      const uid = await ctx.db.insert("users", {});
+      await ctx.db.insert("profiles", { userId: uid, role: "user" as const, canonical: "u" });
+      await ctx.db.insert("instances", { name: "prod", gatewayUrl: "ws://x", kind: "openclaw" });
+      await ctx.db.insert("instanceDiscovery", {
+        instanceName: "prod", lastPollAt: 1, lastPollOk: true, lastOkAt: 1,
+      });
+      await ctx.db.insert("agents", {
+        instanceName: "prod", agentId: "main", source: "discovered",
+        presentInLastOk: false, displayName: "MAIN", firstSeenAt: 1, lastSeenAt: 1, // default, DELETED
+      });
+      await ctx.db.insert("agents", {
+        instanceName: "prod", agentId: "pissey", source: "discovered",
+        presentInLastOk: true, displayName: "PISSEY", firstSeenAt: 1, lastSeenAt: 1, // present
+      });
+      await ctx.db.insert("userAgents", {
+        userId: uid, instanceName: "prod", agentId: "main",
+        isDefault: true, source: "manual" as const, createdAt: 0,
+      });
+      await ctx.db.insert("userAgents", {
+        userId: uid, instanceName: "prod", agentId: "pissey",
+        isDefault: false, source: "manual" as const, createdAt: 1,
+      });
+      return uid;
+    });
+    const chatId = await t.run((ctx) => ctx.db.insert("chats", { userId, updatedAt: 1 })); // unbound
+    const res = await t
+      .withIdentity({ subject: `${userId}|session` })
+      .query(api.agents.getChatAgent, { chatId });
+    expect(res?.multiAgent).toBe(true);
+    expect(res?.agent?.agentId).toBe("pissey"); // NOT the dead default "main"
+    expect(res?.agent?.state).toBe("ok");
+  });
+});

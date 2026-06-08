@@ -22,6 +22,7 @@ import { internal } from "./_generated/api";
 import { Id } from "./_generated/dataModel";
 import { requireActive, requireOwnedChat } from "./lib/access";
 import { auditImpersonated } from "./lib/audit";
+import { enrichUserAgents, resolveAgentForChat } from "./agents";
 
 // Hard upper bound on how many recent messages the reactive feed loads. Chosen
 // to cover a typical visible conversation while keeping the query (and the
@@ -190,6 +191,20 @@ export const listChats = query({
       if (ka !== kb) return ka - kb;
       return b.updatedAt - a.updatedAt;
     });
+
+    // Per-chat provider kind (OpenClaw vs Hermes) for the sidebar's self-hiding
+    // bridge badge. Resolved through the SAME `resolveAgentForChat` the header
+    // chip uses (and that mirrors dispatch): a chat bound to a deleted/revoked
+    // agent — or with a deleted default — resolves to the agent the NEXT turn
+    // actually uses, so the badge can't name a bridge that won't handle the turn.
+    // BATCHED: `enrichUserAgents` loads the user's agents + their instance kinds
+    // ONCE (it already maps a kind-unset legacy instance to "openclaw"); then each
+    // chat is mapped purely. The frontend shows the badge ONLY when chats span >1
+    // kind (invisible until Hermes).
+    const agents = await enrichUserAgents(ctx, userId);
+    const kindOf = (c: { instanceName?: string; agentId?: string }) =>
+      resolveAgentForChat(agents, c)?.kind ?? null;
+
     return chats
       .filter((c) => !c.archived)
       .map((c) => ({
@@ -200,6 +215,7 @@ export const listChats = query({
         sortKey: c.sortKey ?? 0,
         pinned: c.pinned ?? false,
         color: c.color ?? null,
+        providerKind: kindOf(c),
       }));
   },
 });
