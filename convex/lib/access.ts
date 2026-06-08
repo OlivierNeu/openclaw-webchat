@@ -183,6 +183,13 @@ export async function ensureProfile(ctx: MutationCtx): Promise<Id<"users">> {
     // Claim admin. Flipping the flag here is the OCC serialization point.
     await ctx.db.patch(meta._id, { adminAssigned: true });
     role = "admin";
+  } else if (anonAuthEnabled()) {
+    // DEV ONLY (OPENCLAW_ENABLE_ANON_AUTH=1): auto-approve every non-bootstrap
+    // sign-in as an ACTIVE "user" so multiple test identities are immediately
+    // usable for live multi-user testing — no manual approval round-trip. In
+    // PRODUCTION the anon flag is UNSET, so this branch never runs and
+    // non-bootstrap users correctly land "pending" (admin approval required).
+    role = "user";
   } else {
     role = "pending";
   }

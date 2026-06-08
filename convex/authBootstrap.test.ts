@@ -80,4 +80,41 @@ describe("bootstrap resolves the email from the users row (JWT has no email clai
     const res = await as.mutation(api.me.bootstrap, {});
     expect(res.role).toBe("admin"); // first user, no-email exempt when anon on
   });
+
+  test("anon ON: a NON-bootstrap sign-in is auto-approved as active 'user' (dev multi-user)", async () => {
+    process.env.OPENCLAW_ENABLE_ANON_AUTH = "1";
+    const t = convexTest(schema, modules);
+    // First user claims admin (bootstrap).
+    const firstId = await t.run(async (ctx) => ctx.db.insert("users", {}));
+    const first = await t
+      .withIdentity({ subject: `${firstId}|session` })
+      .mutation(api.me.bootstrap, {});
+    expect(first.role).toBe("admin");
+    // A SECOND dev identity → active "user" (NOT pending) so it's immediately
+    // usable for live multi-user testing.
+    const secondId = await t.run(async (ctx) => ctx.db.insert("users", {}));
+    const second = await t
+      .withIdentity({ subject: `${secondId}|session` })
+      .mutation(api.me.bootstrap, {});
+    expect(second.role).toBe("user");
+  });
+
+  test("anon OFF (production posture): a NON-bootstrap sign-in is 'pending'", async () => {
+    delete process.env.OPENCLAW_ENABLE_ANON_AUTH;
+    const t = convexTest(schema, modules);
+    const firstId = await t.run(async (ctx) =>
+      ctx.db.insert("users", { email: "admin@lacneu.com" }),
+    );
+    const first = await t
+      .withIdentity({ subject: `${firstId}|session` })
+      .mutation(api.me.bootstrap, {});
+    expect(first.role).toBe("admin");
+    const secondId = await t.run(async (ctx) =>
+      ctx.db.insert("users", { email: "second@lacneu.com" }),
+    );
+    const second = await t
+      .withIdentity({ subject: `${secondId}|session` })
+      .mutation(api.me.bootstrap, {});
+    expect(second.role).toBe("pending"); // prod: approval required
+  });
 });

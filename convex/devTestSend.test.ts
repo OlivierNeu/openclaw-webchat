@@ -136,6 +136,27 @@ describe("dev.routeUser — re-run promotes an existing assignment to default (C
   });
 });
 
+describe("dev user switcher (listUsersDev / setMyRole)", () => {
+  test("lists profiles + marks the caller; setMyRole flips the caller's role", async () => {
+    const t = convexTest(schema, modules);
+    const meId = await seedAdmin(t); // role admin, canonical "olivier"
+    await t.run(async (ctx) => {
+      const uid = await ctx.db.insert("users", {});
+      await ctx.db.insert("profiles", { userId: uid, role: "user", canonical: "alice" });
+    });
+    const as = t.withIdentity({ subject: `${meId}|session` });
+
+    const list = await as.query(api.dev.listUsersDev, {});
+    expect(list.length).toBe(2);
+    expect(list.find((u) => u.isMe)?.role).toBe("admin"); // caller marked + role
+    expect(list.some((u) => u.canonical === "alice" && !u.isMe)).toBe(true);
+
+    await as.mutation(api.dev.setMyRole, { role: "user" }); // self escape hatch
+    const after = await as.query(api.dev.listUsersDev, {});
+    expect(after.find((u) => u.isMe)?.role).toBe("user");
+  });
+});
+
 describe("dev.enqueueAttachmentTurn — gates the RESOLVED target (Codex P2)", () => {
   test("refuses when the user DEFAULT is a non-allowlisted instance, even though .first() is allowlisted", async () => {
     const t = convexTest(schema, modules);

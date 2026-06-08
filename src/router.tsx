@@ -52,6 +52,7 @@ import type { Id } from "./chat/convexApi";
 import type { ConvexId } from "./chat/convexTypes";
 import { ConvexChat } from "./chat/ConvexChat";
 import { ChatSidebar } from "./chat/ChatSidebar";
+import { DevUserSwitcher } from "./chat/DevUserSwitcher";
 import { UserMenu } from "./chat/UserMenu";
 import { NotificationBell } from "./chat/NotificationBell";
 import { GlobalSearch } from "./chat/GlobalSearch";
@@ -231,6 +232,7 @@ function RoleGate() {
     return (
       <div className="oc-shell">
         <ImpersonationBanner />
+        <DevUserSwitcher />
         <header className="oc-topbar">
           <span className="oc-topbar__brand">OpenClaw</span>
           <div className="oc-topbar__actions">
@@ -363,6 +365,7 @@ function AuthenticatedChrome({
   return (
     <div className="oc-shell">
       <ImpersonationBanner />
+      <DevUserSwitcher />
       <AppTopBar
         userLabel={userLabel}
         themeMode={themeMode}

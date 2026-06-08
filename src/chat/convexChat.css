@@ -2698,3 +2698,38 @@
 .oc-access__gone { color: var(--destructive); border-color: var(--destructive); }
 .oc-access__stale { color: var(--muted-foreground); }
 .oc-admin__toolbar { display: flex; justify-content: flex-end; margin-bottom: 0.5rem; }
+
+/* ── DEV user switcher (dev-only floating affordance) ───────────────────────── */
+.oc-devfab {
+  /* Sits ABOVE the TanStack Router devtools toggle (also fixed bottom-right in dev). */
+  position: fixed; right: 0.85rem; bottom: 2.9rem; z-index: 60;
+  display: inline-flex; align-items: center; gap: 0.3rem;
+  padding: 0.3rem 0.55rem; border-radius: 999px; cursor: pointer;
+  font-size: 0.7rem; font-weight: 700; letter-spacing: 0.05em;
+  color: oklch(0.28 0.07 70);
+  background: oklch(0.82 0.16 85); border: 1px solid oklch(0.7 0.16 75);
+  box-shadow: 0 2px 8px oklch(0 0 0 / 0.25); opacity: 0.7;
+  transition: opacity 150ms, transform 150ms;
+}
+.oc-devfab:hover { opacity: 1; transform: translateY(-1px); }
+.oc-devsw__me {
+  display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between;
+  gap: 0.5rem; padding: 0.5rem 0.65rem; border-radius: 0.5rem;
+  background: var(--muted); border: 1px solid var(--border);
+}
+.oc-devsw__melabel { display: inline-flex; align-items: center; gap: 0.4rem; font-size: 0.85rem; }
+.oc-devsw__roles { display: flex; gap: 0.25rem; flex-wrap: wrap; }
+.oc-devsw__imp {
+  display: flex; align-items: center; gap: 0.5rem; font-size: 0.8rem;
+  padding: 0.4rem 0.6rem; border-radius: 0.5rem;
+  background: color-mix(in oklch, oklch(0.82 0.16 85) 18%, transparent);
+  border: 1px solid color-mix(in oklch, oklch(0.7 0.16 75) 45%, transparent);
+}
+.oc-devsw__list { display: flex; flex-direction: column; gap: 0.3rem; max-height: 22rem; overflow-y: auto; }
+.oc-devsw__empty { color: var(--muted-foreground); font-size: 0.82rem; padding: 0.5rem 0.25rem; }
+.oc-devsw__row { display: flex; align-items: center; gap: 0.5rem; padding: 0.3rem 0.25rem; }
+.oc-devsw__label { flex: 1 1 auto; font-weight: 500; font-size: 0.85rem; }
+.oc-devsw__select {
+  font-size: 0.75rem; padding: 0.15rem 0.3rem; border-radius: 0.4rem;
+  background: var(--background); color: var(--foreground); border: 1px solid var(--border);
+}

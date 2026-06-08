@@ -15,6 +15,7 @@ import { Doc, Id } from "./_generated/dataModel";
 import { generateApiKey, hashKey } from "./lib/apikeys";
 import { seedBuiltinRoles } from "./lib/rbac";
 import { resolveTargetForChat } from "./routing";
+import { requireRealUserId, getProfile } from "./lib/access";
 
 function assertDev() {
   if (process.env.OPENCLAW_ENABLE_ANON_AUTH !== "1") {
@@ -73,6 +74,64 @@ export const makeAdmin = mutation({
     if (!match) return { ok: false, reason: "no profile with that canonical" };
     await ctx.db.patch(match._id, { role: "admin" });
     return { ok: true, profileId: match._id };
+  },
+});
+
+// Force a profile's role by canonical (dev convenience): approve a pending test
+// user to "user", promote to "admin", or DEMOTE to "pending" to exercise the
+// approval UX. Dev-gated; never available in production.
+export const setRole = mutation({
+  args: {
+    canonical: v.string(),
+    role: v.union(v.literal("pending"), v.literal("user"), v.literal("admin")),
+  },
+  handler: async (ctx, { canonical, role }) => {
+    assertDev();
+    const all = await ctx.db.query("profiles").take(500);
+    const match = all.find((p) => p.canonical === canonical);
+    if (!match) {
+      return { ok: false as const, reason: "no profile with that canonical" };
+    }
+    await ctx.db.patch(match._id, { role });
+    return { ok: true as const, profileId: match._id, role };
+  },
+});
+
+// DEV user switcher backend: list every profile + role (so the dev panel never
+// needs the operator to know ids), marking the REAL caller. Dev-gated.
+export const listUsersDev = query({
+  args: {},
+  handler: async (ctx) => {
+    assertDev();
+    const me = await requireRealUserId(ctx);
+    const profiles = await ctx.db.query("profiles").take(500);
+    return profiles
+      .map((p) => ({
+        userId: p.userId,
+        profileId: p._id,
+        canonical: p.canonical ?? null,
+        role: (p.role as string | undefined) ?? "pending",
+        name: p.name ?? null,
+        email: p.email ?? null,
+        isMe: p.userId === me,
+      }))
+      .sort((a, b) => (a.isMe === b.isMe ? 0 : a.isMe ? -1 : 1));
+  },
+});
+
+// Set the CALLER's OWN role (dev escape hatch: become admin to reach Settings,
+// or demote to pending to exercise the approval UX). Real identity, dev-gated.
+export const setMyRole = mutation({
+  args: {
+    role: v.union(v.literal("pending"), v.literal("user"), v.literal("admin")),
+  },
+  handler: async (ctx, { role }) => {
+    assertDev();
+    const me = await requireRealUserId(ctx);
+    const profile = await getProfile(ctx, me);
+    if (!profile) return { ok: false as const, reason: "no profile" };
+    await ctx.db.patch(profile._id, { role });
+    return { ok: true as const, role };
   },
 });
 
