@@ -40,6 +40,7 @@ import type * as lib_timeRange from "../lib/timeRange.js";
 import type * as lib_uiPrefs from "../lib/uiPrefs.js";
 import type * as me from "../me.js";
 import type * as messages from "../messages.js";
+import type * as notifications from "../notifications.js";
 import type * as observability from "../observability.js";
 import type * as openclaw from "../openclaw.js";
 import type * as projects from "../projects.js";
@@ -88,6 +89,7 @@ declare const fullApi: ApiFromModules<{
   "lib/uiPrefs": typeof lib_uiPrefs;
   me: typeof me;
   messages: typeof messages;
+  notifications: typeof notifications;
   observability: typeof observability;
   openclaw: typeof openclaw;
   projects: typeof projects;

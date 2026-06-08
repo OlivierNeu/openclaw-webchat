@@ -13,8 +13,8 @@
 //      admin id (realUserId), with impersonated=true.
 
 import { convexTest } from "convex-test";
-import { describe, expect, test } from "vitest";
-import { api } from "./_generated/api";
+import { describe, expect, test, vi } from "vitest";
+import { api, internal } from "./_generated/api";
 import schema from "./schema";
 import { Id } from "./_generated/dataModel";
 
@@ -332,6 +332,147 @@ describe("feedback admin view (increment B)", () => {
     await expect(
       owner.as.mutation(api.feedback.respondToFeedback, { feedbackId, text: "x" }),
     ).rejects.toThrow(/admin/i);
+  });
+
+  // UI-10 code-review P2: pre-UI-10 admin replies created NO notification (the
+  // badge was feedback-driven). Backfill replays them so they survive the move
+  // to the generic notifications badge, idempotently and without leaking text.
+  describe("backfillFeedbackNotifications (UI-10 review P2)", () => {
+    // Inject an admin reply DIRECTLY into the thread (bypassing respondToFeedback),
+    // reproducing the legacy state: an unread reply with NO notification row.
+    async function legacyReply(
+      t: ReturnType<typeof convexTest>,
+      feedbackId: Id<"feedback">,
+      authorUserId: Id<"users">,
+      at: number,
+    ) {
+      await t.run(async (ctx) => {
+        const fb = await ctx.db.get(feedbackId);
+        await ctx.db.patch(feedbackId, {
+          thread: [
+            ...(fb!.thread ?? []),
+            { authorUserId, authorRole: "admin" as const, text: "réponse secrète", at },
+          ],
+        });
+      });
+    }
+
+    test("backfills one non-PHI notif per unread legacy reply; idempotent", async () => {
+      const t = convexTest(schema, modules);
+      const { owner, admin, feedbackId } = await seedReported(t);
+      await legacyReply(t, feedbackId, admin.userId, 5000);
+      // Precondition: the old badge counts it, but there is NO notification yet.
+      expect(await owner.as.query(api.feedback.myUnreadFeedbackCount, {})).toBe(1);
+      expect((await owner.as.query(api.notifications.myNotifications, {})).length).toBe(0);
+
+      const r1 = await t.mutation(internal.feedback.backfillFeedbackNotifications, {});
+      expect(r1.notified).toBe(1);
+
+      const list = await owner.as.query(api.notifications.myNotifications, {});
+      const fr = list.find((n) => n.kind === "feedback_reply");
+      expect(fr).toBeTruthy();
+      expect(fr?.body ?? "").not.toContain("secrète"); // reply text never leaked
+      // dedupeKey shape matches respondToFeedback -> a future reply won't collide.
+      const row = await t.run(async (ctx) =>
+        (await ctx.db.query("notifications").collect()).find(
+          (n) => n.kind === "feedback_reply",
+        ),
+      );
+      expect(row?.dedupeKey).toBe(`feedback_reply:${feedbackId}:5000`);
+      expect(row?.createdAt).toBe(5000); // original reply time (label), not "now"
+      expect(row?.href).toMatch(/^\/chat\//); // R4: deep-link to the conversation
+
+      // Idempotent: a second run (or a deploy that races a live reply) adds nothing.
+      const r2 = await t.mutation(internal.feedback.backfillFeedbackNotifications, {});
+      expect(r2.notified).toBe(0);
+      expect((await owner.as.query(api.notifications.myNotifications, {})).length).toBe(1);
+    });
+
+    test("drains across pages beyond one batch (BACKFILL_PAGE=100)", async () => {
+      // Codex R2-P1: the backfill processes one bounded page per transaction then
+      // self-schedules the next. Seed MORE than one page and prove the scheduled
+      // chain backfills every legacy reply (not just the first page).
+      vi.useFakeTimers();
+      try {
+        const t = convexTest(schema, modules);
+        const owner = await t.run(async (ctx) => {
+          const uid = await ctx.db.insert("users", {});
+          await ctx.db.insert("profiles", { userId: uid, role: "user" as const });
+          return uid;
+        });
+        const admin = await t.run(async (ctx) => {
+          const uid = await ctx.db.insert("users", {});
+          await ctx.db.insert("profiles", { userId: uid, role: "admin" as const });
+          return uid;
+        });
+        const N = 105; // > BACKFILL_PAGE (100) -> at least two pages
+        await t.run(async (ctx) => {
+          const chatId = await ctx.db.insert("chats", { userId: owner, updatedAt: 1 });
+          const messageId = await ctx.db.insert("messages", {
+            chatId,
+            userId: owner,
+            role: "assistant",
+            status: "complete",
+            text: "x",
+            updatedAt: 1,
+          });
+          for (let i = 0; i < N; i++) {
+            await ctx.db.insert("feedback", {
+              userId: owner,
+              realUserId: owner,
+              impersonated: false,
+              chatId,
+              messageId,
+              at: 1,
+              category: "other",
+              snapshot: { messageRole: "assistant", messageText: "x" },
+              // Legacy unread admin reply, NO notification row.
+              thread: [
+                {
+                  authorUserId: admin,
+                  authorRole: "admin" as const,
+                  text: "r",
+                  at: 1000 + i,
+                },
+              ],
+            });
+          }
+        });
+
+        const first = await t.mutation(
+          internal.feedback.backfillFeedbackNotifications,
+          {},
+        );
+        expect(first.done).toBe(false); // more than one page -> not done in one tx
+        await t.finishAllScheduledFunctions(vi.runAllTimers);
+
+        const count = await t.run(
+          async (ctx) => (await ctx.db.query("notifications").collect()).length,
+        );
+        expect(count).toBe(N); // every page drained, one notif per legacy reply
+      } finally {
+        vi.useRealTimers();
+      }
+    });
+
+    test("skips already-read replies and owner self-replies", async () => {
+      const t = convexTest(schema, modules);
+      const { owner, admin, feedbackId } = await seedReported(t);
+
+      // (a) Already read: userReadAt >= the reply time -> not unread -> no notif.
+      await legacyReply(t, feedbackId, admin.userId, 1000);
+      await t.run((ctx) => ctx.db.patch(feedbackId, { userReadAt: 2000 }));
+
+      // (b) Self-reply: the latest admin message was authored by the OWNER
+      //     (mirrors respondToFeedback's `fb.userId !== adminId` skip).
+      const self = await seedReported(t);
+      await legacyReply(t, self.feedbackId, self.owner.userId, 9000);
+
+      const r = await t.mutation(internal.feedback.backfillFeedbackNotifications, {});
+      expect(r.notified).toBe(0);
+      expect((await owner.as.query(api.notifications.myNotifications, {})).length).toBe(0);
+      expect((await self.owner.as.query(api.notifications.myNotifications, {})).length).toBe(0);
+    });
   });
 
   test("markAllMyFeedbackRead is a NO-OP under impersonation (never clears the user's badge)", async () => {

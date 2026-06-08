@@ -156,3 +156,61 @@ describe("bridge.readErrorCode (tolerant 502 body parsing)", () => {
     expect(code).toBeUndefined();
   });
 });
+
+describe("bridge.dispatchReset — regenerate with NO agent surfaces an error (no silent failure)", () => {
+  test("no-agent regenerate → failDispatch (outbox failed + assistant error bubble)", async () => {
+    const t = convexTest(schema, modules);
+    const prevUrl = process.env.BRIDGE_URL;
+    const prevSecret = process.env.BRIDGE_SHARED_SECRET;
+    process.env.BRIDGE_URL = "http://127.0.0.1:8787"; // pass the config gate
+    process.env.BRIDGE_SHARED_SECRET = "x";
+    try {
+      const { chatId, userId, regenId } = await t.run(async (ctx) => {
+        const userId = await ctx.db.insert("users", {});
+        await ctx.db.insert("profiles", {
+          userId,
+          role: "user",
+          canonical: "alice",
+        });
+        const now = Date.now();
+        const chatId = await ctx.db.insert("chats", {
+          userId,
+          archived: false,
+          updatedAt: now,
+        });
+        const regenId = await ctx.db.insert("outbox", {
+          chatId,
+          userId,
+          clientMessageId: "regen-1",
+          text: "hi",
+          attachmentIds: [],
+          status: "pending",
+        });
+        return { chatId, userId, regenId };
+      });
+
+      // No userAgents → resolveTargetForChat → no_agent. dispatchReset hits the
+      // no-agent branch and returns BEFORE any fetch — so this is hermetic.
+      await t.action(internal.bridge.dispatchReset, {
+        chatId,
+        userId,
+        regenerateOutboxId: regenId,
+      });
+
+      const outbox = await t.run((ctx) => ctx.db.get(regenId));
+      expect(outbox?.status).toBe("failed"); // no longer pending + silent
+
+      const msgs = await messagesOf(t, chatId);
+      const err = msgs.find(
+        (m) => m.role === "assistant" && m.status === "error",
+      );
+      expect(err).toBeTruthy();
+      expect(err?.error ?? "").toMatch(/agent/i); // the "no agent" bubble
+    } finally {
+      if (prevUrl === undefined) delete process.env.BRIDGE_URL;
+      else process.env.BRIDGE_URL = prevUrl;
+      if (prevSecret === undefined) delete process.env.BRIDGE_SHARED_SECRET;
+      else process.env.BRIDGE_SHARED_SECRET = prevSecret;
+    }
+  });
+});

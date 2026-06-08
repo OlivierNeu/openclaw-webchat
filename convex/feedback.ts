@@ -23,7 +23,8 @@
 // captures the environment (best available diagnostic), nothing more.
 
 import { v } from "convex/values";
-import { mutation, query } from "./_generated/server";
+import { mutation, query, internalMutation } from "./_generated/server";
+import { internal } from "./_generated/api";
 import { Doc } from "./_generated/dataModel";
 import {
   requireActive,
@@ -32,6 +33,7 @@ import {
   getProfile,
 } from "./lib/access";
 import { recordAudit } from "./lib/audit";
+import { notifyUser } from "./notifications";
 import {
   PERMISSIONS,
   permissionsForRoleKey,
@@ -445,6 +447,24 @@ function latestAdminAt(thread: Doc<"feedback">["thread"]): number {
   return mx;
 }
 
+type ThreadMessage = NonNullable<Doc<"feedback">["thread"]>[number];
+
+/** The most-recent admin reply in a thread (author + time), or null if none.
+ *  Backfill needs the author to faithfully replay `respondToFeedback`'s skip of
+ *  self-replies (`fb.userId !== adminId`). */
+function latestAdminMessage(
+  thread: Doc<"feedback">["thread"],
+): { authorUserId: ThreadMessage["authorUserId"]; at: number } | null {
+  let latest: { authorUserId: ThreadMessage["authorUserId"]; at: number } | null =
+    null;
+  for (const m of thread ?? []) {
+    if (m.authorRole === "admin" && (latest === null || m.at > latest.at)) {
+      latest = { authorUserId: m.authorUserId, at: m.at };
+    }
+  }
+  return latest;
+}
+
 /** Admin appends a response to a report's thread (audited; not a content read). */
 export const respondToFeedback = mutation({
   args: { feedbackId: v.id("feedback"), text: v.string() },
@@ -454,6 +474,7 @@ export const respondToFeedback = mutation({
     if (fb === null) throw new Error("Not found: feedback");
     const trimmed = text.trim().slice(0, RESPONSE_MAX);
     if (trimmed.length === 0) throw new Error("Empty response");
+    const now = Date.now();
     await ctx.db.patch(feedbackId, {
       thread: [
         ...(fb.thread ?? []),
@@ -461,10 +482,26 @@ export const respondToFeedback = mutation({
           authorUserId: adminId,
           authorRole: "admin" as const,
           text: trimmed,
-          at: Date.now(),
+          at: now,
         },
       ],
     });
+    // Notify the report owner (NON-PHI: a label only — never the reply text,
+    // which stays in the feedback thread). Skip when the admin replies to their
+    // OWN report. dedupeKey per reply so each one notifies exactly once.
+    if (fb.userId !== adminId) {
+      await notifyUser(ctx, {
+        userId: fb.userId,
+        kind: "feedback_reply",
+        title: "Réponse à votre signalement",
+        body: "Un administrateur a répondu à un signalement que vous avez envoyé.",
+        // Deep-link to the reported conversation (the bell's "Mes signalements"
+        // section holds the reply text; the top-list item just needs to be
+        // openable — restoring the link the old feedback panel exposed).
+        href: `/chat/${fb.chatId}`,
+        dedupeKey: `feedback_reply:${feedbackId}:${now}`,
+      });
+    }
     await recordAudit(
       ctx,
       {
@@ -544,5 +581,78 @@ export const markAllMyFeedbackRead = mutation({
         await ctx.db.patch(r._id, { userReadAt: now });
       }
     }
+  },
+});
+
+// --- One-shot migration (UI-10 code-review P2) -------------------------------
+//
+// Before UI-10, `respondToFeedback` did NOT create a `notifications` row — the
+// badge was driven by `myUnreadFeedbackCount`. UI-10 moved the badge to the
+// generic `notifications` table, so feedback replies that were still UNREAD at
+// deploy time have no notification and would silently vanish from the badge.
+//
+// This replays what `respondToFeedback` WOULD have produced for those threads:
+// for each report whose latest admin reply is unread (`latestAdminAt >
+// userReadAt`) and was NOT authored by the owner (mirrors the `fb.userId !==
+// adminId` skip), emit one idempotent `feedback_reply` notification keyed
+// `feedback_reply:<id>:<latestAdminAt>` — the SAME dedupeKey shape a future
+// reply would use, so a live reply racing the backfill is deduped, not doubled.
+// Paginated + idempotent → safe to run more than once.
+//
+// RUN ONCE post-deploy (the schema change is inert without it):
+//   npx convex run feedback:backfillFeedbackNotifications
+//
+// BOUNDED PER TRANSACTION (Codex R2-P1): a Convex mutation is ONE transaction
+// with read/write limits, so we process a single bounded page then SELF-SCHEDULE
+// the next page via `ctx.scheduler.runAfter(0, …)`. A naive in-one-mutation
+// loop over the whole table would blow the limits on a large base and fail the
+// backfill entirely. The CLI call runs the first page and returns; the chain
+// drains the rest in background. Idempotent (dedupeKey), so a re-run is safe.
+const BACKFILL_PAGE = 100;
+
+export const backfillFeedbackNotifications = internalMutation({
+  args: { cursor: v.optional(v.union(v.string(), v.null())) },
+  handler: async (
+    ctx,
+    { cursor },
+  ): Promise<{ scanned: number; notified: number; done: boolean }> => {
+    const result = await ctx.db
+      .query("feedback")
+      .paginate({ numItems: BACKFILL_PAGE, cursor: cursor ?? null });
+    let notified = 0;
+    for (const fb of result.page) {
+      const latest = latestAdminMessage(fb.thread);
+      if (latest === null) continue; // no admin reply yet
+      if (latest.at <= (fb.userReadAt ?? 0)) continue; // already read
+      if (latest.authorUserId === fb.userId) continue; // self-reply (mirror producer)
+      const dedupeKey = `feedback_reply:${fb._id}:${latest.at}`;
+      const before = await ctx.db
+        .query("notifications")
+        .withIndex("by_user_dedupe", (q) =>
+          q.eq("userId", fb.userId).eq("dedupeKey", dedupeKey),
+        )
+        .first();
+      if (before !== null) continue; // already backfilled / produced
+      // Direct insert (not notifyUser) — one dedupe read above is enough, and we
+      // need the exact count + the ORIGINAL reply time as the label.
+      await ctx.db.insert("notifications", {
+        userId: fb.userId,
+        kind: "feedback_reply",
+        title: "Réponse à votre signalement",
+        body: "Un administrateur a répondu à un signalement que vous avez envoyé.",
+        href: `/chat/${fb.chatId}`, // deep-link to the reported conversation
+        dedupeKey,
+        createdAt: latest.at, // original reply time (label only; feed sorts by insert)
+      });
+      notified += 1;
+    }
+    if (!result.isDone) {
+      await ctx.scheduler.runAfter(
+        0,
+        internal.feedback.backfillFeedbackNotifications,
+        { cursor: result.continueCursor },
+      );
+    }
+    return { scanned: result.page.length, notified, done: result.isDone };
   },
 });

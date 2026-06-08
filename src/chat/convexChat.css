@@ -634,7 +634,35 @@
   font-weight: 600;
   font-size: 0.85rem;
   border-bottom: 1px solid var(--border);
+  display: flex; align-items: center; justify-content: space-between; gap: 0.5rem;
 }
+.oc-notif__head--sub {
+  font-size: 0.74rem; font-weight: 700; text-transform: uppercase;
+  letter-spacing: 0.03em; color: var(--muted-foreground);
+  border-top: 1px solid var(--border);
+}
+.oc-notif__bulk { display: flex; gap: 0.35rem; }
+.oc-notif__act {
+  font-size: 0.72rem; color: var(--muted-foreground); cursor: pointer;
+  background: none; border: none; padding: 0.1rem 0.2rem; border-radius: 0.3rem;
+}
+.oc-notif__act:hover:not(:disabled) { color: var(--foreground); background: var(--muted); }
+.oc-notif__act:disabled { opacity: 0.4; cursor: default; }
+.oc-notif__item.is-link { cursor: pointer; }
+.oc-notif__item.is-link:hover { background: var(--muted); }
+.oc-notif__title { font-weight: 600; font-size: 0.82rem; flex: 1 1 auto; min-width: 0; }
+.oc-notif__body { margin: 0; font-size: 0.82rem; color: var(--muted-foreground); }
+.oc-notif__row-actions { display: flex; gap: 0.15rem; flex: 0 0 auto; }
+.oc-notif__row-actions button {
+  display: inline-flex; align-items: center; justify-content: center;
+  width: 1.4rem; height: 1.4rem; border: none; background: none; cursor: pointer;
+  color: var(--muted-foreground); border-radius: 0.3rem;
+}
+.oc-notif__row-actions button:hover { color: var(--foreground); background: var(--background); }
+.oc-notif__kind { flex: 0 0 auto; }
+.oc-notif__kind--anomaly_open { color: oklch(0.7 0.17 50); }
+.oc-notif__kind--anomaly_resolved { color: oklch(0.7 0.16 150); }
+.oc-notif__kind--feedback_reply { color: var(--muted-foreground); }
 .oc-notif__empty { padding: 1rem 0.8rem; color: var(--muted-foreground); font-size: 0.85rem; }
 .oc-notif__list { overflow-y: auto; }
 .oc-notif__item {

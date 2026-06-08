@@ -541,12 +541,29 @@ export const dispatchReset = internalAction({
     regenerateOutboxId: v.optional(v.id("outbox")),
   },
   handler: async (ctx, { chatId, userId, regenerateOutboxId }) => {
+    // A regenerate (assistant-delete) builds a pending outbox row that ONLY this
+    // action can drive. Every path that does NOT chain its dispatch must mark that
+    // row terminal + surface the cause, else it stays pending and the user sees
+    // NOTHING (the silent failure we forbid — reported live). A plain reset (no
+    // regenerate) has nothing to surface.
+    const failRegen = async (
+      reason: "not_configured" | "no_agent" | "send_failed",
+    ) => {
+      if (regenerateOutboxId) {
+        await ctx.runMutation(internal.bridge.failDispatch, {
+          outboxId: regenerateOutboxId,
+          reason,
+        });
+      }
+    };
+
     const bridgeUrl = process.env.BRIDGE_URL;
     const sharedSecret = process.env.BRIDGE_SHARED_SECRET;
     if (!bridgeUrl || !sharedSecret) {
       console.error(
         "bridge.dispatchReset: BRIDGE_URL / BRIDGE_SHARED_SECRET not configured",
       );
+      await failRegen("not_configured");
       return;
     }
     const routing = await ctx.runQuery(internal.bridge.getChatRouting, {
@@ -554,7 +571,8 @@ export const dispatchReset = internalAction({
       userId,
     });
     if (!routing || routing.target === null) {
-      console.error("bridge.dispatchReset: user is unrouted (no valve target)");
+      console.error("bridge.dispatchReset: no agent assigned for user");
+      await failRegen("no_agent");
       return;
     }
 
@@ -581,12 +599,17 @@ export const dispatchReset = internalAction({
       ok = false;
     }
 
-    // Chain the regenerate ONLY after a clean reset (else skip — a stale-session
-    // regenerate would answer with the deleted context).
-    if (ok && regenerateOutboxId) {
-      await ctx.scheduler.runAfter(0, internal.bridge.dispatch, {
-        outboxId: regenerateOutboxId,
-      });
+    // Chain the regenerate ONLY after a clean reset (else a stale-session
+    // regenerate would answer with the deleted context). If the reset FAILED,
+    // surface it on the regenerate row instead of leaving it pending + silent.
+    if (regenerateOutboxId) {
+      if (ok) {
+        await ctx.scheduler.runAfter(0, internal.bridge.dispatch, {
+          outboxId: regenerateOutboxId,
+        });
+      } else {
+        await failRegen("send_failed");
+      }
     }
 
     try {

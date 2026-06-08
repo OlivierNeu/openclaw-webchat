@@ -34,6 +34,7 @@ import { Doc, Id } from "./_generated/dataModel";
 import { getActor, requireAdmin, requirePermission } from "./lib/access";
 import { PERMISSIONS } from "./lib/rbac";
 import { recordAudit } from "./lib/audit";
+import { notifyAdmins } from "./notifications";
 import {
   applyFilter,
   filterValidator,
@@ -204,7 +205,7 @@ async function upsertDetectorAnomaly(
   const now = Date.now();
   const evidence = JSON.stringify(args.evidence);
   if (existing === undefined) {
-    await ctx.db.insert("anomalies", {
+    const id = await ctx.db.insert("anomalies", {
       at: now,
       kind: args.kind,
       severity: args.severity,
@@ -212,6 +213,16 @@ async function upsertDetectorAnomaly(
       message: args.message,
       source: "detector",
       evidence,
+    });
+    // Notify admins on the OPEN transition only (fresh insert) — never on the
+    // upsert/refresh path below, so a re-observed anomaly doesn't spam per cron
+    // tick (advisor). dedupeKey by row id = one notif per open-row lifetime.
+    await notifyAdmins(ctx, {
+      kind: "anomaly_open",
+      title: `Anomalie : ${args.kind}`,
+      body: args.message,
+      href: "/settings/anomalies",
+      dedupeKey: `anomaly_open:${id}`,
     });
     return;
   }
@@ -613,6 +624,13 @@ export const reportAnomalyInternal = internalMutation({
       correlationId,
       evidence,
     });
+    await notifyAdmins(ctx, {
+      kind: "anomaly_open",
+      title: `Anomalie : ${kind}`,
+      body: message,
+      href: "/settings/anomalies",
+      dedupeKey: `anomaly_open:${id}`,
+    });
     return { id };
   },
 });
@@ -641,6 +659,20 @@ async function resolveAnomalyDoc(
     resolvedAt: Date.now(),
     ...(args.resolvedBy !== undefined ? { resolvedBy: args.resolvedBy } : {}),
   });
+  // Notify admins when an anomaly is RESOLVED (not on mute/acknowledge). Fires
+  // here — the SINGLE resolution writer — so DETECTOR auto-resolve notifies too,
+  // not just manual "Résoudre" (advisor). dedupeKey = one resolved-notif per row.
+  if (next === "resolved") {
+    await notifyAdmins(ctx, {
+      kind: "anomaly_resolved",
+      title: `Anomalie résolue : ${row.kind}`,
+      body: row.message,
+      // Deep-link to the RESOLVED view — the tab defaults to status=open, which
+      // would filter out the very anomaly this notification is about.
+      href: "/settings/anomalies?status=resolved",
+      dedupeKey: `anomaly_resolved:${args.anomalyId}`,
+    });
+  }
   return { ok: true };
 }
 

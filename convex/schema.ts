@@ -599,6 +599,34 @@ export default defineSchema({
     // The user's own reports, newest-first, for the notification zone.
     .index("by_user", ["userId"]),
 
+  // Generic per-user notification feed (the bell). The SINGLE source of truth for
+  // the unread badge. Producers: anomaly open/resolved (→ every admin), feedback
+  // reply (→ the report's owner). NON-PHI only — title/body are labels (e.g.
+  // "Réponse à votre signalement"), NEVER message/feedback text; `href` deep-links
+  // to where the detail lives. `readAt` null = unread. Rows are user-clearable.
+  notifications: defineTable({
+    userId: v.id("users"), // recipient (real identity)
+    kind: v.union(
+      v.literal("anomaly_open"),
+      v.literal("anomaly_resolved"),
+      v.literal("feedback_reply"),
+    ),
+    title: v.string(),
+    body: v.string(),
+    href: v.optional(v.string()), // in-app deep link (e.g. "/settings/anomalies")
+    // De-dupe / correlation key so a producer never double-notifies for the same
+    // event (e.g. one anomaly_open per (user, anomalyId)).
+    dedupeKey: v.optional(v.string()),
+    createdAt: v.number(),
+    readAt: v.optional(v.number()), // unset = unread
+  })
+    .index("by_user", ["userId"]) // feed (most-recent page)
+    .index("by_user_dedupe", ["userId", "dedupeKey"]) // idempotent producers
+    // Unread badge: scan ONLY the unread set (readAt === undefined), never the
+    // whole per-user history. A missing optional `readAt` is indexed as
+    // `undefined`, so `.eq("readAt", undefined)` ranges exactly the unread rows.
+    .index("by_user_unread", ["userId", "readAt"]),
+
   // ===========================================================================
   // Observability & RBAC spine (increment 1). All NEW tables -> required fields
   // are fine (no pre-existing rows to reject on schema push). See

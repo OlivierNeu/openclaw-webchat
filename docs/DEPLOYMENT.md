@@ -1,5 +1,25 @@
 # Deployment
 
+> **✅ UI-10 NOTIFICATIONS DEPLOY (2026-06-08) — ADDITIVE, do IN ORDER. NO
+> clean-slate this lot** (the only schema change is the new `notifications` table
+> + a `by_user_unread` index — pure additions, so `convex deploy` validates
+> against existing data):
+> 1. **`convex deploy`** (adds the `notifications` table + index; the bridge is
+>    untouched — `dispatchReset` is Convex, not the bridge service).
+> 2. **RUN THE BACKFILL — mandatory, the schema change is inert without it:**
+>    ```
+>    npx convex run feedback:backfillFeedbackNotifications
+>    ```
+>    Pre-UI-10 admin feedback replies created NO `notifications` row; the badge now
+>    reads ONLY that table, so an unread legacy reply would silently vanish from the
+>    badge until this one-shot replays it. **Bounded per transaction**: it processes
+>    one page (100) then SELF-SCHEDULES the next via the Convex scheduler, so the CLI
+>    returns after the FIRST page (`{scanned, notified, done}`) and the chain drains
+>    the rest in the background — no manual looping, and it never blows a single-tx
+>    read/write limit on a large base. Idempotent (safe to re-run). Skipping this
+>    step leaves the Codex regression live.
+> 3. **Ship the new frontend image** (unified bell + bounded `myUnreadCount`).
+
 > **✅ PROD DEPLOY CHECKLIST (multi-agent, do IN ORDER — each step prevents an
 > outage; the two blocks below give the why):**
 > 1. **Wipe the target Convex app data** (disposable; only admin + a pending user

@@ -52,7 +52,7 @@ const ALL = "__all__";
 // top-level `status` arg). Default "open" preserves today's view.
 const STATUS_OPTIONS = [
   { value: "open", label: "Ouvertes" },
-  { value: "acknowledged", label: "Acquittées" },
+  { value: "acknowledged", label: "En sourdine" },
   { value: "resolved", label: "Résolues" },
 ] as const;
 
@@ -187,8 +187,13 @@ export function AnomaliesTab() {
     <>
       <p className="oc-admin__hint">
         Anomalies détectées (cron) ou signalées par les agents OpenClaw. Données
-        non-PHI uniquement (type, sévérité, message, corrélation). Résoudre ou
-        acquitter une anomalie ouverte la sort du décompte de heartbeat.{" "}
+        non-PHI uniquement (type, sévérité, message, corrélation).{" "}
+        <strong>Ouverte</strong> = active, elle alerte et compte dans le heartbeat.{" "}
+        <strong>En sourdine</strong> = vue, plus d'alerte, mais pas forcément
+        corrigée (les admins sont notifiés des nouvelles anomalies).{" "}
+        <strong>Résolue</strong> = le problème est réglé (le détecteur résout
+        automatiquement quand la condition cesse). Les deux la sortent du
+        décompte heartbeat.{" "}
         <span className="oc-filter__window">
           La plage temporelle filtre la fenêtre récente — une plage antérieure
           peut être partielle.
@@ -269,9 +274,9 @@ export function AnomaliesTab() {
         rowActions={(r) =>
           canResolve && r.status === "open"
             ? [
-                { label: "Résoudre", onSelect: () => void resolve(r) },
+                { label: "Résoudre (corrigé)", onSelect: () => void resolve(r) },
                 {
-                  label: "Acquitter",
+                  label: "Marquer comme vue (sourdine)",
                   onSelect: () => void acknowledge(r),
                 },
               ]
@@ -397,7 +402,7 @@ function SeverityBadge({ severity }: { severity: AnomalyView["severity"] }) {
 function StatusBadge({ status }: { status: AnomalyView["status"] }) {
   if (status === "open") return <Badge variant="destructive">ouverte</Badge>;
   if (status === "acknowledged")
-    return <Badge variant="secondary">acquittée</Badge>;
+    return <Badge variant="secondary">en sourdine</Badge>;
   return <Badge variant="outline">résolue</Badge>;
 }
 
