@@ -1,81 +1,122 @@
-// Routing resolver (valves): maps an authenticated user to an OpenClaw target.
+// Routing resolver (multi-agent). Maps a CHAT to an OpenClaw target from the
+// user's `userAgents` (M:N). The target returned is ALWAYS one the user is
+// authorized for (∈ userAgents) — this is the dispatch-time authorization (IDOR
+// defense). Legacy group/override routing has been REMOVED (single user, no
+// migration); no userAgents => a clear "no_agent" failure, never a silent target.
 //
-// SINGLE source of truth for "which instance + agent does this user talk to".
-// Resolution order (per-user override wins over group):
-//   1. Per-user OVERRIDE: profile.overrideInstance (+ overrideAgentId) — an
-//      explicit pin that beats the group.
-//   2. GROUP: profile.groupId -> groups row:
-//        - mode "per-user": agentId derived from the user's `canonical`
-//          (each member gets their OWN agent / isolated session).
-//        - mode "shared":   agentId = group.sharedAgentId (every member talks
-//          to the SAME agent).
-//   3. Unrouted: no override and no group -> null (the bridge cannot dispatch;
-//      surfaced as a routing error, never a silent wrong target).
-//
-// SECURITY (load-bearing): this emits ONLY non-secret names — instanceName,
-// agentId, canonical. Gateway tokens and device identities are NEVER here; the
-// bridge maps instanceName -> token/deviceIdentity from its own env.
+// SECURITY: emits ONLY non-secret names — instanceName, agentId, canonical.
+// Gateway tokens / device identities live in the bridge env, never here.
 
-import { Doc } from "./_generated/dataModel";
+import { Doc, Id } from "./_generated/dataModel";
 import { QueryCtx, MutationCtx } from "./_generated/server";
-import { getProfile, requireUserId } from "./lib/access";
+import { getProfile } from "./lib/access";
 
 export interface ResolvedTarget {
   instanceName: string;
   agentId: string;
   canonical: string;
-  source: "override" | "group-per-user" | "group-shared";
+  source: "chat-binding" | "user-default";
 }
 
-export async function resolveTargetForProfile(
-  ctx: QueryCtx | MutationCtx,
-  profile: Doc<"profiles"> | null,
-): Promise<ResolvedTarget | null> {
-  if (profile === null) return null;
-  const canonical = profile.canonical ?? `u-${profile.userId.slice(0, 10)}`;
+export interface ChatResolution {
+  target: ResolvedTarget | null;
+  /** When set, persist this binding onto the chat (unbound chat resolved to the
+   *  default, OR the bound agent was deleted on the gateway → re-bind). */
+  rebind: { instanceName: string; agentId: string } | null;
+  failReason: "no_agent" | null;
+}
 
-  // 1. Per-user override wins.
-  if (profile.overrideInstance) {
-    return {
-      instanceName: profile.overrideInstance,
-      agentId: profile.overrideAgentId ?? canonical,
-      canonical,
-      source: "override",
-    };
+/** Is this (instance, agent) DELETED on the gateway? `agents.presentInLastOk` is
+ *  set false ONLY by a SUCCESSFUL poll that omitted the agent (applyDiscovery,
+ *  guarded on a non-empty result); a failed or never-run poll NEVER touches it
+ *  (recordDiscoveryFailure leaves rows + presence intact). So `presentInLastOk
+ *  === false` is reliable last-good knowledge of deletion that a later discovery
+ *  outage must NOT erase (Codex P2): a blip must not resurrect a known-deleted
+ *  agent. An ABSENT row = never discovered (unknown) => NOT deleted (serve the
+ *  binding; the gateway arbitrates) — assignment only ever grants discovered
+ *  agents anyway, and a present agent during a blip keeps presentInLastOk===true
+ *  (so it is served, the stale-blip case). */
+async function isDeleted(
+  ctx: QueryCtx | MutationCtx,
+  instanceName: string,
+  agentId: string,
+): Promise<boolean> {
+  const agent = await ctx.db
+    .query("agents")
+    .withIndex("by_instance_agent", (q) =>
+      q.eq("instanceName", instanceName).eq("agentId", agentId),
+    )
+    .first();
+  return agent !== null && agent.presentInLastOk === false;
+}
+
+export async function resolveTargetForChat(
+  ctx: QueryCtx | MutationCtx,
+  chat: Doc<"chats">,
+  userId: Id<"users">,
+): Promise<ChatResolution> {
+  const profile = await getProfile(ctx, userId);
+  const canonical = profile?.canonical ?? `u-${userId.slice(0, 10)}`;
+
+  const uas = await ctx.db
+    .query("userAgents")
+    .withIndex("by_user", (q) => q.eq("userId", userId))
+    .collect();
+  if (uas.length === 0) {
+    return { target: null, rebind: null, failReason: "no_agent" };
   }
 
-  // 2. Group.
-  if (profile.groupId) {
-    const group = await ctx.db.get(profile.groupId);
-    if (group !== null) {
-      if (group.mode === "shared") {
-        if (!group.sharedAgentId) return null; // misconfigured shared group
-        return {
-          instanceName: group.instanceName,
-          agentId: group.sharedAgentId,
-          canonical,
-          source: "group-shared",
-        };
-      }
-      // per-user: each member gets their own agent, derived from canonical.
+  const asTarget = (
+    u: { instanceName: string; agentId: string },
+    source: ResolvedTarget["source"],
+  ): ResolvedTarget => ({
+    instanceName: u.instanceName,
+    agentId: u.agentId,
+    canonical,
+    source,
+  });
+
+  // Pick a PRESENT fallback agent (Codex P2 — never route to a deleted agent):
+  // the default if it isn't deleted, else the first non-deleted assigned agent.
+  // null when ALL assigned agents are deleted → fail no_agent (never dispatch to
+  // an absent agent, which is the prod "Agent X no longer exists" bug).
+  const pickFallback = async (): Promise<(typeof uas)[number] | null> => {
+    const ordered = [...uas].sort((a, b) =>
+      a.isDefault === b.isDefault ? 0 : a.isDefault ? -1 : 1,
+    );
+    for (const u of ordered) {
+      if (!(await isDeleted(ctx, u.instanceName, u.agentId))) return u;
+    }
+    return null;
+  };
+
+  // Bound chat: honor the binding unless membership was revoked or the agent was
+  // deleted on the gateway.
+  if (chat.instanceName && chat.agentId) {
+    const member = uas.find(
+      (u) => u.instanceName === chat.instanceName && u.agentId === chat.agentId,
+    );
+    if (member && !(await isDeleted(ctx, member.instanceName, member.agentId))) {
       return {
-        instanceName: group.instanceName,
-        agentId: canonical,
-        canonical,
-        source: "group-per-user",
+        target: asTarget(member, "chat-binding"),
+        rebind: null,
+        failReason: null,
       };
     }
+    // revoked or deleted → fall through to a present fallback.
   }
 
-  // 3. Unrouted.
-  return null;
-}
-
-/** Resolve the CURRENT authenticated user's target (used by the bridge path). */
-export async function resolveTargetForUser(
-  ctx: QueryCtx | MutationCtx,
-): Promise<ResolvedTarget | null> {
-  const userId = await requireUserId(ctx);
-  const profile = await getProfile(ctx, userId);
-  return resolveTargetForProfile(ctx, profile);
+  const fb = await pickFallback();
+  if (fb === null) {
+    return { target: null, rebind: null, failReason: "no_agent" };
+  }
+  const alreadyBound =
+    chat.instanceName === fb.instanceName && chat.agentId === fb.agentId;
+  return {
+    target: asTarget(fb, "user-default"),
+    rebind: alreadyBound
+      ? null
+      : { instanceName: fb.instanceName, agentId: fb.agentId },
+    failReason: null,
+  };
 }

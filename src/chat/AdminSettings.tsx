@@ -2,6 +2,8 @@ import { useMemo, useState } from "react";
 import { useMutation, useQuery } from "convex/react";
 import { useNavigate, useSearch } from "@tanstack/react-router";
 import { api } from "./convexApi";
+import type { Id } from "./convexApi";
+import { UserAccessSheet } from "./admin/UserAccessSheet";
 import { Input } from "@/components/ui/input";
 import {
   Select,
@@ -12,6 +14,14 @@ import {
 } from "@/components/ui/select";
 import { Button } from "@/components/ui/button";
 import { Checkbox } from "@/components/ui/checkbox";
+import { Badge } from "@/components/ui/badge";
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog";
 import {
   DropdownMenu,
   DropdownMenuTrigger,
@@ -58,7 +68,6 @@ const ALL = "__all__";
 // `/settings/<tab>`, and this tuple is what both sides validate against.
 export const TABS = [
   "users",
-  "groups",
   "instances",
   "bridge",
   "serviceAccounts",
@@ -109,7 +118,6 @@ export const TAB_LABELS: Partial<Record<Tab, string>> = {
 // boundary. Keep this map total over TABS (Record<Tab,...> enforces that).
 export const TAB_PERMISSION: Record<Tab, string> = {
   users: "admin.manage",
-  groups: "admin.manage",
   instances: "admin.manage",
   bridge: "bridge.read",
   serviceAccounts: "admin.manage",
@@ -228,14 +236,17 @@ export function UsersTab() {
       role: role === ALL ? undefined : role,
     },
   });
-  // Groups are unfiltered here (they feed the per-row routing <Select>).
-  const groups = useQuery(api.admin.listGroups, {});
   const me = useQuery(api.me.getMe);
   const setRole = useMutation(api.admin.setRole);
-  const setRouting = useMutation(api.admin.setUserRouting);
   const setPerms = useMutation(api.admin.setUserPermissions);
   const startImpersonation = useMutation(api.admin.startImpersonation);
   const toast = useToast();
+  // The user whose Access editor (instance+agent assignment) is open. Replaces
+  // the legacy free-text override/group columns (H4).
+  const [accessFor, setAccessFor] = useState<{
+    profileId: Id<"profiles">;
+    label: string;
+  } | null>(null);
 
   // Role options: the three built-ins plus any custom role already present on a
   // user row (forward-compatible if a deployment adds more).
@@ -258,14 +269,6 @@ export function UsersTab() {
       await setRole(args);
     } catch (err) {
       toast.error("Changement de rôle refusé", err);
-    }
-  }
-
-  async function changeRouting(args: Parameters<typeof setRouting>[0]) {
-    try {
-      await setRouting(args);
-    } catch (err) {
-      toast.error("Mise à jour du routage refusée", err);
     }
   }
 
@@ -365,241 +368,55 @@ export function UsersTab() {
             ),
         },
         {
-          header: "Group",
+          // Agents are assignable to EVERY user, admins included: an admin is
+          // also a chat user and needs >=1 agent to start a conversation (there
+          // is NO server-side "admin uses all agents" bypass — Codex P2).
+          header: "Agents",
           cell: (u) => (
-            <Select
-              value={u.groupId ?? "none"}
-              onValueChange={(v) =>
-                void changeRouting({
+            <Button
+              variant="outline"
+              size="sm"
+              className="h-8 font-normal"
+              onClick={() =>
+                setAccessFor({
                   profileId: u._id,
-                  groupId: v === "none" ? null : (v as never),
+                  label:
+                    u.email || u.name || u.canonical || u.userId.slice(0, 8),
                 })
               }
             >
-              <SelectTrigger size="sm" className="w-40">
-                <SelectValue />
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem value="none">— none —</SelectItem>
-                {(groups ?? []).map((g) => (
-                  <SelectItem key={g._id} value={g._id}>
-                    {g.name}
-                  </SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
-          ),
-        },
-        {
-          header: "Override instance",
-          cell: (u) => (
-            <Input
-              className="h-8 w-44"
-              defaultValue={u.overrideInstance ?? ""}
-              placeholder="(group)"
-              onBlur={(e) =>
-                void changeRouting({
-                  profileId: u._id,
-                  overrideInstance: e.target.value || null,
-                })
-              }
-            />
-          ),
-        },
-        {
-          header: "Override agent",
-          cell: (u) => (
-            <Input
-              className="h-8 w-44"
-              defaultValue={u.overrideAgentId ?? ""}
-              placeholder="(derived)"
-              onBlur={(e) =>
-                void changeRouting({
-                  profileId: u._id,
-                  overrideAgentId: e.target.value || null,
-                })
-              }
-            />
+              Gérer les agents
+            </Button>
           ),
         },
       ]}
+    />
+    <UserAccessSheet
+      profileId={accessFor?.profileId ?? null}
+      userLabel={accessFor?.label ?? ""}
+      open={accessFor !== null}
+      onOpenChange={(o) => {
+        if (!o) setAccessFor(null);
+      }}
     />
     </>
   );
 }
 
-type GroupForm = {
+
+type InstanceKind = "openclaw" | "hermes";
+type InstanceForm = {
   name: string;
-  instanceName: string;
-  mode: "per-user" | "shared";
-  sharedAgentId: string;
+  gatewayUrl: string;
+  displayName: string;
+  kind: InstanceKind;
 };
-const EMPTY_GROUP: GroupForm = {
+const EMPTY_INSTANCE: InstanceForm = {
   name: "",
-  instanceName: "",
-  mode: "per-user",
-  sharedAgentId: "",
+  gatewayUrl: "",
+  displayName: "",
+  kind: "openclaw",
 };
-
-export function GroupsTab() {
-  const search = useSearch({ from: "/settings/groups" });
-  const navigate = useNavigate({ from: "/settings/groups" });
-  const q = search.q ?? "";
-  const mode = search.mode ?? ALL;
-  const setQ = (v: string) =>
-    void navigate({ search: (p) => ({ ...p, q: v || undefined }), replace: true });
-  const setMode = (v: string) =>
-    void navigate({
-      search: (p) => ({ ...p, mode: v === ALL ? undefined : (v as "per-user" | "shared") }),
-    });
-
-  const groups = useQuery(api.admin.listGroups, {
-    filter: {
-      q: q || undefined,
-      mode: mode === ALL ? undefined : mode,
-    },
-  });
-  const createGroup = useMutation(api.admin.createGroup);
-  const deleteGroup = useMutation(api.admin.deleteGroup);
-  const toast = useToast();
-  const [sheetOpen, setSheetOpen] = useState(false);
-  const [form, setForm] = useState<GroupForm>(EMPTY_GROUP);
-
-  const active = q !== "" || mode !== ALL;
-  function reset() {
-    void navigate({ search: {}, replace: true });
-  }
-
-  async function submit() {
-    try {
-      await createGroup({
-        name: form.name,
-        instanceName: form.instanceName,
-        mode: form.mode,
-        sharedAgentId: form.mode === "shared" ? form.sharedAgentId : undefined,
-      });
-      setForm(EMPTY_GROUP);
-      setSheetOpen(false);
-    } catch (err) {
-      // M5: surface duplicate-key / validation rejections instead of swallowing.
-      toast.error("Échec de la création du groupe", err);
-    }
-  }
-
-  return (
-    <>
-      <FilterBar
-        q={q}
-        onQChange={setQ}
-        searchPlaceholder="Rechercher (nom, instance)"
-        onReset={reset}
-        canReset={active}
-      >
-        <Select value={mode} onValueChange={setMode}>
-          <SelectTrigger size="sm" className="w-40">
-            <SelectValue />
-          </SelectTrigger>
-          <SelectContent>
-            <SelectItem value={ALL}>Tous les modes</SelectItem>
-            <SelectItem value="per-user">per-user</SelectItem>
-            <SelectItem value="shared">shared</SelectItem>
-          </SelectContent>
-        </Select>
-      </FilterBar>
-      <DataTableShell
-        title="Groups"
-        rows={groups}
-        addLabel="Add group"
-        onAdd={() => {
-          setForm(EMPTY_GROUP);
-          setSheetOpen(true);
-        }}
-        emptyHint="Aucun groupe."
-        columns={[
-          { header: "Name", cell: (g) => g.name },
-          { header: "Instance", cell: (g) => g.instanceName },
-          { header: "Mode", cell: (g) => g.mode },
-          { header: "Shared agent", cell: (g) => g.sharedAgentId ?? "—" },
-        ]}
-        rowActions={(g) => [
-          {
-            label: "Delete",
-            variant: "destructive",
-            onSelect: () => void deleteGroup({ groupId: g._id }),
-          },
-        ]}
-        bulkActions={[
-          {
-            label: "Delete",
-            variant: "destructive",
-            onSelect: (ids) =>
-              ids.forEach((id) =>
-                void deleteGroup({ groupId: id as never }),
-              ),
-          },
-        ]}
-      />
-      <EntitySheet
-        open={sheetOpen}
-        onOpenChange={setSheetOpen}
-        title="Nouveau groupe"
-        description="Routage par groupe (valve)."
-        canSubmit={Boolean(form.name && form.instanceName) &&
-          (form.mode !== "shared" || Boolean(form.sharedAgentId))}
-        onSubmit={submit}
-        submitLabel="Ajouter"
-      >
-        <div className="oc-form">
-          <Field label="Nom du groupe">
-            <Input
-              value={form.name}
-              onChange={(e) => setForm({ ...form, name: e.target.value })}
-            />
-          </Field>
-          <Field label="Instance">
-            <Input
-              value={form.instanceName}
-              onChange={(e) =>
-                setForm({ ...form, instanceName: e.target.value })
-              }
-            />
-          </Field>
-          <Field label="Mode">
-            <Select
-              value={form.mode}
-              onValueChange={(v) =>
-                setForm({ ...form, mode: v as "per-user" | "shared" })
-              }
-            >
-              <SelectTrigger className="w-full">
-                <SelectValue />
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem value="per-user">
-                  per-user (chacun son agent)
-                </SelectItem>
-                <SelectItem value="shared">shared (agent commun)</SelectItem>
-              </SelectContent>
-            </Select>
-          </Field>
-          {form.mode === "shared" ? (
-            <Field label="Shared agentId">
-              <Input
-                value={form.sharedAgentId}
-                onChange={(e) =>
-                  setForm({ ...form, sharedAgentId: e.target.value })
-                }
-              />
-            </Field>
-          ) : null}
-        </div>
-      </EntitySheet>
-    </>
-  );
-}
-
-type InstanceForm = { name: string; gatewayUrl: string; displayName: string };
-const EMPTY_INSTANCE: InstanceForm = { name: "", gatewayUrl: "", displayName: "" };
 
 export function InstancesTab() {
   const instances = useQuery(api.admin.listInstances, {});
@@ -608,6 +425,8 @@ export function InstancesTab() {
   const toast = useToast();
   const [sheetOpen, setSheetOpen] = useState(false);
   const [form, setForm] = useState<InstanceForm>(EMPTY_INSTANCE);
+  // The instance whose discovered-agents dialog is open.
+  const [agentsFor, setAgentsFor] = useState<string | null>(null);
 
   async function submit() {
     try {
@@ -615,6 +434,7 @@ export function InstancesTab() {
         name: form.name,
         gatewayUrl: form.gatewayUrl,
         displayName: form.displayName || undefined,
+        kind: form.kind,
       });
       setForm(EMPTY_INSTANCE);
       setSheetOpen(false);
@@ -627,8 +447,9 @@ export function InstancesTab() {
   return (
     <>
       <p className="oc-admin__hint">
-        Métadonnées non-secrètes uniquement. Les tokens gateway et device
-        identities vivent dans l’environnement du bridge, jamais ici.
+        Métadonnées non-secrètes uniquement. Les agents sont <strong>découverts
+        par le bridge</strong> (jamais saisis à la main) ; les tokens gateway et
+        device identities vivent dans l’environnement du bridge, jamais ici.
       </p>
       <DataTableShell
         title="Instances"
@@ -641,8 +462,27 @@ export function InstancesTab() {
         emptyHint="Aucune instance."
         columns={[
           { header: "Name", cell: (i) => i.name },
+          {
+            header: "Bridge",
+            cell: (i) => (
+              <Badge variant="outline">{i.kind ?? "openclaw"}</Badge>
+            ),
+          },
           { header: "Gateway URL", cell: (i) => i.gatewayUrl },
           { header: "Display", cell: (i) => i.displayName ?? "—" },
+          {
+            header: "Agents",
+            cell: (i) => (
+              <Button
+                variant="outline"
+                size="sm"
+                className="h-8 font-normal"
+                onClick={() => setAgentsFor(i.name)}
+              >
+                Voir les agents
+              </Button>
+            ),
+          },
         ]}
         rowActions={(i) => [
           {
@@ -676,6 +516,22 @@ export function InstancesTab() {
               onChange={(e) => setForm({ ...form, name: e.target.value })}
             />
           </Field>
+          <Field label="Technologie (bridge)">
+            <Select
+              value={form.kind}
+              onValueChange={(v) =>
+                setForm({ ...form, kind: v as InstanceKind })
+              }
+            >
+              <SelectTrigger size="sm" className="w-40">
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="openclaw">OpenClaw</SelectItem>
+                <SelectItem value="hermes">Hermes</SelectItem>
+              </SelectContent>
+            </Select>
+          </Field>
           <Field label="Gateway URL (ws(s)://)">
             <Input
               value={form.gatewayUrl}
@@ -690,7 +546,83 @@ export function InstancesTab() {
           </Field>
         </div>
       </EntitySheet>
+      <InstanceAgentsDialog
+        instanceName={agentsFor}
+        open={agentsFor !== null}
+        onOpenChange={(o) => {
+          if (!o) setAgentsFor(null);
+        }}
+      />
     </>
+  );
+}
+
+// Read-only view of the agents DISCOVERED on an instance (the bridge is the
+// source of truth) + the poll outcome. Manual entry is intentionally absent —
+// agents come from `agents.list`, never from a text field (the prod-bug fix).
+function InstanceAgentsDialog({
+  instanceName,
+  open,
+  onOpenChange,
+}: {
+  instanceName: string | null;
+  open: boolean;
+  onOpenChange: (open: boolean) => void;
+}) {
+  const data = useQuery(
+    api.agents.listAgentsForInstance,
+    open && instanceName ? { instanceName } : "skip",
+  );
+  return (
+    <Dialog open={open} onOpenChange={onOpenChange}>
+      <DialogContent>
+        <DialogHeader>
+          <DialogTitle>Agents découverts — {instanceName}</DialogTitle>
+          <DialogDescription>
+            Liste fournie par le bridge (OpenClaw <code>agents.list</code> /
+            Hermes). Lecture seule.
+          </DialogDescription>
+        </DialogHeader>
+        {data === undefined ? (
+          <p className="oc-access__hint">Chargement…</p>
+        ) : (
+          <>
+            <div className="oc-access__poll">
+              {data.discovery === null
+                ? "Jamais sondé."
+                : data.discovery.lastPollOk
+                  ? "Découverte OK."
+                  : `Hors-ligne (${data.discovery.error ?? "?"}) — dernier bon résultat servi.`}
+            </div>
+            {data.agents.length === 0 ? (
+              <p className="oc-access__hint">Aucun agent découvert.</p>
+            ) : (
+              <div className="oc-access__list">
+                {data.agents.map((a) => (
+                  <div key={a.agentId} className="oc-access__row">
+                    <span className="oc-access__label">
+                      {a.emoji ? `${a.emoji} ` : ""}
+                      {a.displayName ?? a.agentId}
+                    </span>
+                    {a.model ? (
+                      <span className="oc-access__model">{a.model}</span>
+                    ) : null}
+                    {a.isDefaultOnInstance ? (
+                      <Badge variant="outline">défaut</Badge>
+                    ) : null}
+                    {a.presentInLastOk === false ? (
+                      <Badge variant="outline" className="oc-access__gone">
+                        supprimé
+                      </Badge>
+                    ) : null}
+                  </div>
+                ))}
+              </div>
+            )}
+          </>
+        )}
+      </DialogContent>
+    </Dialog>
   );
 }
 

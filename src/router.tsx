@@ -58,7 +58,6 @@ import { GlobalSearch } from "./chat/GlobalSearch";
 import {
   PARAMLESS_TABS,
   UsersTab,
-  GroupsTab,
   InstancesTab,
   AuditTab,
   visibleTabs,
@@ -85,7 +84,6 @@ import {
   kpiSearchSchema,
   serviceAccountsSearchSchema,
   usersSearchSchema,
-  groupsSearchSchema,
 } from "./lib/routing/searchSchemas";
 import { Button } from "@/components/ui/button";
 import { ToastProvider } from "@/components/ui/toast";
@@ -606,13 +604,6 @@ const usersRoute = createRoute({
   validateSearch: usersSearchSchema,
   component: UsersTab,
 });
-const groupsRoute = createRoute({
-  getParentRoute: () => settingsRoute,
-  path: "groups",
-  validateSearch: groupsSearchSchema,
-  component: GroupsTab,
-});
-
 // Paramless tabs (roles | integrations | instances | theme): one shared route.
 const settingsTabRoute = createRoute({
   getParentRoute: () => settingsRoute,
@@ -694,7 +685,6 @@ const routeTree = rootRoute.addChildren([
     kpiRoute,
     serviceAccountsRoute,
     usersRoute,
-    groupsRoute,
     settingsTabRoute,
   ]),
 ]);

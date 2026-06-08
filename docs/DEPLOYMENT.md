@@ -1,5 +1,55 @@
 # Deployment
 
+> **✅ PROD DEPLOY CHECKLIST (multi-agent, do IN ORDER — each step prevents an
+> outage; the two blocks below give the why):**
+> 1. **Wipe the target Convex app data** (disposable; only admin + a pending user
+>    in prod) — else the schema-clean `convex deploy` FAILS validation.
+> 2. **`convex deploy`** (the old bridge ignores the new body fields, so
+>    Convex-first is safe) — sets `BRIDGE_INSTANCE_NAME` per deployment.
+> 3. **Create ONLY the instance this bridge serves** in the `instances` table
+>    (a user assigned an agent on a non-served instance will 409 cleanly but see
+>    "indisponible").
+> 4. **Set the bridge env**: `OPENCLAW_INSTANCE_NAME` == that `instances.name` ==
+>    `BRIDGE_INSTANCE_NAME`; remove `OPENCLAW_AGENT_ID`/`OPENCLAW_CANONICAL`.
+> 5. **Ship the new bridge image** (it hard-requires body routing — shipping it
+>    before step 2 makes every send 400).
+
+> **⚠️ SCHEMA-CLEAN DEPLOY (multi-agent redesign, 2026-06-07) — READ BEFORE
+> `convex deploy`.** The multi-agent schema **drops** the legacy routing columns
+> (`groups` table + `profiles.{groupId, overrideInstance, overrideAgentId,
+> allowedChatPrefixes}`, `userAgents.needsReassignment`, source `"migrated"`).
+> Convex schema validation is **strict**: it rejects deploying a schema that drops
+> a column while any existing document still carries it. So this is a **clean-slate
+> deploy** — there is no migration (operator-confirmed: no data to preserve).
+>
+> Procedure for the target (NAS self-hosted) deployment:
+> 1. **Wipe the app data first** (the data is disposable; only `admin` + a
+>    `pending` user exist in prod). Clear the legacy-carrying tables, or reset the
+>    whole app DB — the app re-bootstraps the first signed-in account to `admin`.
+> 2. `convex deploy` the new schema (now validates against empty/clean data).
+> 3. First admin login re-creates the profile cleanly; assign agents via Users →
+>    "Gérer les agents".
+>
+> Skipping step 1 makes `convex deploy` **fail** schema validation (this is the
+> Codex P1 caution). Rehearsed locally: `dev.reset` purged the DB → schema valid
+> on empty → app re-bootstrapped admin clean. See `docs/MULTI_AGENT_REDESIGN.md`
+> §4.0. *(If you ever need a zero-downtime deploy WITH legacy data present, the
+> alternative is to re-add the dropped columns as `v.optional(...)` and clear them
+> in a follow-up — but that re-introduces dead columns and is not the chosen path.)*
+
+> **⚠️ DEPLOY ORDER (Phase 2a body-routing) — Convex BEFORE the bridge.** The new
+> bridge image HARD-REQUIRES `agentId` + `canonical` on every `/send|/patch|/reset`
+> body (it 400s with no env fallback — that fallback was the prod bug). Convex's
+> `bridge.dispatch` is what supplies those fields. So:
+> 1. `convex deploy` FIRST (the OLD bridge simply ignores the extra body fields, so
+>    a Convex-first rollout is safe and causes no outage).
+> 2. THEN ship the new bridge image.
+> Shipping the bridge first → **every send 400s** until Convex catches up.
+> Also set `OPENCLAW_INSTANCE_NAME` on each bridge (== its Convex `instances.name`
+> == that deployment's `BRIDGE_INSTANCE_NAME`) to activate the M2 cross-instance
+> guard. The bridge no longer reads `OPENCLAW_AGENT_ID` / `OPENCLAW_CANONICAL` —
+> remove them from the bridge env. See `docs/MULTI_AGENT_REDESIGN.md` §4 Phase 2a.
+
 > **ARCHITECTURE NOTE (2026-06):** Modes A/B and the original "Media Volume"
 > section below describe the **LEGACY** backend (Firebase frontend + FastAPI
 > signed-media `/api/media/outbound`). The project has since migrated to

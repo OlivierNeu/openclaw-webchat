@@ -57,15 +57,50 @@ const chatColorValidator = v.union(
   v.null(),
 );
 
+// Authorize a (user, instance, agent) chat binding against the user's userAgents
+// (red-team B / IDOR): the bridge will route by these names, so Convex is the
+// SOLE authorization point. Returns silently if authorized; throws otherwise.
+async function requireAgentMembership(
+  ctx: MutationCtx,
+  userId: Id<"users">,
+  instanceName: string,
+  agentId: string,
+) {
+  const row = await ctx.db
+    .query("userAgents")
+    .withIndex("by_user_instance_agent", (q) =>
+      q.eq("userId", userId).eq("instanceName", instanceName).eq("agentId", agentId),
+    )
+    .first();
+  if (row === null) {
+    throw new Error("Forbidden: agent not assigned to this user");
+  }
+}
+
 export const createChat = mutation({
   args: {
     title: v.optional(v.string()),
     openclawChatId: v.optional(v.string()),
     projectId: v.optional(v.id("projects")),
+    // The agent this chat binds to (from the picker, or auto when the user has
+    // exactly one). BOTH or NEITHER — an unbound chat resolves to the user's
+    // default at dispatch. Authorized server-side against userAgents (IDOR gate).
+    instanceName: v.optional(v.string()),
+    agentId: v.optional(v.string()),
   },
-  handler: async (ctx, { title, openclawChatId, projectId }) => {
+  handler: async (
+    ctx,
+    { title, openclawChatId, projectId, instanceName, agentId },
+  ) => {
     const { userId, actor } = await requireActive(ctx);
     if (projectId) await requireOwnedProject(ctx, userId, projectId);
+    // Binding must be both-or-neither, and authorized against userAgents.
+    if ((instanceName === undefined) !== (agentId === undefined)) {
+      throw new Error("Invalid: instanceName and agentId must be set together");
+    }
+    if (instanceName !== undefined && agentId !== undefined) {
+      await requireAgentMembership(ctx, userId, instanceName, agentId);
+    }
     const now = Date.now();
     // New chats go to the TOP: a key below the current minimum sortKey.
     const minKey = await minChatSortKey(ctx, userId, projectId ?? null);
@@ -74,6 +109,8 @@ export const createChat = mutation({
       title,
       openclawChatId,
       projectId,
+      instanceName,
+      agentId,
       archived: false,
       sortKey: minKey - 1,
       updatedAt: now,

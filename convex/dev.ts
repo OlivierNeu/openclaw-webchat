@@ -3,12 +3,18 @@
 // auth provider). Never enabled in production.
 
 import { v } from "convex/values";
-import { action, internalMutation, mutation, query } from "./_generated/server";
+import {
+  action,
+  internalMutation,
+  mutation,
+  query,
+  MutationCtx,
+} from "./_generated/server";
 import { internal } from "./_generated/api";
-import { Id } from "./_generated/dataModel";
+import { Doc, Id } from "./_generated/dataModel";
 import { generateApiKey, hashKey } from "./lib/apikeys";
 import { seedBuiltinRoles } from "./lib/rbac";
-import { resolveTargetForProfile } from "./routing";
+import { resolveTargetForChat } from "./routing";
 
 function assertDev() {
   if (process.env.OPENCLAW_ENABLE_ANON_AUTH !== "1") {
@@ -29,6 +35,28 @@ function assertDevInstance(instanceName: string): void {
       )}] — refusing "${instanceName}" (never touch jerome/family)`,
     );
   }
+}
+
+/**
+ * Pick the owner for a no-chatId live send: prefer a profile that ACTUALLY has a
+ * `userAgents` grant (the routed user — possibly targeted by `routeUser({email})`),
+ * admin among them first; else fall back to admin/first (which resolves to a clear
+ * no_agent). Dev-only, so the small whole-table read is acceptable. (Codex P3.)
+ */
+async function pickRoutedOwner(
+  ctx: MutationCtx,
+  profiles: Doc<"profiles">[],
+): Promise<Doc<"profiles"> | undefined> {
+  const routed = new Set(
+    (await ctx.db.query("userAgents").collect()).map((u) => u.userId),
+  );
+  const routedProfiles = profiles.filter((p) => routed.has(p.userId));
+  return (
+    routedProfiles.find((p) => p.role === "admin") ??
+    routedProfiles[0] ??
+    profiles.find((p) => p.role === "admin") ??
+    profiles[0]
+  );
 }
 
 // Wipe app data (NOT the @convex-dev/auth tables, except we clear profiles so
@@ -284,10 +312,10 @@ export const searchProbe = query({
 /**
  * LIVE-BRIDGE ROUTING (dev-gated). Wire the test user(s) to one OpenClaw instance
  * so `bridge.dispatch` resolves a non-null target and POSTs to the bridge instead
- * of marking the outbox `failed` (the "unrouted" path). Upserts the non-secret
+ * of marking the outbox `failed` (the "no_agent" path). Upserts the non-secret
  * `instances` row (the bridge maps name -> token/deviceIdentity from its OWN env;
- * gatewayUrl here is display/metadata only) and sets a per-user OVERRIDE on the
- * matching profile(s).
+ * gatewayUrl here is display/metadata only), seeds the agent as DISCOVERED, and
+ * assigns it as the default agent (userAgents) to the matching profile(s).
  *
  *   npx convex run dev:routeUser \
  *     '{"instanceName":"admin","gatewayUrl":"wss://gateway.lacneu.com","agentId":"olivier","canonical":"olivier"}'
@@ -308,60 +336,113 @@ export const routeUser = mutation({
     assertDev();
     assertDevInstance(instanceName); // never route a profile to jerome/family
 
-    // Upsert the non-secret instance row (name == secret-store group key).
+    const now = Date.now();
+    // Upsert the non-secret instance row (kind = openclaw for the dev gateway).
     const existing = await ctx.db
       .query("instances")
       .withIndex("by_name", (q) => q.eq("name", instanceName))
-      .unique();
+      .first();
     if (existing === null) {
       await ctx.db.insert("instances", {
         name: instanceName,
         gatewayUrl,
         displayName: instanceName,
+        kind: "openclaw",
       });
     } else {
-      await ctx.db.patch(existing._id, { gatewayUrl });
+      await ctx.db.patch(existing._id, { gatewayUrl, kind: "openclaw" });
     }
 
-    // Route the matching active profile(s) via a per-user override.
+    // Seed the agent as DISCOVERED + a successful discovery (what the bridge
+    // /agents poll would produce) so the multi-agent routing resolves it.
+    const agentRow = await ctx.db
+      .query("agents")
+      .withIndex("by_instance_agent", (q) =>
+        q.eq("instanceName", instanceName).eq("agentId", agentId),
+      )
+      .first();
+    if (agentRow === null) {
+      await ctx.db.insert("agents", {
+        instanceName,
+        agentId,
+        source: "discovered",
+        presentInLastOk: true,
+        isDefaultOnInstance: true,
+        firstSeenAt: now,
+        lastSeenAt: now,
+      });
+    } else {
+      await ctx.db.patch(agentRow._id, {
+        source: "discovered",
+        presentInLastOk: true,
+        lastSeenAt: now,
+      });
+    }
+    const disc = await ctx.db
+      .query("instanceDiscovery")
+      .withIndex("by_instance", (q) => q.eq("instanceName", instanceName))
+      .first();
+    if (disc === null) {
+      await ctx.db.insert("instanceDiscovery", {
+        instanceName,
+        lastPollAt: now,
+        lastPollOk: true,
+        lastOkAt: now,
+      });
+    } else {
+      await ctx.db.patch(disc._id, { lastPollAt: now, lastPollOk: true, lastOkAt: now });
+    }
+
+    // Assign the agent (as default) to the matching active profile(s) via the
+    // M:N userAgents join — the new routing source.
     const profiles = await ctx.db.query("profiles").take(500);
     const targets = profiles.filter(
       (p) =>
         (p.role === "admin" || p.role === "user") &&
         (email ? p.email === email : true),
     );
-    const routed: Array<{
-      userId: Id<"users">;
-      email: string | null;
-      role: string;
-      target: Awaited<ReturnType<typeof resolveTargetForProfile>>;
-    }> = [];
+    const routed: Array<{ userId: Id<"users">; email: string | null; role: string }> = [];
     for (const p of targets) {
-      await ctx.db.patch(p._id, {
-        overrideInstance: instanceName,
-        overrideAgentId: agentId,
-        canonical,
-      });
-      const fresh = await ctx.db.get(p._id);
-      const target = await resolveTargetForProfile(ctx, fresh);
-      routed.push({
-        userId: p.userId,
-        email: p.email ?? null,
-        role: p.role as string,
-        target,
-      });
+      await ctx.db.patch(p._id, { canonical });
+      const userUas = await ctx.db
+        .query("userAgents")
+        .withIndex("by_user", (q) => q.eq("userId", p.userId))
+        .collect();
+      const ua = userUas.find(
+        (e) => e.instanceName === instanceName && e.agentId === agentId,
+      );
+      // routeUser ANNOUNCES this (instance, agent) as the routed default, so make
+      // it the default even on a re-run where the row already exists but is not
+      // the default (else dev.testSend keeps resolving to the stale default — P3).
+      if (!ua || !ua.isDefault) {
+        for (const e of userUas) {
+          if (e.isDefault) await ctx.db.patch(e._id, { isDefault: false });
+        }
+      }
+      if (!ua) {
+        await ctx.db.insert("userAgents", {
+          userId: p.userId,
+          instanceName,
+          agentId,
+          isDefault: true,
+          source: "manual",
+          createdAt: now,
+        });
+      } else if (!ua.isDefault) {
+        await ctx.db.patch(ua._id, { isDefault: true });
+      }
+      routed.push({ userId: p.userId, email: p.email ?? null, role: p.role as string });
     }
 
     return { ok: true, instance: instanceName, gatewayUrl, routedCount: routed.length, routed };
   },
 });
-
 /**
  * LIVE-TEST TRIGGER (dev-gated). Programmatically enqueue a user turn for the
  * routed test profile — the same path the browser's send.sendMessage takes
  * (optimistic user message + outbox row + scheduled bridge.dispatch) — so the
  * live harness can drive a round-trip WITHOUT a browser click. The scheduled
- * dispatch resolves routing (overrideInstance) and POSTs to the bridge, which
+ * dispatch resolves routing (userAgents) and POSTs to the bridge, which
  * connects to the gateway and streams the reply back into Convex.
  *
  *   npx convex run dev:testSend '{"text":"hello from the live harness"}'
@@ -378,24 +459,36 @@ export const testSend = mutation({
     // (so the harness can drive any conversation); otherwise pick a routed profile.
     const profiles = await ctx.db.query("profiles").take(500);
     let owner: (typeof profiles)[number] | undefined;
+    let boundChat: Doc<"chats"> | null = null;
     if (chatId) {
-      const chat = await ctx.db.get(chatId);
-      if (!chat) return { ok: false as const, reason: "chat not found" };
-      owner = profiles.find((p) => p.userId === chat.userId);
+      boundChat = await ctx.db.get(chatId);
+      if (!boundChat) return { ok: false as const, reason: "chat not found" };
+      owner = profiles.find((p) => p.userId === boundChat!.userId);
       if (!owner) return { ok: false as const, reason: "chat owner has no profile" };
     } else {
-      owner =
-        profiles.find((p) => p.overrideInstance) ??
-        profiles.find((p) => p.role === "admin") ??
-        profiles[0];
+      owner = await pickRoutedOwner(ctx, profiles);
     }
     if (!owner) return { ok: false as const, reason: "no routed profile" };
-    // SAFETY: only fire a live send for a user routed to an allowlisted dev
-    // instance — never let a stray routing reach jerome/family.
-    if (!owner.overrideInstance) {
-      return { ok: false as const, reason: "test user not routed (run dev.routeUser first)" };
+    // SAFETY: gate the ACTUAL dispatch target, not an arbitrary assignment.
+    // bridge.dispatch routes via resolveTargetForChat — the chat BINDING first,
+    // else the user's DEFAULT userAgents row (NOT necessarily `.first()`), and on
+    // an instance that may differ from `.first()`. Gating `.first()` could thus
+    // allowlist one instance while the send actually reaches another (e.g.
+    // jerome/family) (Codex P2). Resolve the same way dispatch will, then assert
+    // THAT instance. For a fresh (no chatId) send the new chat is unbound, so a
+    // synthetic unbound chat resolves to the same default the real one will.
+    const resolveChat: Doc<"chats"> =
+      boundChat ?? ({ userId: owner.userId } as unknown as Doc<"chats">);
+    const resolution = await resolveTargetForChat(ctx, resolveChat, owner.userId);
+    if (!resolution.target) {
+      return {
+        ok: false as const,
+        reason: `test user has no resolvable agent (${
+          resolution.failReason ?? "no_agent"
+        }) — run dev.routeUser first`,
+      };
     }
-    assertDevInstance(owner.overrideInstance);
+    assertDevInstance(resolution.target.instanceName);
     const userId = owner.userId;
     const now = Date.now();
 
@@ -623,22 +716,32 @@ export const enqueueAttachmentTurn = internalMutation({
     assertDev();
     const profiles = await ctx.db.query("profiles").take(500);
     let owner: (typeof profiles)[number] | undefined;
+    let boundChat: Doc<"chats"> | null = null;
     if (chatId) {
-      const chat = await ctx.db.get(chatId);
-      if (!chat) return { ok: false, reason: "chat not found" };
-      owner = profiles.find((p) => p.userId === chat.userId);
+      boundChat = await ctx.db.get(chatId);
+      if (!boundChat) return { ok: false, reason: "chat not found" };
+      owner = profiles.find((p) => p.userId === boundChat!.userId);
       if (!owner) return { ok: false, reason: "chat owner has no profile" };
     } else {
-      owner =
-        profiles.find((p) => p.overrideInstance) ??
-        profiles.find((p) => p.role === "admin") ??
-        profiles[0];
+      owner = await pickRoutedOwner(ctx, profiles);
     }
     if (!owner) return { ok: false, reason: "no routed profile" };
-    if (!owner.overrideInstance) {
-      return { ok: false, reason: "test user not routed (run dev.routeUser first)" };
+    // SAFETY: gate the ACTUAL dispatch target (chat binding else user DEFAULT),
+    // not an arbitrary `.first()` — same barrier as testSend (Codex P2). The
+    // scheduled dispatch resolves via resolveTargetForChat, so gating `.first()`
+    // could allowlist one instance while the attachment reaches another.
+    const resolveChat: Doc<"chats"> =
+      boundChat ?? ({ userId: owner.userId } as unknown as Doc<"chats">);
+    const resolution = await resolveTargetForChat(ctx, resolveChat, owner.userId);
+    if (!resolution.target) {
+      return {
+        ok: false,
+        reason: `test user has no resolvable agent (${
+          resolution.failReason ?? "no_agent"
+        }) — run dev.routeUser first`,
+      };
     }
-    assertDevInstance(owner.overrideInstance);
+    assertDevInstance(resolution.target.instanceName);
     const userId = owner.userId;
     const now = Date.now();
 
@@ -781,9 +884,11 @@ export const reset = mutation({
       "chats",
       "projects",
       "instances",
+      "instanceDiscovery",
+      "agents",
+      "userAgents",
       "profiles",
       "appMeta",
-      "groups",
       "auditLog",
       "serviceAccounts",
       "apiKeys",

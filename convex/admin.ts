@@ -1,7 +1,8 @@
 // Admin settings surface. EVERY function here requires the admin role
 // (requireAdmin derives identity via ctx.auth — never an arg). Manages users
-// (roles/approval), routing groups (valves), per-user overrides, and instance
-// metadata. NO secrets are read or written (gateway tokens / device identities
+// (roles/approval), per-tab RBAC grants, and instance metadata. Agent assignment
+// lives in convex/agents.ts. NO secrets are read or written (gateway tokens /
+// device identities
 // live only in the bridge env; these tables hold non-secret names).
 
 import { v } from "convex/values";
@@ -29,12 +30,6 @@ import {
 const USERS_FILTER_CFG: FilterConfig = {
   searchFields: ["email", "name", "canonical"],
   structured: { role: { field: "role", kind: "string" } },
-  advanced: false,
-};
-
-const GROUPS_FILTER_CFG: FilterConfig = {
-  searchFields: ["name", "instanceName"],
-  structured: { mode: { field: "mode", kind: "string" } },
   advanced: false,
 };
 
@@ -70,9 +65,6 @@ export const listUsers = query({
       role: roleOf(p),
       email: p.email ?? null,
       name: p.name ?? null,
-      groupId: p.groupId ?? null,
-      overrideInstance: p.overrideInstance ?? null,
-      overrideAgentId: p.overrideAgentId ?? null,
       canonical: p.canonical ?? null,
       // Granted per-tab Settings permissions (for the grant editor; admins hold
       // every permission via the wildcard regardless of this field).
@@ -380,31 +372,10 @@ export const setIntegrationConfig = mutation({
 
 // --- Per-user routing override ---------------------------------------------
 
-export const setUserRouting = mutation({
-  args: {
-    profileId: v.id("profiles"),
-    groupId: v.optional(v.union(v.id("groups"), v.null())),
-    overrideInstance: v.optional(v.union(v.string(), v.null())),
-    overrideAgentId: v.optional(v.union(v.string(), v.null())),
-    canonical: v.optional(v.string()),
-  },
-  handler: async (ctx, args) => {
-    await requireAdmin(ctx);
-    const target = await ctx.db.get(args.profileId);
-    if (target === null) throw new Error("Not found: profile");
-    const patch: Record<string, unknown> = {};
-    if (args.groupId !== undefined)
-      patch.groupId = args.groupId === null ? undefined : args.groupId;
-    if (args.overrideInstance !== undefined)
-      patch.overrideInstance =
-        args.overrideInstance === null ? undefined : args.overrideInstance;
-    if (args.overrideAgentId !== undefined)
-      patch.overrideAgentId =
-        args.overrideAgentId === null ? undefined : args.overrideAgentId;
-    if (args.canonical !== undefined) patch.canonical = args.canonical;
-    await ctx.db.patch(args.profileId, patch);
-  },
-});
+// NOTE: legacy `setUserRouting` (per-user group/override write path) was RETIRED
+// with the multi-agent redesign (H4) — routing now comes from `userAgents` (see
+// convex/agents.ts). The `groups`/override columns stay only so old rows validate
+// and the reconciling migration can read them once.
 
 // --- Per-user Settings tab permissions (per-tab RBAC grants) -----------------
 
@@ -429,84 +400,6 @@ export const setUserPermissions = mutation({
   },
 });
 
-// --- Groups (valves) --------------------------------------------------------
-
-const modeValidator = v.union(v.literal("per-user"), v.literal("shared"));
-
-export const listGroups = query({
-  args: { filter: v.optional(filterValidator) },
-  handler: async (ctx, { filter }) => {
-    await requireAdmin(ctx);
-    // listGroups returns the raw docs (no toView) — "view" == the returned
-    // object, so the filter reads the doc's own fields (name/instanceName/mode).
-    const groups = await ctx.db.query("groups").order("desc").take(200);
-    return applyFilter(groups, filter, GROUPS_FILTER_CFG);
-  },
-});
-
-export const createGroup = mutation({
-  args: {
-    name: v.string(),
-    instanceName: v.string(),
-    mode: modeValidator,
-    sharedAgentId: v.optional(v.string()),
-    description: v.optional(v.string()),
-  },
-  handler: async (ctx, args) => {
-    await requireAdmin(ctx);
-    if (args.mode === "shared" && !args.sharedAgentId) {
-      throw new Error("A shared group requires sharedAgentId");
-    }
-    return await ctx.db.insert("groups", args);
-  },
-});
-
-export const updateGroup = mutation({
-  args: {
-    groupId: v.id("groups"),
-    name: v.optional(v.string()),
-    instanceName: v.optional(v.string()),
-    mode: v.optional(modeValidator),
-    sharedAgentId: v.optional(v.union(v.string(), v.null())),
-    description: v.optional(v.union(v.string(), v.null())),
-  },
-  handler: async (ctx, args) => {
-    await requireAdmin(ctx);
-    const group = await ctx.db.get(args.groupId);
-    if (group === null) throw new Error("Not found: group");
-    const mode = args.mode ?? group.mode;
-    const sharedAgentId =
-      args.sharedAgentId === null
-        ? undefined
-        : (args.sharedAgentId ?? group.sharedAgentId);
-    if (mode === "shared" && !sharedAgentId) {
-      throw new Error("A shared group requires sharedAgentId");
-    }
-    const patch: Record<string, unknown> = { mode, sharedAgentId };
-    if (args.name !== undefined) patch.name = args.name;
-    if (args.instanceName !== undefined) patch.instanceName = args.instanceName;
-    if (args.description !== undefined)
-      patch.description = args.description === null ? undefined : args.description;
-    await ctx.db.patch(args.groupId, patch);
-  },
-});
-
-export const deleteGroup = mutation({
-  args: { groupId: v.id("groups") },
-  handler: async (ctx, { groupId }) => {
-    await requireAdmin(ctx);
-    // Block deletion while members reference the group (avoid orphaned routing).
-    const members = await ctx.db
-      .query("profiles")
-      .filter((q) => q.eq(q.field("groupId"), groupId))
-      .take(1);
-    if (members.length > 0) {
-      throw new Error("Refused: group has members; reassign them first");
-    }
-    await ctx.db.delete(groupId);
-  },
-});
-
 // --- Instances (non-secret metadata) ---------------------------------------
 
 export const listInstances = query({
@@ -523,22 +416,22 @@ export const upsertInstance = mutation({
     name: v.string(),
     gatewayUrl: v.string(),
     displayName: v.optional(v.string()),
+    // Which provider technology backs this instance (the bridge adapts by kind).
+    kind: v.optional(v.union(v.literal("openclaw"), v.literal("hermes"))),
   },
   handler: async (ctx, args) => {
     await requireAdmin(ctx);
-    if (args.instanceId) {
-      await ctx.db.patch(args.instanceId, {
-        name: args.name,
-        gatewayUrl: args.gatewayUrl,
-        displayName: args.displayName,
-      });
-      return args.instanceId;
-    }
-    return await ctx.db.insert("instances", {
+    const fields = {
       name: args.name,
       gatewayUrl: args.gatewayUrl,
       displayName: args.displayName,
-    });
+      kind: args.kind ?? "openclaw",
+    };
+    if (args.instanceId) {
+      await ctx.db.patch(args.instanceId, fields);
+      return args.instanceId;
+    }
+    return await ctx.db.insert("instances", fields);
   },
 });
 
@@ -546,6 +439,57 @@ export const deleteInstance = mutation({
   args: { instanceId: v.id("instances") },
   handler: async (ctx, { instanceId }) => {
     await requireAdmin(ctx);
+    const inst = await ctx.db.get(instanceId);
+    if (inst === null) return; // idempotent
+    const name = inst.name;
     await ctx.db.delete(instanceId);
+
+    // `userAgents` / `agents` / `instanceDiscovery` reference the instance by
+    // NAME (value), so deleting the row alone leaves ORPHAN grants the user could
+    // still bind/send to (Codex P2). Cascade-clean — but ONLY if no OTHER instance
+    // row still serves this name (duplicate-name resilience, like routing.first()).
+    const stillServed = await ctx.db
+      .query("instances")
+      .withIndex("by_name", (q) => q.eq("name", name))
+      .first();
+    if (stillServed !== null) return;
+
+    // Discovery cache for this instance.
+    const discRows = await ctx.db
+      .query("instanceDiscovery")
+      .withIndex("by_instance", (q) => q.eq("instanceName", name))
+      .collect();
+    for (const d of discRows) await ctx.db.delete(d._id);
+    // Discovered/known agents for this instance.
+    const agentRows = await ctx.db
+      .query("agents")
+      .withIndex("by_instance", (q) => q.eq("instanceName", name))
+      .collect();
+    for (const a of agentRows) await ctx.db.delete(a._id);
+    // Orphaned per-user grants — read ONLY this instance's rows via by_instance
+    // (never a whole-table scan; Convex doc limits — Codex P2). Track affected
+    // users so we can re-elect a default among their remaining grants (never leave
+    // "agents but no default" — H2).
+    const instUa = await ctx.db
+      .query("userAgents")
+      .withIndex("by_instance", (q) => q.eq("instanceName", name))
+      .collect();
+    const affected = new Set<Id<"users">>();
+    for (const ua of instUa) {
+      affected.add(ua.userId);
+      await ctx.db.delete(ua._id);
+    }
+    for (const userId of affected) {
+      const remaining = await ctx.db
+        .query("userAgents")
+        .withIndex("by_user", (q) => q.eq("userId", userId))
+        .collect();
+      if (remaining.length > 0 && !remaining.some((r) => r.isDefault)) {
+        await ctx.db.patch(remaining[0]._id, { isDefault: true });
+      }
+    }
+    // Chats bound to the deleted instance are intentionally LEFT: on the next send
+    // resolveTargetForChat sees the (now-removed) grant and re-binds to the user's
+    // default (or fails no_agent) — no orphan dispatch, history preserved.
   },
 });

@@ -49,6 +49,7 @@ import { Input } from "@/components/ui/input";
 import { useConfirm, usePrompt } from "@/components/ConfirmDialog";
 import { api } from "./convexApi";
 import type { Id } from "./convexApi";
+import { AgentPickerDialog, type PickableAgent } from "./AgentPicker";
 
 // Preset chat colors (token-driven, list display only). Value matches the
 // backend `chatColorValidator`. The dot uses oklch hues that read in both modes.
@@ -99,6 +100,35 @@ export function ChatSidebar({
   const reorderChat = useMutation(api.chats.reorderChat);
   const moveToProject = useMutation(api.chats.moveChatToProject);
   const prompt = usePrompt();
+
+  // The agents this (effective) user may open a chat on. Drives the new-chat
+  // binding: exactly 1 → bind automatically; >1 (or 0) → open the picker.
+  const myAgents = useQuery(api.agents.listMyAgents) as
+    | PickableAgent[]
+    | undefined;
+  const [pickerOpen, setPickerOpen] = useState(false);
+
+  async function bindAndOpen(instanceName: string, agentId: string) {
+    const id = (await createChat({
+      title: "New chat",
+      instanceName,
+      agentId,
+    })) as Id<"chats">;
+    onSelect(id);
+  }
+
+  async function startNewChat() {
+    const agents = myAgents;
+    // Auto-bind ONLY when the sole agent is usable. A single agent that was
+    // deleted on the gateway falls through to the picker (which disables it) so we
+    // never auto-create a chat bound to a dead agent (red-team MEDIUM).
+    if (agents && agents.length === 1 && agents[0].state !== "deleted") {
+      await bindAndOpen(agents[0].instanceName, agents[0].agentId);
+      return;
+    }
+    // 0, >1, sole-deleted, or still loading → let the picker decide.
+    setPickerOpen(true);
+  }
 
   // Transient local buffer: Convex is the source of truth; during a drag (and
   // until the write confirms) we render the local arrangement so the item does
@@ -223,13 +253,19 @@ export function ChatSidebar({
 
   return (
     <aside className="oc-sidebar">
+      <AgentPickerDialog
+        open={pickerOpen}
+        onOpenChange={setPickerOpen}
+        agents={myAgents}
+        onPick={(instanceName, agentId) => {
+          setPickerOpen(false);
+          void bindAndOpen(instanceName, agentId);
+        }}
+      />
       <div className="oc-sidebar__top">
         <Button
           className="flex-1 justify-start"
-          onClick={async () => {
-            const id = (await createChat({ title: "New chat" })) as Id<"chats">;
-            onSelect(id);
-          }}
+          onClick={() => void startNewChat()}
         >
           <Plus /> New chat
         </Button>

@@ -2618,3 +2618,83 @@
     animation: none;
   }
 }
+
+/* ── Agent picker (new chat) + Access editor + Instances agents (multi-agent) ── */
+.oc-agentpicker__hint,
+.oc-access__hint {
+  color: var(--muted-foreground);
+  font-size: 0.85rem;
+  padding: 0.75rem 0.25rem;
+}
+.oc-agentpicker__search { margin-bottom: 0.5rem; }
+.oc-agentpicker__list,
+.oc-access__list {
+  display: flex; flex-direction: column; gap: 0.35rem;
+  max-height: 22rem; overflow-y: auto;
+}
+.oc-agentpicker__group,
+.oc-access__group { display: flex; flex-direction: column; gap: 0.2rem; }
+.oc-agentpicker__instance,
+.oc-access__instance {
+  display: flex; align-items: center; gap: 0.4rem;
+  font-size: 0.72rem; text-transform: uppercase; letter-spacing: 0.04em;
+  color: var(--muted-foreground);
+  padding: 0.5rem 0.25rem 0.15rem;
+}
+.oc-agentpicker__kind, .oc-access__kind { font-size: 0.65rem; }
+.oc-agentpicker__item {
+  display: flex; align-items: center; gap: 0.55rem;
+  width: 100%; text-align: left;
+  padding: 0.5rem 0.6rem; border-radius: 0.5rem;
+  border: 1px solid var(--border); background: var(--card);
+  color: var(--card-foreground); cursor: pointer;
+  transition: background-color 150ms, border-color 150ms;
+}
+.oc-agentpicker__item:hover:not(:disabled) {
+  background: var(--accent); border-color: var(--accent);
+}
+.oc-agentpicker__item:disabled { opacity: 0.5; cursor: not-allowed; }
+.oc-agentpicker__icon { color: var(--muted-foreground); flex: 0 0 auto; }
+.oc-agentpicker__label, .oc-access__label { flex: 1 1 auto; font-weight: 500; }
+.oc-agentpicker__model, .oc-access__model {
+  font-family: var(--font-mono); font-size: 0.72rem; color: var(--muted-foreground);
+}
+.oc-agentpicker__default { color: oklch(0.8 0.15 85); flex: 0 0 auto; }
+.oc-access__row {
+  display: flex; align-items: center; gap: 0.55rem;
+  padding: 0.35rem 0.25rem;
+}
+/* Default agent = the only visible star (filled gold), boxed to icon-sm so its
+   glyph lines up with the hover star of the other rows. */
+.oc-access__fav {
+  margin-left: auto;
+  flex: 0 0 auto;
+  width: 1.75rem; height: 1.75rem;
+  display: inline-flex; align-items: center; justify-content: center;
+  color: oklch(0.8 0.15 85);
+}
+/* Non-default agents: no star at rest; revealed on row hover / keyboard focus
+   to offer "make default". Reserved in flow (opacity, not display) → no shift. */
+.oc-access__setdefault {
+  margin-left: auto;
+  color: var(--muted-foreground);
+  opacity: 0;
+  transition: opacity 150ms ease;
+}
+.oc-access__row:hover .oc-access__setdefault,
+.oc-access__row:focus-within .oc-access__setdefault,
+.oc-access__setdefault:focus-visible { opacity: 1; color: oklch(0.8 0.15 85); }
+@media (prefers-reduced-motion: reduce) {
+  .oc-access__setdefault { transition: none; }
+}
+.oc-access__warn {
+  display: flex; align-items: center; gap: 0.45rem;
+  font-size: 0.8rem; color: var(--foreground);
+  background: color-mix(in oklch, var(--destructive) 12%, transparent);
+  border: 1px solid color-mix(in oklch, var(--destructive) 35%, transparent);
+  border-radius: 0.5rem; padding: 0.5rem 0.65rem; margin-bottom: 0.5rem;
+}
+.oc-access__poll { font-size: 0.78rem; color: var(--muted-foreground); padding: 0 0.25rem 0.4rem; }
+.oc-access__gone { color: var(--destructive); border-color: var(--destructive); }
+.oc-access__stale { color: var(--muted-foreground); }
+.oc-admin__toolbar { display: flex; justify-content: flex-end; margin-bottom: 0.5rem; }

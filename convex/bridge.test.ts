@@ -57,7 +57,7 @@ describe("bridge.failDispatch", () => {
     const t = convexTest(schema, modules);
     const { chatId, outboxId } = await seed(t);
 
-    await t.mutation(internal.bridge.failDispatch, { outboxId, reason: "unrouted" });
+    await t.mutation(internal.bridge.failDispatch, { outboxId, reason: "no_agent" });
 
     const row = await t.run((ctx) => ctx.db.get(outboxId));
     expect(row?.status).toBe("failed");
@@ -68,7 +68,7 @@ describe("bridge.failDispatch", () => {
     expect(msgs[0]!.status).toBe("error");
     expect(msgs[0]!.text).toBe(""); // RunStatus renders from `error`, not `text`
     expect(msgs[0]!.error).toMatch(/administrateur/i);
-    expect(msgs[0]!.error).toMatch(/routing/); // reason-specific ref
+    expect(msgs[0]!.error).toMatch(/no-agent/); // reason-specific ref
   });
 
   test("is idempotent — a retry inserts NO second error bubble", async () => {

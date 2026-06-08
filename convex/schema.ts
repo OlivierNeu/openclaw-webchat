@@ -87,7 +87,7 @@ export default defineSchema({
     // (lib/access.ensureProfile) backfills it. Semantics:
     //   - "pending": authenticated but NOT yet approved -> blocked from the app
     //   - "user":    approved, full chat access
-    //   - "admin":   approved + can manage users/roles/groups/instances
+    //   - "admin":   approved + can manage users/roles/agents/instances
     // A row with no role is treated as "pending" by the access helpers.
     role: v.optional(
       v.union(v.literal("pending"), v.literal("user"), v.literal("admin")),
@@ -143,18 +143,9 @@ export default defineSchema({
     // perms can NEVER land here. Effective perms = role ∪ this (see access.ts).
     extraPermissions: v.optional(v.array(v.string())),
 
-    // --- Routing (valves) ---------------------------------------------------
-    // Group membership drives routing by default (see `groups`). A per-user
-    // OVERRIDE wins over the group when set.
-    groupId: v.optional(v.id("groups")),
-    // Per-user override of the resolved OpenClaw target. Non-secret names only.
-    overrideInstance: v.optional(v.string()), // -> instances.name
-    overrideAgentId: v.optional(v.string()),
     // Stable per-user key used to derive a per-user agent / session namespace
     // (OpenClaw `canonical`). Defaults to a slug of the email when unset.
     canonical: v.optional(v.string()),
-    // Chat-id prefixes this user is allowed to address on the gateway.
-    allowedChatPrefixes: v.optional(v.array(v.string())),
 
     // Admin impersonation target. When an admin starts "view/act as a user",
     // the target's userId is recorded HERE, on the ADMIN's own profile. The
@@ -167,27 +158,88 @@ export default defineSchema({
     .index("by_user", ["userId"])
     .index("by_role", ["role"]),
 
-  // A routing group (valve). Members of a group share an OpenClaw instance and
-  // a routing MODE:
-  //   - "per-user": each member gets their OWN agent, derived from their
-  //                 `canonical` (e.g. agentId = canonical). Isolation per user.
-  //   - "shared":   every member talks to the SAME agent (`sharedAgentId`).
-  // NO secrets — only the non-secret instance NAME the bridge maps to a token.
-  groups: defineTable({
-    name: v.string(),
-    instanceName: v.string(), // -> instances.name
-    mode: v.union(v.literal("per-user"), v.literal("shared")),
-    sharedAgentId: v.optional(v.string()), // required when mode === "shared"
-    description: v.optional(v.string()),
-  }).index("by_name", ["name"]),
-
-  // OpenClaw instances the deployment knows about. NO secrets (gateway tokens
-  // and device identities are bridge-env only — the bridge maps `name` -> token).
+  // OpenClaw / Hermes instances the deployment knows about. NO secrets (gateway
+  // tokens and device identities are bridge-env only — the bridge maps `name` ->
+  // secrets). See docs/MULTI_AGENT_REDESIGN.md.
   instances: defineTable({
     name: v.string(),
     gatewayUrl: v.string(),
     displayName: v.optional(v.string()),
+    // Which provider technology backs this instance. OPTIONAL (additive) →
+    // unset legacy rows are treated as "openclaw". The bridge adapts API calls
+    // by kind; the app stays standardized.
+    kind: v.optional(v.union(v.literal("openclaw"), v.literal("hermes"))),
+    // Cached provider capabilities from the bridge `/capabilities` (incl.
+    // agentDiscovery). Non-secret. OPTIONAL → unknown until first poll.
+    capabilities: v.optional(
+      v.object({
+        agentDiscovery: v.optional(v.boolean()),
+        abort: v.optional(v.boolean()),
+        history: v.optional(v.boolean()),
+        attachments: v.optional(v.boolean()),
+        media: v.optional(v.boolean()),
+        streaming: v.optional(v.string()), // "delta" | "snapshot" | "both"
+      }),
+    ),
   }).index("by_name", ["name"]),
+
+  // Per-instance discovery OUTCOME (the truth dispatch keys on). Distinct from
+  // the `agents` cache: a single boolean cannot tell "agent absent in a
+  // SUCCESSFUL poll" (=> deleted on gateway => re-bind) from "unknown because the
+  // poll FAILED" (=> serve last-good, never hard-fail on a blip). Poll outcome
+  // lives here; per-agent presence on `agents.presentInLastOk` (red-team B2).
+  instanceDiscovery: defineTable({
+    instanceName: v.string(), // -> instances.name
+    lastPollAt: v.number(),
+    lastPollOk: v.boolean(), // last discovery succeeded? (down/error => false)
+    lastOkAt: v.optional(v.number()), // last time it succeeded (staleness window)
+    error: v.optional(v.string()), // non-secret reason code when !lastPollOk
+  }).index("by_instance", ["instanceName"]),
+
+  // Resilient cache of bridge-discovered agents (last-good, NEVER emptied by a
+  // failed poll). Source of truth is the bridge `/agents` (which calls the
+  // provider, e.g. OpenClaw `agents.list`). The app binds/assigns ONLY agents
+  // present here — this is what makes "Agent X no longer exists" structurally
+  // impossible for discovery-capable instances.
+  agents: defineTable({
+    instanceName: v.string(), // -> instances.name
+    agentId: v.string(), // provider-defined id (e.g. "olivier")
+    displayName: v.optional(v.string()), // identityName
+    emoji: v.optional(v.string()),
+    model: v.optional(v.string()),
+    isDefaultOnInstance: v.optional(v.boolean()),
+    // "discovered" = from a real provider enumeration; "manual" = admin fallback
+    // when the provider cannot enumerate (agentDiscovery:false) => UNVERIFIED.
+    source: v.union(v.literal("discovered"), v.literal("manual")),
+    // Was this agent present in the most recent SUCCESSFUL poll? false +
+    // instanceDiscovery.lastPollOk === true => deleted on the gateway. A FAILED
+    // poll never flips this (serve last-good). Manual rows: always true.
+    presentInLastOk: v.boolean(),
+    firstSeenAt: v.number(),
+    lastSeenAt: v.number(), // last successful poll that INCLUDED it
+  })
+    .index("by_instance", ["instanceName"])
+    .index("by_instance_agent", ["instanceName", "agentId"]),
+
+  // The M:N join: which agents a user may use. user↔instance is DERIVED from this
+  // (no second grant table). INVARIANT: exactly one isDefault === true WHENEVER
+  // the user has >=1 row (enforced in the mutations via a by_user range read —
+  // red-team H3). Authorization for chat binding + dispatch checks membership
+  // here (red-team B / IDOR).
+  userAgents: defineTable({
+    userId: v.id("users"),
+    instanceName: v.string(),
+    agentId: v.string(),
+    isDefault: v.boolean(),
+    // "manual" = admin-assigned; "auto" = best-effort convention prefill.
+    source: v.union(v.literal("manual"), v.literal("auto")),
+    createdAt: v.number(),
+  })
+    .index("by_user", ["userId"])
+    .index("by_user_instance_agent", ["userId", "instanceName", "agentId"])
+    // Targeted read for the instance-deletion cascade (admin.deleteInstance) so it
+    // never has to scan the whole table — Convex read/write doc limits (Codex P2).
+    .index("by_instance", ["instanceName"]),
 
   // Singleton app metadata. Exactly one row (key === "singleton"). Acts as the
   // serialization point for first-admin bootstrap: the first sign-in that finds
@@ -264,6 +316,14 @@ export default defineSchema({
     title: v.optional(v.string()),
     // The OpenClaw-side chat identifier (used to route sends). Non-secret.
     openclawChatId: v.optional(v.string()),
+    // The agent this chat is BOUND to (chosen at creation; auto when the user has
+    // exactly one agent, else via the picker). WRITE-ONCE after first dispatch
+    // (the sessionKey embeds agentId+canonical → a silent swap forks the gateway
+    // session AND changes the idempotencyKey → red-team H1). Non-secret names.
+    // OPTIONAL + additive: legacy chats (both null) resolve to the user's default
+    // agent at dispatch (docs/MULTI_AGENT_REDESIGN.md §3.3).
+    instanceName: v.optional(v.string()), // -> instances.name
+    agentId: v.optional(v.string()), // -> agents.agentId (on instanceName)
     archived: v.optional(v.boolean()),
     updatedAt: v.number(),
     // Sidebar organization (all optional — additive on existing rows):

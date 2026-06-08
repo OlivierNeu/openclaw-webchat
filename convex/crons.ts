@@ -60,4 +60,15 @@ crons.interval(
   {},
 );
 
+// Agent discovery (multi-agent redesign): every 2 minutes, ask the bridge
+// `/agents` for each instance and cache the result RESILIENTLY (a failed poll
+// never empties the cache nor flips per-agent presence — red-team B2). This is
+// the bind whitelist that makes a stale/typo agent id structurally impossible.
+crons.interval(
+  "discover agents",
+  { minutes: 2 },
+  internal.agents.pollAgentDiscovery,
+  {},
+);
+
 export default crons;

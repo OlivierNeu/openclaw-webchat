@@ -21,8 +21,7 @@ import {
 } from "./_generated/server";
 import { internal } from "./_generated/api";
 import { Doc, Id } from "./_generated/dataModel";
-import { getProfile } from "./lib/access";
-import { resolveTargetForProfile } from "./routing";
+import { resolveTargetForChat } from "./routing";
 
 /**
  * ArrayBuffer -> base64 in the DEFAULT Convex action runtime (no Node Buffer;
@@ -145,8 +144,8 @@ export const markOutbox = internalMutation({
 const DISPATCH_FAILURE_MESSAGE: Record<string, string> = {
   not_configured:
     "Le service de chat n’est pas encore configuré. Contactez votre administrateur. (réf. bridge-config)",
-  unrouted:
-    "Votre compte n’est rattaché à aucun assistant. Contactez votre administrateur. (réf. routing)",
+  no_agent:
+    "Aucun agent ne vous est assigné. Contactez votre administrateur pour qu’il vous en attribue un. (réf. no-agent)",
   send_failed:
     "Le service de chat est momentanément indisponible. Réessayez ; si le problème persiste, contactez votre administrateur. (réf. bridge)",
 };
@@ -164,7 +163,7 @@ export const failDispatch = internalMutation({
     outboxId: v.id("outbox"),
     reason: v.union(
       v.literal("not_configured"),
-      v.literal("unrouted"),
+      v.literal("no_agent"),
       v.literal("send_failed"),
     ),
   },
@@ -204,18 +203,47 @@ export const getChatRouting = internalQuery({
     if (chat === null) {
       return null;
     }
-    const profile = await getProfile(ctx, userId);
-    const target = await resolveTargetForProfile(ctx, profile);
+    // Routing v2: resolve from the CHAT's binding (∈ userAgents), with the
+    // stale-vs-deleted + default-fallback logic. The returned target is ALWAYS
+    // authorized for this user (dispatch-time IDOR defense). `rebind` (when set)
+    // is persisted by the dispatch action before sending.
+    const res = await resolveTargetForChat(ctx, chat, userId);
     return {
-      openclawChatId: chat.openclawChatId ?? null,
-      // null target => the user is unrouted (no override, no group); the
-      // dispatch will mark the row failed rather than send to a wrong agent.
-      target,
+      // On a REBIND (unbound/legacy chat, or the bound agent was revoked/deleted)
+      // the stored openclawChatId belongs to the OLD agent's provider conversation
+      // — sending it with the NEW target would resume/reset the wrong agent's
+      // session. Start the new agent fresh (the bridge falls back to the Convex
+      // chatId as the routing-id segment). Persisted to null by bindChatTarget.
+      openclawChatId: res.rebind ? null : chat.openclawChatId ?? null,
+      target: res.target, // null => no agent assigned (failReason no_agent)
+      rebind: res.rebind,
+      failReason: res.failReason,
       // The user's per-chat OpenClaw knob intent (reasoning/model). The bridge
       // re-applies these via sessions.patch before each turn so they survive a
       // session reset. Non-secret labels only.
       sessionSettings: chat.sessionSettings ?? null,
     };
+  },
+});
+
+// Persist a chat's resolved binding (legacy/unbound chat resolved to default, or
+// a re-bind after the bound agent was deleted on the gateway). Called by the
+// dispatch action so the NEXT turn resolves straight to the binding (a stable
+// sessionKey). Idempotent; resilient to a chat deleted mid-turn.
+export const bindChatTarget = internalMutation({
+  args: {
+    chatId: v.id("chats"),
+    instanceName: v.string(),
+    agentId: v.string(),
+  },
+  handler: async (ctx, { chatId, instanceName, agentId }) => {
+    const chat = await ctx.db.get(chatId);
+    if (chat === null) return;
+    if (chat.instanceName === instanceName && chat.agentId === agentId) return;
+    // Rebinding to a different agent: DROP the stale provider conversation id (it
+    // belonged to the old agent) so the next turn starts the new agent fresh on
+    // the Convex chatId instead of resuming the old agent's thread (Codex P1).
+    await ctx.db.patch(chatId, { instanceName, agentId, openclawChatId: undefined });
   },
 });
 
@@ -259,22 +287,42 @@ export const dispatch = internalAction({
       userId: row.userId as Id<"users">,
     });
 
-    // Unrouted user (no override, no group) -> cannot pick an agent. Mark failed
-    // rather than send to a wrong/absent target.
-    if (!routing || routing.target === null) {
-      console.error("bridge.dispatch: user is unrouted (no valve target)");
+    // Chat deleted mid-turn -> nothing to dispatch / render.
+    if (!routing) {
       await ctx.runMutation(internal.bridge.failDispatch, {
         outboxId,
-        reason: "unrouted",
+        reason: "send_failed",
+      });
+      return;
+    }
+
+    // No agent assigned (and no legacy valve) -> cannot pick an agent. Mark failed
+    // with a clear, actionable message rather than send to a wrong/absent target.
+    if (routing.target === null) {
+      console.error("bridge.dispatch: no agent assigned for user");
+      await ctx.runMutation(internal.bridge.failDispatch, {
+        outboxId,
+        reason: "no_agent",
       });
       await traceDispatch(ctx, {
         outboxId,
         chatId: row.chatId,
         dispatchStatus: "failed",
-        reason: "unrouted",
-        errorCode: "UNROUTED",
+        reason: "no_agent",
+        errorCode: "NO_AGENT",
       });
       return;
+    }
+
+    // Persist a re-bind (legacy/unbound chat resolved to the default, or the bound
+    // agent was deleted on the gateway) BEFORE sending, so the chat's stored
+    // binding matches the agent we dispatch to and the next turn is stable.
+    if (routing.rebind) {
+      await ctx.runMutation(internal.bridge.bindChatTarget, {
+        chatId: row.chatId as Id<"chats">,
+        instanceName: routing.rebind.instanceName,
+        agentId: routing.rebind.agentId,
+      });
     }
 
     // Resolve INBOUND attachments (storageId -> bytes -> base64) into OpenClaw's

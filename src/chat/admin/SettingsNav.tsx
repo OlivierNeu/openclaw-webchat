@@ -42,7 +42,6 @@ const TAB_ACTIVE_CLASS = (t: Tab) => TAB_CLASS(t) + " is-active";
 
 type FilteredTabPath =
   | "/settings/users"
-  | "/settings/groups"
   | "/settings/serviceAccounts"
   | "/settings/traces"
   | "/settings/kpi"
