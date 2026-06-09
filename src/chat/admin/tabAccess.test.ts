@@ -61,8 +61,11 @@ describe("visibleTabs", () => {
     ]);
   });
 
-  test("a plain user (chats.read only) sees no settings tab", () => {
-    expect(visibleTabs(["chats.read"])).toEqual([]);
+  test("a plain user (chats.read only) sees exactly the Files tab", () => {
+    // Files is owner-scoped and gated on the base `chats.read` permission every
+    // approved user holds, so they see it (and land on it) — the explicit
+    // requirement. A permission-less (pending) user still sees nothing.
+    expect(visibleTabs(["chats.read"])).toEqual(["files"]);
     expect(visibleTabs([])).toEqual([]);
   });
 });

@@ -75,6 +75,7 @@ import { AnomaliesTab } from "./chat/admin/AnomaliesTab";
 import { IntegrationsTab } from "./chat/admin/IntegrationsTab";
 import { FeedbacksTab } from "./chat/admin/FeedbacksTab";
 import { UiPrefsTab } from "./chat/admin/UiPrefsTab";
+import { FilesTab } from "./chat/admin/FilesTab";
 import { BridgeTab } from "./chat/admin/BridgeTab";
 import { SettingsNav } from "./chat/admin/SettingsNav";
 import { ThemeShowroom } from "./chat/ThemeShowroom";
@@ -88,7 +89,9 @@ import {
 } from "./lib/routing/searchSchemas";
 import { Button } from "@/components/ui/button";
 import { ToastProvider } from "@/components/ui/toast";
+import { m } from "@/paraglide/messages.js";
 import { useApplyTheme, type ThemeMode } from "@/lib/useTheme";
+import { useApplyLocale, type Locale } from "@/lib/useLocale";
 import { useSidebarLayout } from "@/lib/useSidebarLayout";
 import { Link, useMatchRoute } from "@tanstack/react-router";
 
@@ -104,6 +107,9 @@ type Me = {
   themeMode: ThemeMode | null;
   resolvedThemeMode: ThemeMode;
   defaultThemeMode: ThemeMode | null;
+  locale: Locale | null;
+  resolvedLocale: Locale;
+  defaultLocale: Locale | null;
   // EFFECTIVE permissions (role ∪ extraPermissions; admins = full superset).
   // Drives which Settings tabs the user may open (per-tab RBAC); server queries
   // enforce the same permissions independently.
@@ -119,7 +125,7 @@ function RootShell() {
   return (
     <>
       <AuthLoading>
-        <div className="oc-boot">Chargement…</div>
+        <div className="oc-boot">{m.app_loading()}</div>
       </AuthLoading>
       <Unauthenticated>
         <SignIn />
@@ -145,9 +151,7 @@ function SignIn() {
     try {
       await signIn(provider);
     } catch {
-      setError(
-        "Connexion refusée. Comptes autorisés : @lacneu.com et @ataraxis-coaching.com.",
-      );
+      setError(m.app_signin_refused());
     }
   }
   const noneEnabled =
@@ -159,7 +163,7 @@ function SignIn() {
     <div className="oc-signin">
       {providers?.google ? (
         <button type="button" className="oc-signin__btn" onClick={() => void oauth("google")}>
-          Se connecter avec Google
+          {m.app_signin_google()}
         </button>
       ) : null}
       {providers?.microsoft ? (
@@ -168,12 +172,12 @@ function SignIn() {
           className="oc-signin__btn"
           onClick={() => void oauth("microsoft-entra-id")}
         >
-          Se connecter avec Microsoft
+          {m.app_signin_microsoft()}
         </button>
       ) : null}
       {error ? <p className="oc-signin__error">{error}</p> : null}
       {noneEnabled ? (
-        <p className="oc-signin__error">Aucun mode de connexion configuré.</p>
+        <p className="oc-signin__error">{m.app_signin_none_enabled()}</p>
       ) : null}
       {providers?.anonymous ? (
         <button
@@ -181,7 +185,7 @@ function SignIn() {
           className="oc-signin__btn oc-signin__btn--dev"
           onClick={() => void signIn("anonymous")}
         >
-          Continue (dev, no account)
+          {m.app_signin_anonymous()}
         </button>
       ) : null}
     </div>
@@ -209,6 +213,11 @@ function RoleGate() {
   // loads -> the hook falls back to the localStorage cache (no flash).
   useApplyTheme(me?.resolvedThemeMode);
 
+  // Apply the Convex-resolved UI language (source of truth). undefined until
+  // getMe loads -> Paraglide's localStorage strategy already owns first-paint.
+  // On a real cross-device mismatch the hook reloads ONCE (loop-safe).
+  useApplyLocale(me?.resolvedLocale);
+
   // Impersonation safety (§3.2 option 1): on a REAL change of effective identity
   // (start/stop impersonation), send the URL back to "/" so it can't point at a
   // chat the new effective identity can't read. Detect a genuine CHANGE, not the
@@ -224,9 +233,9 @@ function RoleGate() {
     prevUserId.current = me.userId;
   }, [me, navigate]);
 
-  if (me === undefined) return <div className="oc-boot">Chargement…</div>;
+  if (me === undefined) return <div className="oc-boot">{m.app_loading()}</div>;
 
-  const userLabel = me.name || me.email || "Compte";
+  const userLabel = me.name || me.email || m.app_account_fallback();
 
   if (me.role === "pending") {
     return (
@@ -236,15 +245,17 @@ function RoleGate() {
         <header className="oc-topbar">
           <span className="oc-topbar__brand">OpenClaw</span>
           <div className="oc-topbar__actions">
-            <UserMenu label={userLabel} mode={me.themeMode} minimal />
+            <UserMenu
+              label={userLabel}
+              mode={me.themeMode}
+              localePref={me.locale}
+              minimal
+            />
           </div>
         </header>
         <div className="oc-pending">
-          <h1 className="oc-pending__title">En attente d’approbation</h1>
-          <p className="oc-pending__body">
-            Ton compte est créé mais doit être approuvé par un administrateur
-            avant d’accéder au chat.
-          </p>
+          <h1 className="oc-pending__title">{m.app_pending_title()}</h1>
+          <p className="oc-pending__body">{m.app_pending_body()}</p>
         </div>
       </div>
     );
@@ -260,6 +271,7 @@ function RoleGate() {
       canOpenSettings={visibleTabs(me.permissions ?? []).length > 0}
       userLabel={userLabel}
       themeMode={me.themeMode}
+      localePref={me.locale}
     />
   );
 }
@@ -284,9 +296,11 @@ function ImpersonationBanner() {
     <div className="oc-imp" role="alert">
       <Eye className="size-4 shrink-0" />
       <span className="oc-imp__text">
-        Vous explorez l’application en tant que{" "}
-        <strong>{imp.targetLabel}</strong>. Toute action est exécutée et tracée
-        en votre nom (<strong>{imp.realLabel}</strong>).
+        {m.app_imp_prefix()}{" "}
+        <strong>{imp.targetLabel}</strong>
+        {m.app_imp_middle()}
+        <strong>{imp.realLabel}</strong>
+        {m.app_imp_suffix()}
       </span>
       <Button
         size="sm"
@@ -294,7 +308,7 @@ function ImpersonationBanner() {
         className="oc-imp__exit"
         onClick={() => void stop()}
       >
-        Quitter
+        {m.app_imp_exit()}
       </Button>
     </div>
   );
@@ -304,11 +318,13 @@ function ImpersonationBanner() {
 function AppTopBar({
   userLabel,
   themeMode,
+  localePref,
   collapsed,
   onToggleSidebar,
 }: {
   userLabel: string;
   themeMode: ThemeMode | null;
+  localePref: Locale | null;
   collapsed: boolean;
   onToggleSidebar: () => void;
 }) {
@@ -318,7 +334,7 @@ function AppTopBar({
         <Button
           variant="ghost"
           size="icon-sm"
-          aria-label={collapsed ? "Afficher la barre latérale" : "Réduire la barre latérale"}
+          aria-label={collapsed ? m.app_sidebar_show() : m.app_sidebar_hide()}
           onClick={onToggleSidebar}
         >
           {collapsed ? <PanelLeftOpen /> : <PanelLeftClose />}
@@ -334,7 +350,7 @@ function AppTopBar({
       </div>
       <div className="oc-topbar__actions">
         <NotificationBell />
-        <UserMenu label={userLabel} mode={themeMode} />
+        <UserMenu label={userLabel} mode={themeMode} localePref={localePref} />
       </div>
     </header>
   );
@@ -348,10 +364,12 @@ function AuthenticatedChrome({
   canOpenSettings,
   userLabel,
   themeMode,
+  localePref,
 }: {
   canOpenSettings: boolean;
   userLabel: string;
   themeMode: ThemeMode | null;
+  localePref: Locale | null;
 }) {
   const { width, collapsed, toggleCollapsed, startResize } = useSidebarLayout();
   const matchRoute = useMatchRoute();
@@ -369,6 +387,7 @@ function AuthenticatedChrome({
       <AppTopBar
         userLabel={userLabel}
         themeMode={themeMode}
+        localePref={localePref}
         collapsed={collapsed}
         onToggleSidebar={toggleCollapsed}
       />
@@ -394,7 +413,7 @@ function AuthenticatedChrome({
                   <Button variant="ghost" className="m-2 justify-start" asChild>
                     {/* Land on the settings index, which redirects to the user's
                         FIRST allowed tab (not a hardcoded admin-only tab). */}
-                    <Link to="/settings">Settings</Link>
+                    <Link to="/settings">{m.app_settings()}</Link>
                   </Button>
                 ) : null}
               </>
@@ -405,7 +424,7 @@ function AuthenticatedChrome({
               onPointerDown={startResize}
               role="separator"
               aria-orientation="vertical"
-              aria-label="Redimensionner la barre latérale"
+              aria-label={m.app_sidebar_resize()}
             />
           </div>
         ) : null}
@@ -446,7 +465,7 @@ function SettingsLayout() {
   }, [noAccess, navigate]);
 
   if (me === undefined) {
-    return <div className="oc-admin__hint" style={{ padding: 16 }}>Chargement…</div>;
+    return <div className="oc-admin__hint" style={{ padding: 16 }}>{m.app_loading()}</div>;
   }
   if (noAccess) return null; // redirecting (no settings access at all)
 
@@ -476,11 +495,8 @@ function SettingsAccessDenied() {
       <div className="oc-route-error__icon" aria-hidden>
         <AlertTriangle size={28} />
       </div>
-      <h2 className="oc-route-error__title">Accès non autorisé</h2>
-      <p className="oc-route-error__body">
-        Vous n’avez pas la permission de consulter cet onglet. Choisissez un
-        onglet disponible dans le menu, ou contactez votre administrateur.
-      </p>
+      <h2 className="oc-route-error__title">{m.app_access_denied_title()}</h2>
+      <p className="oc-route-error__body">{m.app_access_denied_body()}</p>
     </div>
   );
 }
@@ -500,7 +516,7 @@ function SettingsIndexRedirect() {
     // navigate `to` (runtime resolves the string against the route tree).
     void navigate({ to: dest as "/settings/users", replace: true });
   }, [me, navigate]);
-  return <div className="oc-admin__hint" style={{ padding: 16 }}>Chargement…</div>;
+  return <div className="oc-admin__hint" style={{ padding: 16 }}>{m.app_loading()}</div>;
 }
 
 // Paramless tab dispatcher: the four tabs that carry no search params share one
@@ -520,6 +536,8 @@ function SettingsParamlessScreen() {
       return <FeedbacksTab />;
     case "uiprefs":
       return <UiPrefsTab />;
+    case "files":
+      return <FilesTab />;
     case "roles":
     default:
       return <RolesTab />;
@@ -630,21 +648,18 @@ function RouteError({ reset }: ErrorComponentProps) {
       <div className="oc-route-error__icon" aria-hidden>
         <AlertTriangle size={28} />
       </div>
-      <h2 className="oc-route-error__title">Une erreur est survenue</h2>
-      <p className="oc-route-error__body">
-        Cette page n’a pas pu être affichée. Réessayez, ou revenez à l’accueil. Si
-        le problème persiste, contactez votre administrateur.
-      </p>
+      <h2 className="oc-route-error__title">{m.app_route_error_title()}</h2>
+      <p className="oc-route-error__body">{m.app_route_error_body()}</p>
       <div className="oc-route-error__actions">
         <button type="button" className="oc-route-error__cta" onClick={() => reset()}>
-          Réessayer
+          {m.app_retry()}
         </button>
         <button
           type="button"
           className="oc-route-error__cta oc-route-error__cta--ghost"
           onClick={() => void navigate({ to: "/" })}
         >
-          Accueil
+          {m.app_home()}
         </button>
       </div>
     </div>
@@ -660,17 +675,15 @@ function RouteNotFound() {
       <div className="oc-route-error__icon" aria-hidden>
         <Compass size={28} />
       </div>
-      <h2 className="oc-route-error__title">Page introuvable</h2>
-      <p className="oc-route-error__body">
-        Cette adresse ne correspond à aucune page de l’application.
-      </p>
+      <h2 className="oc-route-error__title">{m.app_not_found_title()}</h2>
+      <p className="oc-route-error__body">{m.app_not_found_body()}</p>
       <div className="oc-route-error__actions">
         <button
           type="button"
           className="oc-route-error__cta"
           onClick={() => void navigate({ to: "/" })}
         >
-          Accueil
+          {m.app_home()}
         </button>
       </div>
     </div>

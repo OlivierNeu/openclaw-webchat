@@ -41,6 +41,9 @@ import { FilterBar } from "./admin/filters/FilterBar";
 import { TimeRangePicker } from "./admin/filters/TimeRangePicker";
 import { AdvancedFilter, type AdvancedField } from "./admin/filters/AdvancedFilter";
 import type { TimeRange } from "./admin/filters/types";
+import { m } from "@/paraglide/messages.js";
+import type { Locale } from "@/lib/useLocale";
+import type { ThemeMode } from "@/lib/useTheme";
 
 // Living style guide: renders every component the app uses with the active
 // design tokens, the way ui.shadcn.com does. Use it to verify the chart in both
@@ -80,35 +83,80 @@ function Section({
   );
 }
 
-// Admin control: the app-wide DEFAULT theme mode (applied to users who have not
-// set their own preference). Backed by admin.setDefaultThemeMode -> appMeta.
-function DefaultThemeControl() {
+function themeModeLabel(mode: ThemeMode): string {
+  return mode === "light"
+    ? m.usermenu_theme_light()
+    : mode === "dark"
+      ? m.usermenu_theme_dark()
+      : m.usermenu_theme_system();
+}
+
+// Admin "Apparence" panel: the app-wide DEFAULTS applied to users who have not
+// set their OWN preference (the per-user theme/language live in the account menu).
+//   - Default theme  -> admin.setDefaultThemeMode (a class swap, no reload).
+//   - Default language -> admin.setDefaultLocale. ASYMMETRY: an admin with NO
+//     personal locale who changes this inherits it → useApplyLocale RELOADS their
+//     own view (Paraglide). The note warns about it (advisor).
+function AppearancePanel() {
   const me = useQuery(api.me.getMe) as
-    | { defaultThemeMode: "light" | "dark" | "system" | null }
+    | {
+        defaultThemeMode: ThemeMode | null;
+        defaultLocale: Locale | null;
+      }
     | undefined;
-  const setDefault = useMutation(api.admin.setDefaultThemeMode);
-  const current = me?.defaultThemeMode ?? "system";
+  const setDefaultTheme = useMutation(api.admin.setDefaultThemeMode);
+  const setDefaultLocale = useMutation(api.admin.setDefaultLocale);
+  const theme = me?.defaultThemeMode ?? "system";
+  // null (no admin default) resolves to the base locale "fr" → highlight it.
+  const localeDefault: Locale = me?.defaultLocale ?? "fr";
+
   return (
-    <section className="oc-show__section">
-      <div className="oc-show__heading">
-        <h2 className="oc-show__title">Default theme</h2>
-        <p className="oc-show__desc">
-          Appliqué aux utilisateurs sans préférence personnelle.
-        </p>
-      </div>
-      <div className="oc-show__row">
-        {(["light", "dark", "system"] as const).map((m) => (
-          <Button
-            key={m}
-            variant={current === m ? "default" : "outline"}
-            size="sm"
-            onClick={() => void setDefault({ mode: m })}
-          >
-            {m}
-          </Button>
-        ))}
-      </div>
-    </section>
+    <div className="oc-appearance">
+      <section className="oc-show__section">
+        <div className="oc-show__heading">
+          <h2 className="oc-show__title">
+            {m.appearance_default_theme_title()}
+          </h2>
+          <p className="oc-show__desc">{m.appearance_default_theme_desc()}</p>
+        </div>
+        <div className="oc-show__row">
+          {(["light", "dark", "system"] as const).map((mode) => (
+            <Button
+              key={mode}
+              variant={theme === mode ? "default" : "outline"}
+              size="sm"
+              onClick={() => void setDefaultTheme({ mode })}
+            >
+              {themeModeLabel(mode)}
+            </Button>
+          ))}
+        </div>
+      </section>
+
+      <section className="oc-show__section">
+        <div className="oc-show__heading">
+          <h2 className="oc-show__title">
+            {m.appearance_default_language_title()}
+          </h2>
+          <p className="oc-show__desc">
+            {m.appearance_default_language_desc()}
+          </p>
+        </div>
+        <div className="oc-show__row">
+          {(["fr", "en"] as const).map((loc) => (
+            <Button
+              key={loc}
+              variant={localeDefault === loc ? "default" : "outline"}
+              size="sm"
+              onClick={() => void setDefaultLocale({ locale: loc })}
+            >
+              {loc === "fr" ? m.language_fr() : m.language_en()}
+            </Button>
+          ))}
+        </div>
+        <p className="oc-show__desc">{m.appearance_default_language_note()}</p>
+      </section>
+    </div>
   );
 }
 
@@ -131,7 +179,14 @@ export function ThemeShowroom() {
 
   return (
     <div className="oc-show">
-      <DefaultThemeControl />
+      <AppearancePanel />
+      {/* The component showroom (design reference) is collapsed below — it's dev
+          tooling, intentionally NOT internationalized. #23 will relocate it to a
+          /showroom route; remove this copy then. */}
+      <details className="oc-show__ref">
+        <summary className="oc-show__title">
+          {m.appearance_design_reference()}
+        </summary>
       <Section title="Buttons" description="Variants">
         <div className="oc-show__row">
           <Button>Default</Button>
@@ -328,6 +383,7 @@ export function ThemeShowroom() {
           </div>
         </div>
       </Section>
+      </details>
     </div>
   );
 }

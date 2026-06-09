@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react";
 import { useQuery, useMutation } from "convex/react";
+import { m } from "@/paraglide/messages.js";
 import { api } from "../convexApi";
 import { DataTableShell } from "./DataTableShell";
 import { Badge } from "@/components/ui/badge";
@@ -70,7 +71,7 @@ export function IntegrationsTab() {
   }, [status, draft]);
 
   if (!status || !draft) {
-    return <p className="oc-admin__hint">Chargement…</p>;
+    return <p className="oc-admin__hint">{m.integrations_loading()}</p>;
   }
 
   const d = draft;
@@ -94,10 +95,8 @@ export function IntegrationsTab() {
   return (
     <>
       <p className="oc-admin__hint">
-        Configuration des intégrations. <strong>Aucune clé API ici</strong> —
-        elles vivent dans l'environnement du déploiement ; un champ vide retombe
-        sur la variable d'environnement puis le défaut. L'indicateur
-        « configuré » reflète la présence de la clé côté serveur.
+        {m.integrations_intro_before()} <strong>{m.integrations_intro_no_api_key()}</strong>{" "}
+        {m.integrations_intro_after()}
       </p>
 
       {/* ── Langfuse (trace shipping — LIVE) ─────────────────────────── */}
@@ -106,17 +105,17 @@ export function IntegrationsTab() {
         status={
           status.langfuse.configured ? (
             status.langfuse.enabled ? (
-              <Badge variant="secondary">actif</Badge>
+              <Badge variant="secondary">{m.integrations_status_active()}</Badge>
             ) : (
-              <Badge variant="outline">en pause</Badge>
+              <Badge variant="outline">{m.integrations_status_paused()}</Badge>
             )
           ) : (
-            <Badge variant="outline">clé manquante (env)</Badge>
+            <Badge variant="outline">{m.integrations_status_key_missing()}</Badge>
           )
         }
-        note="Export des traces. Clés : LANGFUSE_PUBLIC_KEY / LANGFUSE_SECRET_KEY (env)."
+        note={m.integrations_langfuse_note()}
       >
-        <Field label="Host">
+        <Field label={m.integrations_field_host()}>
           <Input
             value={d.langfuse.host ?? ""}
             placeholder={status.langfuse.effectiveHost}
@@ -125,7 +124,7 @@ export function IntegrationsTab() {
           />
         </Field>
         <ToggleRow
-          label="Activé (expédition des traces)"
+          label={m.integrations_toggle_traces_enabled()}
           checked={d.langfuse.enabled ?? true}
           onChange={(v) => {
             setField("langfuse", "enabled", v);
@@ -140,17 +139,17 @@ export function IntegrationsTab() {
         status={
           status.opik.configured ? (
             status.opik.enabled ? (
-              <Badge variant="secondary">actif</Badge>
+              <Badge variant="secondary">{m.integrations_status_active()}</Badge>
             ) : (
-              <Badge variant="outline">en pause</Badge>
+              <Badge variant="outline">{m.integrations_status_paused()}</Badge>
             )
           ) : (
-            <Badge variant="outline">clé manquante (env)</Badge>
+            <Badge variant="outline">{m.integrations_status_key_missing()}</Badge>
           )
         }
-        note="Export des traces. Clé : OPIK_API_KEY (env)."
+        note={m.integrations_opik_note()}
       >
-        <Field label="Base URL">
+        <Field label={m.integrations_field_base_url()}>
           <Input
             value={d.opik.baseUrl ?? ""}
             placeholder={status.opik.effectiveBaseUrl}
@@ -158,10 +157,10 @@ export function IntegrationsTab() {
             onBlur={() => commit("opik", { baseUrl: d.opik.baseUrl ?? "" })}
           />
         </Field>
-        <Field label="Workspace">
+        <Field label={m.integrations_field_workspace()}>
           <Input
             value={d.opik.workspace ?? ""}
-            placeholder={status.opik.effectiveWorkspace || "(défaut serveur)"}
+            placeholder={status.opik.effectiveWorkspace || m.integrations_opik_workspace_placeholder()}
             onChange={(e) => setField("opik", "workspace", e.target.value)}
             onBlur={() =>
               commit("opik", { workspace: d.opik.workspace ?? "" })
@@ -169,7 +168,7 @@ export function IntegrationsTab() {
           />
         </Field>
         <ToggleRow
-          label="Activé (expédition des traces)"
+          label={m.integrations_toggle_traces_enabled()}
           checked={d.opik.enabled ?? true}
           onChange={(v) => {
             setField("opik", "enabled", v);
@@ -180,18 +179,18 @@ export function IntegrationsTab() {
 
       {/* ── TTS (consumer = bridge, pending) ─────────────────────────── */}
       <Section
-        title="Synthèse vocale (TTS)"
-        status={<Badge variant="outline">appliqué par le bridge (à venir)</Badge>}
-        note="Lecture audio des réponses. Clé du provider via env (ex. OPENAI_API_KEY, ELEVENLABS_API_KEY)."
+        title={m.integrations_tts_title()}
+        status={<Badge variant="outline">{m.integrations_status_bridge_pending()}</Badge>}
+        note={m.integrations_tts_note()}
       >
-        <Field label="Mode auto">
+        <Field label={m.integrations_field_auto_mode()}>
           <SelectField
             value={(d.tts.auto as string) ?? "off"}
             options={[
-              ["off", "Désactivé"],
-              ["always", "Toujours"],
-              ["inbound", "Après un message vocal"],
-              ["tagged", "Sur directive [[tts:…]]"],
+              ["off", m.integrations_tts_auto_off()],
+              ["always", m.integrations_tts_auto_always()],
+              ["inbound", m.integrations_tts_auto_inbound()],
+              ["tagged", m.integrations_tts_auto_tagged()],
             ]}
             onChange={(v) => {
               setField("tts", "auto", v);
@@ -199,13 +198,13 @@ export function IntegrationsTab() {
             }}
           />
         </Field>
-        <Field label="Provider">
+        <Field label={m.integrations_field_provider()}>
           <SelectField
             value={(d.tts.provider as string) ?? "openai"}
             options={[
               ["openai", "OpenAI"],
               ["elevenlabs", "ElevenLabs"],
-              ["microsoft", "Microsoft (sans clé)"],
+              ["microsoft", m.integrations_tts_provider_microsoft()],
               ["azure", "Azure Speech"],
               ["google", "Google Gemini"],
             ]}
@@ -215,7 +214,7 @@ export function IntegrationsTab() {
             }}
           />
         </Field>
-        <Field label="Modèle">
+        <Field label={m.integrations_field_model()}>
           <Input
             value={(d.tts.model as string) ?? ""}
             placeholder="eleven_multilingual_v2"
@@ -223,10 +222,10 @@ export function IntegrationsTab() {
             onBlur={() => commit("tts", { model: (d.tts.model as string) ?? "" })}
           />
         </Field>
-        <Field label="Voix">
+        <Field label={m.integrations_field_voice()}>
           <Input
             value={(d.tts.voice as string) ?? ""}
-            placeholder="speakerVoiceId / nom de voix"
+            placeholder={m.integrations_tts_voice_placeholder()}
             onChange={(e) => setField("tts", "voice", e.target.value)}
             onBlur={() => commit("tts", { voice: (d.tts.voice as string) ?? "" })}
           />
@@ -235,23 +234,23 @@ export function IntegrationsTab() {
 
       {/* ── Talk / STS (consumer = bridge, pending) ──────────────────── */}
       <Section
-        title="Mode conversation (Talk / STS)"
-        status={<Badge variant="outline">appliqué par le bridge (à venir)</Badge>}
+        title={m.integrations_talk_title()}
+        status={<Badge variant="outline">{m.integrations_status_bridge_pending()}</Badge>}
         note={
           status.secrets.openai
-            ? "OpenAI realtime : OPENAI_API_KEY présent (env). Le navigateur recevra un jeton éphémère minté côté serveur — jamais la clé brute."
-            : "OpenAI realtime : OPENAI_API_KEY ABSENT (env). À définir côté déploiement pour activer gpt-realtime."
+            ? m.integrations_talk_note_key_present()
+            : m.integrations_talk_note_key_absent()
         }
       >
         <ToggleRow
-          label="Activer le mode conversation"
+          label={m.integrations_talk_enable()}
           checked={(d.talk.enabled as boolean) ?? false}
           onChange={(v) => {
             setField("talk", "enabled", v);
             commit("talk", { enabled: v });
           }}
         />
-        <Field label="Provider realtime">
+        <Field label={m.integrations_field_realtime_provider()}>
           <SelectField
             value={(d.talk.realtimeProvider as string) ?? "openai"}
             options={[
@@ -264,7 +263,7 @@ export function IntegrationsTab() {
             }}
           />
         </Field>
-        <Field label="Modèle realtime">
+        <Field label={m.integrations_field_realtime_model()}>
           <Input
             value={(d.talk.realtimeModel as string) ?? ""}
             placeholder="gpt-realtime-2"
@@ -274,7 +273,7 @@ export function IntegrationsTab() {
             }
           />
         </Field>
-        <Field label="Voix">
+        <Field label={m.integrations_field_voice()}>
           <Input
             value={(d.talk.voice as string) ?? ""}
             placeholder="cedar / marin"
@@ -282,11 +281,11 @@ export function IntegrationsTab() {
             onBlur={() => commit("talk", { voice: (d.talk.voice as string) ?? "" })}
           />
         </Field>
-        <Field label="Transport">
+        <Field label={m.integrations_field_transport()}>
           <SelectField
             value={(d.talk.transport as string) ?? "webrtc"}
             options={[
-              ["webrtc", "WebRTC (navigateur)"],
+              ["webrtc", m.integrations_talk_transport_webrtc()],
               ["provider-websocket", "Provider WebSocket"],
               ["gateway-relay", "Gateway relay"],
             ]}
@@ -296,7 +295,7 @@ export function IntegrationsTab() {
             }}
           />
         </Field>
-        <Field label="Locale">
+        <Field label={m.integrations_field_locale()}>
           <Input
             value={(d.talk.speechLocale as string) ?? ""}
             placeholder="fr-CA"
@@ -307,7 +306,7 @@ export function IntegrationsTab() {
           />
         </Field>
         <ToggleRow
-          label="Interrompre la lecture quand l'utilisateur parle"
+          label={m.integrations_talk_interrupt()}
           checked={(d.talk.interruptOnSpeech as boolean) ?? true}
           onChange={(v) => {
             setField("talk", "interruptOnSpeech", v);
@@ -319,33 +318,29 @@ export function IntegrationsTab() {
       {/* ── Voice wake (feasibility note — not buildable in browser) ──── */}
       <section className="oc-int__section">
         <div className="oc-int__section-head">
-          <h3 className="oc-uipa__h">Voice wake (mot d'activation)</h3>
-          <Badge variant="outline">non câblable dans le navigateur</Badge>
+          <h3 className="oc-uipa__h">{m.integrations_voicewake_title()}</h3>
+          <Badge variant="outline">{m.integrations_voicewake_badge()}</Badge>
         </div>
         <p className="oc-uipa__note">
-          OpenClaw gère le voice-wake côté Gateway avec détection native
-          macOS/iOS (Android = micro manuel) ; le navigateur n'est pas une
-          plateforme supportée. Le câbler dans ce webchat nécessiterait un moteur
-          wake-word côté client (type Porcupine) que nous bâtirions — hors de
-          OpenClaw. Configuration des déclencheurs : RPC gateway
+          {m.integrations_voicewake_note()}
           <code> voicewake.get/set</code>.
         </p>
       </section>
 
       <DataTableShell
-        title="Curseurs d'expédition"
+        title={m.integrations_cursors_title()}
         rows={status.cursors.map((c) => ({ ...c, _id: c.vendor }))}
-        emptyHint="Aucun curseur — aucune trace n'a encore été expédiée."
+        emptyHint={m.integrations_cursors_empty()}
         columns={[
-          { header: "Vendeur", cell: (c) => <Badge variant="secondary">{c.vendor}</Badge> },
+          { header: m.integrations_col_vendor(), cell: (c) => <Badge variant="secondary">{c.vendor}</Badge> },
           {
-            header: "Dernier envoi",
+            header: m.integrations_col_last_send(),
             cell: (c) =>
               c.lastAt > 0 ? new Date(c.lastAt).toLocaleString("fr-FR") : "—",
           },
-          { header: "Échecs consécutifs", cell: (c) => String(c.failureCount) },
-          { header: "Dernier statut HTTP", cell: (c) => c.lastErrorStatus ?? "—" },
-          { header: "Dernière erreur", cell: (c) => c.lastError ?? "—" },
+          { header: m.integrations_col_consecutive_failures(), cell: (c) => String(c.failureCount) },
+          { header: m.integrations_col_last_http_status(), cell: (c) => c.lastErrorStatus ?? "—" },
+          { header: m.integrations_col_last_error(), cell: (c) => c.lastError ?? "—" },
         ]}
       />
     </>

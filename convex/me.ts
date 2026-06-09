@@ -36,6 +36,11 @@ import {
 const APP_META_KEY = "singleton";
 
 type ThemeMode = "light" | "dark" | "system";
+type Locale = "fr" | "en";
+
+// Mirror project.inlang/settings.json baseLocale. The UI language resolves to
+// this when neither the user nor the admin has set a preference.
+const BASE_LOCALE: Locale = "fr";
 
 async function readAppMeta(ctx: QueryCtx | MutationCtx) {
   return await ctx.db
@@ -51,6 +56,14 @@ function resolveThemeMode(
   adminDefault: ThemeMode | undefined,
 ): ThemeMode {
   return userMode ?? adminDefault ?? "system";
+}
+
+// Resolve the effective UI language: user pref -> admin default -> baseLocale.
+function resolveLocale(
+  userLocale: Locale | undefined,
+  adminDefault: Locale | undefined,
+): Locale {
+  return userLocale ?? adminDefault ?? BASE_LOCALE;
 }
 
 export const bootstrap = mutation({
@@ -85,6 +98,8 @@ export const getMe = query({
     const meta = await readAppMeta(ctx);
     const adminDefaultMode = meta?.defaultThemeMode as ThemeMode | undefined;
     const userMode = profile?.themeMode as ThemeMode | undefined;
+    const adminDefaultLocale = meta?.defaultLocale as Locale | undefined;
+    const userLocale = profile?.locale as Locale | undefined;
     return {
       userId,
       role: roleOf(profile),
@@ -96,6 +111,12 @@ export const getMe = query({
       themeMode: userMode ?? null,
       resolvedThemeMode: resolveThemeMode(userMode, adminDefaultMode),
       defaultThemeMode: adminDefaultMode ?? null,
+      // UI language (mirror of theme): the user's own pref (or null) + the
+      // resolved effective locale the client applies via Paraglide + the admin
+      // default. The client's useApplyLocale reconciles localStorage to this.
+      locale: userLocale ?? null,
+      resolvedLocale: resolveLocale(userLocale, adminDefaultLocale),
+      defaultLocale: adminDefaultLocale ?? null,
       // Unified UI preferences (the interface-config module): the resolved
       // effective values the chat renders by, plus the user's own overrides, the
       // admin defaults, and which features are system-enabled (so the Préférences
@@ -196,6 +217,39 @@ export const setThemeMode = mutation({
     }
     await ctx.db.patch(profile._id, { themeMode: mode ?? undefined });
     await auditImpersonated(ctx, actor, "theme.set", {
+      resource: "profile",
+      resourceId: userId,
+    });
+  },
+});
+
+// Set the calling user's UI language preference. Identity-level (requireUserId
+// via getActor, NOT requireActive) so a pending user can localize the waiting
+// screen too. Passing null clears the pref (revert to the admin default / base
+// locale). Mirror of setThemeMode; the client applies it through Paraglide's
+// setLocale (which writes localStorage + reloads ONCE on a real change).
+export const setLocale = mutation({
+  args: {
+    locale: v.union(v.literal("fr"), v.literal("en"), v.null()),
+  },
+  handler: async (ctx, { locale }) => {
+    // Effective identity: while impersonating, this acts on the TARGET's locale
+    // (full "act as the user" scope) and is audited.
+    const actor = await getActor(ctx);
+    const userId = actor.effectiveUserId;
+    const profile = await getProfile(ctx, userId);
+    if (profile === null) {
+      // No profile yet (pre-bootstrap, real user only). Create a minimal pending
+      // profile carrying just the locale pref.
+      await ctx.db.insert("profiles", {
+        userId,
+        role: "pending",
+        locale: locale ?? undefined,
+      });
+      return;
+    }
+    await ctx.db.patch(profile._id, { locale: locale ?? undefined });
+    await auditImpersonated(ctx, actor, "locale.set", {
       resource: "profile",
       resourceId: userId,
     });

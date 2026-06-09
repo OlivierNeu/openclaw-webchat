@@ -21,6 +21,7 @@ import {
   CardHeader,
   CardTitle,
 } from "@/components/ui/card";
+import { m } from "@/paraglide/messages.js";
 
 // "KPI" tab — the observability dashboard (increment 4). Reads
 // api.kpi.listKpis, an admin query returning the SMALL, long-lived per-hour
@@ -57,26 +58,26 @@ type MetricConfig = {
 };
 
 const METRIC_CONFIG: MetricConfig[] = [
-  { metric: "api.calls", label: "Appels API", unit: "/h", group: "API", isError: false },
-  { metric: "api.errors", label: "Erreurs API", unit: "/h", group: "API", isError: true },
+  { metric: "api.calls", label: m.kpi_metric_api_calls(), unit: "/h", group: "API", isError: false },
+  { metric: "api.errors", label: m.kpi_metric_api_errors(), unit: "/h", group: "API", isError: true },
   {
     metric: "api.latency.avg_ms",
-    label: "Latence moyenne",
+    label: m.kpi_metric_api_latency(),
     unit: "ms",
     group: "API",
     isError: false,
   },
   {
     metric: "openclaw.ingest",
-    label: "Ingestion OpenClaw",
+    label: m.kpi_metric_openclaw_ingest(),
     unit: "/h",
     group: "OpenClaw",
     isError: false,
   },
-  { metric: "chat.send", label: "Messages envoyés", unit: "/h", group: "Chat", isError: false },
+  { metric: "chat.send", label: m.kpi_metric_chat_send(), unit: "/h", group: "Chat", isError: false },
   {
     metric: "assistant.stream.errors",
-    label: "Erreurs de stream",
+    label: m.kpi_metric_stream_errors(),
     unit: "/h",
     group: "Assistant",
     isError: true,
@@ -158,12 +159,9 @@ export function KpiTab() {
   const header = (
     <>
       <p className="oc-admin__hint">
-        Indicateurs agrégés par heure à partir des traces expurgées (métadonnées
-        non-PHI uniquement). Mise à jour en direct (useQuery) — le rollup tourne
-        chaque heure.{" "}
+        {m.kpi_header_hint()}{" "}
         <span className="oc-filter__window">
-          La plage filtre l’historique des rollups — une plage antérieure peut
-          être partielle.
+          {m.kpi_header_range_note()}
         </span>
       </p>
       <Toolbar value={range} onChange={setRange} />
@@ -174,7 +172,7 @@ export function KpiTab() {
     return (
       <>
         {header}
-        <p className="oc-admin__hint">Chargement des KPI…</p>
+        <p className="oc-admin__hint">{m.kpi_loading()}</p>
       </>
     );
   }
@@ -183,9 +181,7 @@ export function KpiTab() {
     return (
       <>
         {header}
-        <p className="oc-admin__hint">
-          Aucune donnée KPI — le rollup tourne chaque heure ; lance-le ou attends.
-        </p>
+        <p className="oc-admin__hint">{m.kpi_empty()}</p>
       </>
     );
   }
@@ -266,12 +262,12 @@ function MetricCard({
         <div className="oc-kpi__axis">
           {latest ? (
             <span className="oc-kpi__axis-latest">
-              dernier&nbsp;: {bucketLabel(latest.bucket)}
+              {m.kpi_axis_latest({ value: bucketLabel(latest.bucket) })}
             </span>
           ) : (
-            <span className="oc-kpi__muted">aucune donnée</span>
+            <span className="oc-kpi__muted">{m.kpi_no_data()}</span>
           )}
-          <span className="oc-kpi__muted">{series.length} h</span>
+          <span className="oc-kpi__muted">{m.kpi_hours_count({ count: series.length })}</span>
         </div>
       </CardContent>
     </Card>
@@ -310,7 +306,7 @@ function BarChart({
       viewBox={`0 0 ${CHART_W} ${CHART_H}`}
       preserveAspectRatio="none"
       role="img"
-      aria-label={`Série horaire (max ${formatValue(max)} ${unit})`}
+      aria-label={m.kpi_chart_aria({ max: formatValue(max), unit })}
     >
       {series.map((p, i) => {
         // Guard max === 0 (all-zero series): height stays 0, no NaN.

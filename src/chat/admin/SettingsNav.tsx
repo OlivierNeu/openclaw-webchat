@@ -30,6 +30,26 @@ import {
   type Tab,
 } from "../AdminSettings";
 import { BridgeStatusBadge } from "./BridgeStatusBadge";
+import { m } from "@/paraglide/messages.js";
+
+// i18n overrides for tab nav labels, applied as they get internationalized
+// (the rest still fall back to the FR TAB_LABELS until the full migration).
+const TAB_I18N: Partial<Record<Tab, () => string>> = {
+  users: () => m.settings_tab_users(),
+  instances: () => m.settings_tab_instances(),
+  bridge: () => m.settings_tab_bridge(),
+  serviceAccounts: () => m.settings_tab_serviceaccounts(),
+  roles: () => m.settings_tab_roles(),
+  traces: () => m.settings_tab_traces(),
+  kpi: () => m.settings_tab_kpi(),
+  anomalies: () => m.settings_tab_anomalies(),
+  files: () => m.files_tab_label(),
+  integrations: () => m.settings_tab_integrations(),
+  theme: () => m.appearance_tab_label(),
+  uiprefs: () => m.uiprefs_tab_label(),
+  audit: () => m.settings_tab_audit(),
+  feedbacks: () => m.settings_tab_feedbacks(),
+};
 
 // Vertical, DRAG-AND-DROP settings navigation (replaces the chat list in
 // Settings). Tab order is a per-user preference persisted to Convex
@@ -66,7 +86,7 @@ export function mergeOrder(saved: string[] | null | undefined): Tab[] {
 }
 
 function TabLinkInner({ tab }: { tab: Tab }) {
-  const label = TAB_LABELS[tab] ?? tab;
+  const label = TAB_I18N[tab]?.() ?? TAB_LABELS[tab] ?? tab;
   const activeProps = { className: TAB_ACTIVE_CLASS(tab) };
   // Path-only highlight (search params must not break the active state).
   const activeOptions = { includeSearch: false };
@@ -114,7 +134,7 @@ function SortableTab({ tab }: { tab: Tab }) {
       <button
         type="button"
         className="oc-settings-nav__grip"
-        aria-label="Réordonner cet onglet"
+        aria-label={m.settingsnav_reorder()}
         {...attributes}
         {...listeners}
       >
@@ -175,11 +195,11 @@ export function SettingsNav() {
   }
 
   return (
-    <nav className="oc-settings-nav" aria-label="Réglages">
+    <nav className="oc-settings-nav" aria-label={m.settingsnav_aria()}>
       <Link to="/" className="oc-settings-nav__back">
-        ← Retour au chat
+        {m.settingsnav_back()}
       </Link>
-      <div className="oc-settings-nav__title">Settings</div>
+      <div className="oc-settings-nav__title">{m.settingsnav_title()}</div>
       <DndContext
         sensors={sensors}
         collisionDetection={closestCenter}

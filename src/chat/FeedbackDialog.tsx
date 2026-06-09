@@ -21,6 +21,7 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { Button } from "@/components/ui/button";
+import { m } from "@/paraglide/messages.js";
 
 // OpenRouter-style "Report Feedback". Flagging a message FREEZES a forensic
 // snapshot server-side (convex/feedback.ts) so a later delete/regenerate cannot
@@ -43,23 +44,27 @@ type MsgRole = "user" | "assistant" | "system";
 // An AI report and a user report are different acts: the assistant-response set
 // is about generation quality; the user-message set is about "what I typed was
 // changed on the way out" (the headline dispute).
-const AI_CATEGORIES: { id: string; label: string }[] = [
-  { id: "incorrect", label: "Réponse incorrecte" },
-  { id: "incoherence", label: "Incohérence" },
-  { id: "altered_words", label: "Mots / orthographe erronés" },
-  { id: "formatting", label: "Formatage" },
-  { id: "latency", label: "Latence" },
-  { id: "api_error", label: "Erreur API" },
-  { id: "other", label: "Autre" },
-];
-const USER_CATEGORIES: { id: string; label: string }[] = [
-  { id: "altered_words", label: "Mots modifiés à l'envoi" },
-  { id: "formatting", label: "Caractères / mise en forme altérés" },
-  { id: "other", label: "Autre" },
-];
+function aiCategories(): { id: string; label: string }[] {
+  return [
+    { id: "incorrect", label: m.feedbackdlg_cat_incorrect() },
+    { id: "incoherence", label: m.feedbackdlg_cat_incoherence() },
+    { id: "altered_words", label: m.feedbackdlg_cat_altered_words_ai() },
+    { id: "formatting", label: m.feedbackdlg_cat_formatting_ai() },
+    { id: "latency", label: m.feedbackdlg_cat_latency() },
+    { id: "api_error", label: m.feedbackdlg_cat_api_error() },
+    { id: "other", label: m.feedbackdlg_cat_other() },
+  ];
+}
+function userCategories(): { id: string; label: string }[] {
+  return [
+    { id: "altered_words", label: m.feedbackdlg_cat_altered_words_user() },
+    { id: "formatting", label: m.feedbackdlg_cat_formatting_user() },
+    { id: "other", label: m.feedbackdlg_cat_other() },
+  ];
+}
 
 function categoriesFor(role: MsgRole) {
-  return role === "user" ? USER_CATEGORIES : AI_CATEGORIES;
+  return role === "user" ? userCategories() : aiCategories();
 }
 
 // Known text-mutating browser extensions and the DOM footprint they inject.
@@ -185,13 +190,13 @@ export function FeedbackProvider({ children }: { children: React.ReactNode }) {
         {target ? (
           <DialogContent className="sm:max-w-md">
             <DialogHeader>
-              <DialogTitle>Signaler un problème</DialogTitle>
+              <DialogTitle>{m.feedbackdlg_title()}</DialogTitle>
               <DialogDescription>
                 {submitted
-                  ? "Merci. Un instantané complet de ce message a été figé pour analyse."
+                  ? m.feedbackdlg_desc_submitted()
                   : isUser
-                    ? "Signalez un problème avec votre message tel qu'il a été envoyé. Un instantané forensique exact est enregistré."
-                    : "Signalez un problème avec cette réponse. Un instantané forensique exact est enregistré au moment de l'envoi."}
+                    ? m.feedbackdlg_desc_user()
+                    : m.feedbackdlg_desc_assistant()}
               </DialogDescription>
             </DialogHeader>
 
@@ -205,31 +210,27 @@ export function FeedbackProvider({ children }: { children: React.ReactNode }) {
                 {target.sourceWasOpen ? (
                   verdict === true ? (
                     <p className="oc-feedback__fidelity is-ok">
-                      ✓ Le texte affiché (vue source) correspond exactement,
-                      caractère pour caractère, au texte stocké côté serveur. La
-                      comparaison est figée comme preuve.
+                      {m.feedbackdlg_fidelity_ok()}
                     </p>
                   ) : (
                     <p className="oc-feedback__fidelity is-warn">
-                      ⚠ Écart détecté entre le texte affiché (vue source) et le
-                      texte stocké. L'instantané a figé les deux versions.
+                      {m.feedbackdlg_fidelity_warn()}
                     </p>
                   )
                 ) : (
                   <p className="oc-feedback__fidelity">
-                    Instantané enregistré. Pour vérifier que l'affichage n'altère
-                    aucun caractère, ouvrez la vue source (&lt;/&gt;) sur ce
-                    message puis signalez à nouveau : la comparaison portera alors
-                    sur le texte réellement affiché par le navigateur.
+                    {m.feedbackdlg_fidelity_closed()}
                   </p>
                 )}
               </div>
             ) : (
               <div className="oc-feedback__form">
-                <label className="oc-feedback__label">Catégorie</label>
+                <label className="oc-feedback__label">
+                  {m.feedbackdlg_category_label()}
+                </label>
                 <Select value={category} onValueChange={setCategory}>
                   <SelectTrigger>
-                    <SelectValue placeholder="Choisir une catégorie" />
+                    <SelectValue placeholder={m.feedbackdlg_category_placeholder()} />
                   </SelectTrigger>
                   <SelectContent>
                     {categoriesFor(target.role).map((c) => (
@@ -244,12 +245,12 @@ export function FeedbackProvider({ children }: { children: React.ReactNode }) {
                   className="oc-feedback__label"
                   htmlFor="oc-feedback-comment"
                 >
-                  Commentaire
+                  {m.feedbackdlg_comment_label()}
                 </label>
                 <textarea
                   id="oc-feedback-comment"
                   className="oc-feedback__textarea"
-                  placeholder="Décrivez le problème…"
+                  placeholder={m.feedbackdlg_comment_placeholder()}
                   value={comment}
                   maxLength={COMMENT_MAX}
                   onChange={(e) =>
@@ -265,17 +266,19 @@ export function FeedbackProvider({ children }: { children: React.ReactNode }) {
 
             <DialogFooter>
               {submitted ? (
-                <Button onClick={() => onOpenChange(false)}>Fermer</Button>
+                <Button onClick={() => onOpenChange(false)}>
+                  {m.feedbackdlg_close()}
+                </Button>
               ) : (
                 <>
                   <Button variant="outline" onClick={() => onOpenChange(false)}>
-                    Annuler
+                    {m.feedbackdlg_cancel()}
                   </Button>
                   <Button
                     onClick={() => void onSubmit()}
                     disabled={!category || submitting}
                   >
-                    {submitting ? "Envoi…" : "Envoyer"}
+                    {submitting ? m.feedbackdlg_sending() : m.feedbackdlg_send()}
                   </Button>
                 </>
               )}
@@ -342,8 +345,12 @@ export function FeedbackButton() {
     <button
       type="button"
       className={`oc-iconbtn${alreadyReported ? " is-on" : ""}`}
-      title={alreadyReported ? "Problème signalé" : "Signaler un problème"}
-      aria-label="Signaler un problème avec ce message"
+      title={
+        alreadyReported
+          ? m.feedbackdlg_btn_reported()
+          : m.feedbackdlg_btn_report()
+      }
+      aria-label={m.feedbackdlg_btn_aria()}
       onClick={onFlag}
     >
       <Flag size={15} aria-hidden />

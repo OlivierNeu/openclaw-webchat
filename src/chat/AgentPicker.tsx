@@ -9,6 +9,7 @@ import {
 import { Input } from "@/components/ui/input";
 import { Badge } from "@/components/ui/badge";
 import { Star, Server, Bot } from "lucide-react";
+import { m } from "@/paraglide/messages.js";
 
 // One agent the current user may open a chat on (shape of api.agents.listMyAgents).
 export interface PickableAgent {
@@ -105,18 +106,17 @@ export function AgentPickerDialog({
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent className="oc-agentpicker">
         <DialogHeader>
-          <DialogTitle>Choisir un agent</DialogTitle>
+          <DialogTitle>{m.agentpicker_dialog_title()}</DialogTitle>
           <DialogDescription>
-            Sélectionnez l’agent (et l’instance) pour cette conversation.
+            {m.agentpicker_dialog_description()}
           </DialogDescription>
         </DialogHeader>
 
         {agents === undefined ? (
-          <p className="oc-agentpicker__hint">Chargement…</p>
+          <p className="oc-agentpicker__hint">{m.agentpicker_loading()}</p>
         ) : agents.length === 0 ? (
           <p className="oc-agentpicker__hint">
-            Aucun agent ne vous est assigné. Contactez votre administrateur pour
-            qu’il vous en attribue un.
+            {m.agentpicker_empty_state()}
           </p>
         ) : (
           <>
@@ -124,9 +124,9 @@ export function AgentPickerDialog({
               autoFocus
               value={q}
               onChange={(e) => setQ(e.target.value)}
-              placeholder="Rechercher un agent…"
+              placeholder={m.agentpicker_search_placeholder()}
               className="oc-agentpicker__search"
-              aria-label="Rechercher un agent"
+              aria-label={m.agentpicker_search_aria_label()}
             />
             <div className="oc-agentpicker__list" role="listbox">
               {groups.map((g) => (
@@ -149,7 +149,7 @@ export function AgentPickerDialog({
                       disabled={a.state === "deleted"}
                       title={
                         a.state === "deleted"
-                          ? "Cet agent n’existe plus sur la gateway"
+                          ? m.agentpicker_agent_deleted_title()
                           : undefined
                       }
                     >
@@ -164,7 +164,7 @@ export function AgentPickerDialog({
                       {a.isDefault ? (
                         <Star
                           size={13}
-                          aria-label="Agent par défaut"
+                          aria-label={m.agentpicker_default_agent_aria_label()}
                           className="oc-agentpicker__default"
                         />
                       ) : null}

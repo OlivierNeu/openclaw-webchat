@@ -1,5 +1,5 @@
 import * as React from "react";
-import { useState } from "react";
+import { useMemo, useState } from "react";
 import { useQuery, useMutation } from "convex/react";
 import { api } from "./convexApi";
 import {
@@ -10,47 +10,19 @@ import {
   DialogTitle,
 } from "@/components/ui/dialog";
 import { Checkbox } from "@/components/ui/checkbox";
+import { Input } from "@/components/ui/input";
+import { m } from "@/paraglide/messages.js";
+import { PREF_META, groupAndFilterPrefs } from "./prefsMeta";
 
 // User UI-preferences panel (the interface-config module). Mounted ONCE at app
 // root via <PreferencesProvider> — NOT inside the UserMenu dropdown, so the menu
 // closing on "Préférences…" cannot unmount the dialog (the FeedbackDialog lesson).
 //
-// Renders the toggles the SERVER returns (getMe.ui.effective keys) so a key the
-// backend doesn't know can't appear; PREF_LABELS is display-only. The server is
-// the real gate (setUiPref rejects a locked feature); here locked rows are just
+// Renders the toggles the SERVER returns (getMe.ui.effective keys), grouped by
+// category with an accent-insensitive filter (prefsMeta.groupAndFilterPrefs); a
+// key with no display metadata still appears (in the "other" group). The server
+// is the real gate (setUiPref rejects a locked feature); here locked rows are
 // greyed with a "Non activé" note.
-
-// Display metadata ONLY (labels/help). Keys must exist server-side to render.
-// Exported so the admin "Préférences UI" tab reuses the same labels.
-export const PREF_LABELS: Record<string, { label: string; help?: string }> = {
-  showSource: {
-    label: "Vue source des messages",
-    help: "Le bouton </> qui montre le texte brut exact d'un message.",
-  },
-  showReport: {
-    label: "Signaler un problème",
-    help: "Le drapeau qui envoie un signalement (feedback) sur un message.",
-  },
-  copyAssistant: { label: "Copier les réponses de l'IA" },
-  copyUser: { label: "Copier vos messages" },
-  showDelete: { label: "Supprimer un message" },
-  showTools: {
-    label: "Cartes d'outils",
-    help: "Afficher les exécutions d'outils de l'agent dans le fil.",
-  },
-  voiceInput: {
-    label: "Saisie vocale (micro)",
-    help: "Le bouton micro dans le composeur.",
-  },
-  showChatAge: {
-    label: "Âge des conversations",
-    help: "Afficher l'ancienneté de chaque conversation (ex. « 3j », « 2sem ») dans la liste à gauche.",
-  },
-  showChatProvider: {
-    label: "Bridge des conversations",
-    help: "Marquer le bridge (OpenClaw / Hermes) de chaque conversation dans la liste à gauche. Apparaît uniquement si vos conversations utilisent plusieurs bridges.",
-  },
-};
 
 type UiState = {
   effective: Record<string, boolean>;
@@ -70,6 +42,7 @@ export function usePreferences(): () => void {
 
 export function PreferencesProvider({ children }: { children: React.ReactNode }) {
   const [open, setOpen] = useState(false);
+  const [query, setQuery] = useState("");
   // SKIP while closed: this provider is mounted ABOVE the router (so the menu
   // closing can't unmount the dialog), which means it also renders on the
   // signed-out screen. getMe calls requireUserId and would throw without an
@@ -79,70 +52,97 @@ export function PreferencesProvider({ children }: { children: React.ReactNode })
   const ui = me?.ui as UiState | undefined;
   const setPref = useMutation(api.me.setUiPref);
 
+  const groups = useMemo(
+    () => (ui ? groupAndFilterPrefs(Object.keys(ui.effective), query) : []),
+    [ui, query],
+  );
+
   return (
     <PreferencesContext.Provider value={() => setOpen(true)}>
       {children}
       <Dialog open={open} onOpenChange={setOpen}>
         <DialogContent className="sm:max-w-lg">
           <DialogHeader>
-            <DialogTitle>Préférences d'interface</DialogTitle>
-            <DialogDescription>
-              Affichez ou masquez les éléments de l'interface. Certaines options
-              dépendent d'une fonctionnalité système non encore activée.
-            </DialogDescription>
+            <DialogTitle>{m.prefs_dialog_title()}</DialogTitle>
+            <DialogDescription>{m.prefs_dialog_desc()}</DialogDescription>
           </DialogHeader>
 
           {ui ? (
-            <div className="oc-prefs">
-              {Object.keys(ui.effective).map((key) => {
-                const meta = PREF_LABELS[key];
-                if (!meta) return null; // server key with no display metadata
-                const locked = ui.locked[key];
-                const checked = ui.effective[key];
-                const overridden = ui.userOverrides[key] !== undefined;
-                return (
-                  <div
-                    key={key}
-                    className={`oc-prefs__row${locked ? " is-locked" : ""}`}
-                  >
-                    <div className="oc-prefs__info">
-                      <span className="oc-prefs__label">
-                        {meta.label}
-                        {locked ? (
-                          <span className="oc-prefs__lock">Non activé</span>
-                        ) : !overridden ? (
-                          <span className="oc-prefs__def">défaut</span>
-                        ) : null}
-                      </span>
-                      {meta.help ? (
-                        <span className="oc-prefs__help">{meta.help}</span>
-                      ) : null}
+            <>
+              <Input
+                value={query}
+                onChange={(e) => setQuery(e.target.value)}
+                placeholder={m.prefs_filter_placeholder()}
+                aria-label={m.prefs_filter_placeholder()}
+                className="mb-2"
+              />
+              {groups.length === 0 ? (
+                <div className="oc-prefs__empty">{m.prefs_no_match()}</div>
+              ) : (
+                <div className="oc-prefs">
+                  {groups.map((group) => (
+                    <div key={group.id} className="oc-prefs__group">
+                      <h4 className="oc-prefs__cat">{group.label}</h4>
+                      {group.keys.map((key) => {
+                        const meta = PREF_META[key];
+                        const label = meta ? meta.label() : key;
+                        const help = meta?.help?.();
+                        const locked = ui.locked[key];
+                        const checked = ui.effective[key];
+                        const overridden = ui.userOverrides[key] !== undefined;
+                        return (
+                          <div
+                            key={key}
+                            className={`oc-prefs__row${locked ? " is-locked" : ""}`}
+                          >
+                            <div className="oc-prefs__info">
+                              <span className="oc-prefs__label">
+                                {label}
+                                {locked ? (
+                                  <span className="oc-prefs__lock">
+                                    {m.prefs_badge_locked()}
+                                  </span>
+                                ) : !overridden ? (
+                                  <span className="oc-prefs__def">
+                                    {m.prefs_badge_default()}
+                                  </span>
+                                ) : null}
+                              </span>
+                              {help ? (
+                                <span className="oc-prefs__help">{help}</span>
+                              ) : null}
+                            </div>
+                            <div className="oc-prefs__ctl">
+                              {!locked && overridden ? (
+                                <button
+                                  type="button"
+                                  className="oc-prefs__reset"
+                                  onClick={() =>
+                                    void setPref({ key, value: null })
+                                  }
+                                >
+                                  {m.prefs_reset()}
+                                </button>
+                              ) : null}
+                              <Checkbox
+                                checked={checked}
+                                disabled={locked}
+                                onCheckedChange={(v) =>
+                                  void setPref({ key, value: v === true })
+                                }
+                                aria-label={label}
+                              />
+                            </div>
+                          </div>
+                        );
+                      })}
                     </div>
-                    <div className="oc-prefs__ctl">
-                      {!locked && overridden ? (
-                        <button
-                          type="button"
-                          className="oc-prefs__reset"
-                          onClick={() => void setPref({ key, value: null })}
-                        >
-                          Réinitialiser
-                        </button>
-                      ) : null}
-                      <Checkbox
-                        checked={checked}
-                        disabled={locked}
-                        onCheckedChange={(v) =>
-                          void setPref({ key, value: v === true })
-                        }
-                        aria-label={meta.label}
-                      />
-                    </div>
-                  </div>
-                );
-              })}
-            </div>
+                  ))}
+                </div>
+              )}
+            </>
           ) : (
-            <div className="oc-prefs__empty">Chargement…</div>
+            <div className="oc-prefs__empty">{m.common_loading()}</div>
           )}
         </DialogContent>
       </Dialog>

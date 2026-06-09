@@ -9,6 +9,7 @@ import { EntitySheet } from "./EntitySheet";
 import { FilterBar } from "./filters/FilterBar";
 import { useConfirm } from "@/components/ConfirmDialog";
 import { useToast } from "@/components/ui/toast";
+import { m } from "@/paraglide/messages.js";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -70,9 +71,9 @@ type MintedKey = {
 // `expiresAt` (no key name field exists on the apiKeys doc), so the pre-mint
 // affordance is expiry-only.
 const EXPIRY_OPTIONS = [
-  { value: "never", label: "Jamais", days: null },
-  { value: "30", label: "30 jours", days: 30 },
-  { value: "90", label: "90 jours", days: 90 },
+  { value: "never", label: () => m.serviceaccounts_expiry_never(), days: null },
+  { value: "30", label: () => m.serviceaccounts_expiry_30d(), days: 30 },
+  { value: "90", label: () => m.serviceaccounts_expiry_90d(), days: 90 },
 ] as const;
 type ExpiryValue = (typeof EXPIRY_OPTIONS)[number]["value"];
 
@@ -174,7 +175,7 @@ export function ServiceAccountsTab() {
       setSheetOpen(false);
     } catch (err) {
       // M5: surface duplicate-key / validation rejection instead of swallowing.
-      toast.error("Échec de la création du compte", err);
+      toast.error(m.serviceaccounts_toast_create_error(), err);
     }
   }
 
@@ -203,7 +204,7 @@ export function ServiceAccountsTab() {
       });
     } catch (err) {
       // M5: surface mint failures (the plaintext is lost on error anyway).
-      toast.error("Échec de la génération de la clé", err);
+      toast.error(m.serviceaccounts_toast_mint_error(), err);
     } finally {
       mintingRef.current = false;
       setMinting(null);
@@ -214,42 +215,42 @@ export function ServiceAccountsTab() {
     // Irreversible cascade (the account + every key it owns). Type-to-confirm
     // on the account name guards against an accidental destructive click.
     const ok = await confirm({
-      title: "Supprimer ce compte de service ?",
+      title: m.serviceaccounts_delete_title(),
       description: (
         <>
-          Le compte <span className="font-mono">{account.name}</span> et{" "}
-          <strong>toutes ses clés API</strong> seront supprimés
-          définitivement. Cette action est irréversible. Tapez le nom du compte
-          pour confirmer.
+          {m.serviceaccounts_delete_desc_before()}{" "}
+          <span className="font-mono">{account.name}</span>{" "}
+          {m.serviceaccounts_delete_desc_and()}{" "}
+          <strong>{m.serviceaccounts_delete_desc_all_keys()}</strong>{" "}
+          {m.serviceaccounts_delete_desc_after()}
         </>
       ),
       confirmWord: account.name,
-      confirmLabel: "Supprimer",
+      confirmLabel: m.serviceaccounts_confirm_delete(),
       destructive: true,
     });
     if (!ok) return;
     try {
       await deleteServiceAccount({ serviceAccountId: account._id });
-      toast.success("Compte de service supprimé", account.name);
+      toast.success(m.serviceaccounts_toast_delete_success(), account.name);
     } catch (err) {
-      toast.error("Échec de la suppression du compte", err);
+      toast.error(m.serviceaccounts_toast_delete_error(), err);
     }
   }
 
   async function revoke(key: ApiKeyRow) {
     const ok = await confirm({
-      title: "Révoquer cette clé API ?",
+      title: m.serviceaccounts_revoke_title(),
       description: (
         <>
-          La clé{" "}
+          {m.serviceaccounts_revoke_desc_before()}{" "}
           <span className="font-mono">
             {key.prefix}…{key.lastFour}
           </span>{" "}
-          sera désactivée immédiatement et ne pourra plus authentifier de
-          requêtes. Cette action est irréversible.
+          {m.serviceaccounts_revoke_desc_after()}
         </>
       ),
-      confirmLabel: "Révoquer",
+      confirmLabel: m.serviceaccounts_confirm_revoke(),
       destructive: true,
     });
     if (!ok) return;
@@ -260,7 +261,7 @@ export function ServiceAccountsTab() {
       await revokeApiKey({ keyId: key._id });
     } catch (err) {
       // M5: surface revoke failures.
-      toast.error("Échec de la révocation", err);
+      toast.error(m.serviceaccounts_toast_revoke_error(), err);
     } finally {
       setRevoking((prev) => {
         const next = new Set(prev);
@@ -272,25 +273,21 @@ export function ServiceAccountsTab() {
 
   return (
     <>
-      <p className="oc-admin__hint">
-        Comptes de service pour les agents OpenClaw (auth par clé API). Le texte
-        en clair d’une clé n’est affiché qu’une seule fois à sa création — il
-        n’est jamais stocké ni récupérable ensuite.
-      </p>
+      <p className="oc-admin__hint">{m.serviceaccounts_hint()}</p>
 
       <FilterBar
         q={q}
         onQChange={setQ}
-        searchPlaceholder="Rechercher un compte"
+        searchPlaceholder={m.serviceaccounts_search_placeholder()}
         onReset={resetFilters}
         canReset={filtersActive}
       >
         <Select value={roleFilter} onValueChange={setRoleFilter}>
           <SelectTrigger size="sm" className="w-40">
-            <SelectValue placeholder="Rôle" />
+            <SelectValue placeholder={m.serviceaccounts_role()} />
           </SelectTrigger>
           <SelectContent>
-            <SelectItem value={ALL}>Tous les rôles</SelectItem>
+            <SelectItem value={ALL}>{m.serviceaccounts_all_roles()}</SelectItem>
             {(roles ?? []).map((r) => (
               <SelectItem key={r._id} value={r.key}>
                 {r.key}
@@ -303,22 +300,22 @@ export function ServiceAccountsTab() {
             <SelectValue />
           </SelectTrigger>
           <SelectContent>
-            <SelectItem value={ALL}>Tous les statuts</SelectItem>
-            <SelectItem value="active">actif</SelectItem>
-            <SelectItem value="disabled">désactivé</SelectItem>
+            <SelectItem value={ALL}>{m.serviceaccounts_all_statuses()}</SelectItem>
+            <SelectItem value="active">{m.serviceaccounts_status_active()}</SelectItem>
+            <SelectItem value="disabled">{m.serviceaccounts_status_disabled()}</SelectItem>
           </SelectContent>
         </Select>
       </FilterBar>
 
       <DataTableShell
-        title="Comptes de service"
+        title={m.serviceaccounts_title()}
         rows={accounts}
-        addLabel="Ajouter un compte"
+        addLabel={m.serviceaccounts_add()}
         onAdd={() => {
           setForm(EMPTY_ACCOUNT);
           setSheetOpen(true);
         }}
-        emptyHint="Aucun compte de service."
+        emptyHint={m.serviceaccounts_empty()}
         isExpanded={(a) => expanded.has(a._id)}
         renderExpanded={(a) => (
           <AccountKeys
@@ -330,17 +327,17 @@ export function ServiceAccountsTab() {
         )}
         rowActions={(a) => [
           {
-            label: "Générer une clé API",
+            label: m.serviceaccounts_action_mint(),
             onSelect: () => void mint(a),
           },
           {
             label: expanded.has(a._id)
-              ? "Masquer les clés"
-              : "Afficher les clés",
+              ? m.serviceaccounts_action_hide_keys()
+              : m.serviceaccounts_action_show_keys(),
             onSelect: () => toggleExpanded(a._id),
           },
           {
-            label: "Supprimer le compte",
+            label: m.serviceaccounts_action_delete(),
             variant: "destructive",
             onSelect: () => void deleteAccount(a),
           },
@@ -353,29 +350,33 @@ export function ServiceAccountsTab() {
               <Button
                 variant="ghost"
                 size="icon-sm"
-                aria-label={expanded.has(a._id) ? "Replier" : "Déplier"}
+                aria-label={
+                  expanded.has(a._id)
+                    ? m.serviceaccounts_collapse()
+                    : m.serviceaccounts_expand()
+                }
                 onClick={() => toggleExpanded(a._id)}
               >
                 {expanded.has(a._id) ? <ChevronDown /> : <ChevronRight />}
               </Button>
             ),
           },
-          { header: "Nom", cell: (a) => a.name },
+          { header: m.serviceaccounts_col_name(), cell: (a) => a.name },
           {
-            header: "Rôle",
+            header: m.serviceaccounts_col_role(),
             cell: (a) => <Badge variant="secondary">{a.roleKey}</Badge>,
           },
           {
-            header: "Statut",
+            header: m.serviceaccounts_col_status(),
             cell: (a) =>
               a.disabled ? (
-                <Badge variant="destructive">désactivé</Badge>
+                <Badge variant="destructive">{m.serviceaccounts_status_disabled()}</Badge>
               ) : (
-                <Badge variant="outline">actif</Badge>
+                <Badge variant="outline">{m.serviceaccounts_status_active()}</Badge>
               ),
           },
           {
-            header: "Expiration de la prochaine clé",
+            header: m.serviceaccounts_col_next_key_expiry(),
             cell: (a) => (
               <Select
                 value={expiryByAccount[a._id] ?? "never"}
@@ -392,7 +393,7 @@ export function ServiceAccountsTab() {
                 <SelectContent>
                   {EXPIRY_OPTIONS.map((o) => (
                     <SelectItem key={o.value} value={o.value}>
-                      {o.label}
+                      {o.label()}
                     </SelectItem>
                   ))}
                 </SelectContent>
@@ -400,13 +401,15 @@ export function ServiceAccountsTab() {
             ),
           },
           {
-            header: "Clés",
+            header: m.serviceaccounts_col_keys(),
             cell: (a) => {
               const keys = keysByAccount.get(a._id) ?? [];
               const active = keys.filter((k) => !k.disabled).length;
               return (
                 <span className="oc-sa__keycount">
-                  {minting === a._id ? "génération…" : `${active} active(s)`}
+                  {minting === a._id
+                    ? m.serviceaccounts_minting()
+                    : m.serviceaccounts_active_count({ count: active })}
                 </span>
               );
             },
@@ -417,28 +420,28 @@ export function ServiceAccountsTab() {
       <EntitySheet
         open={sheetOpen}
         onOpenChange={setSheetOpen}
-        title="Nouveau compte de service"
-        description="Principal authentifié par clé API (jamais un humain)."
+        title={m.serviceaccounts_sheet_title()}
+        description={m.serviceaccounts_sheet_description()}
         canSubmit={Boolean(form.name && form.roleKey)}
         onSubmit={submitAccount}
-        submitLabel="Ajouter"
+        submitLabel={m.serviceaccounts_submit()}
       >
         <div className="oc-form">
           <label className="oc-field">
-            <span className="oc-field__label">Nom</span>
+            <span className="oc-field__label">{m.serviceaccounts_field_name()}</span>
             <Input
               value={form.name}
               onChange={(e) => setForm({ ...form, name: e.target.value })}
             />
           </label>
           <label className="oc-field">
-            <span className="oc-field__label">Rôle</span>
+            <span className="oc-field__label">{m.serviceaccounts_field_role()}</span>
             <Select
               value={form.roleKey || undefined}
               onValueChange={(v) => setForm({ ...form, roleKey: v })}
             >
               <SelectTrigger className="w-full">
-                <SelectValue placeholder="Choisir un rôle" />
+                <SelectValue placeholder={m.serviceaccounts_choose_role()} />
               </SelectTrigger>
               <SelectContent>
                 {(roles ?? []).map((r) => (
@@ -450,7 +453,7 @@ export function ServiceAccountsTab() {
             </Select>
           </label>
           <label className="oc-field">
-            <span className="oc-field__label">Description (optionnel)</span>
+            <span className="oc-field__label">{m.serviceaccounts_field_description()}</span>
             <Input
               value={form.description}
               onChange={(e) =>
@@ -482,20 +485,21 @@ function AccountKeys({
   return (
     <div className="oc-sa__keys">
       <div className="oc-sa__keys-head">
-        Clés de <span className="font-medium">{account.name}</span>
+        {m.serviceaccounts_keys_of()}{" "}
+        <span className="font-medium">{account.name}</span>
       </div>
       {keys.length === 0 ? (
-        <p className="oc-admin__hint">Aucune clé pour ce compte.</p>
+        <p className="oc-admin__hint">{m.serviceaccounts_keys_empty()}</p>
       ) : (
         <table className="oc-sa__keytable">
           <thead>
             <tr>
-              <th>Clé</th>
-              <th>Rôle</th>
-              <th>Créée</th>
-              <th>Dernier usage</th>
-              <th>Expiration</th>
-              <th>Statut</th>
+              <th>{m.serviceaccounts_keycol_key()}</th>
+              <th>{m.serviceaccounts_keycol_role()}</th>
+              <th>{m.serviceaccounts_keycol_created()}</th>
+              <th>{m.serviceaccounts_keycol_last_used()}</th>
+              <th>{m.serviceaccounts_keycol_expiry()}</th>
+              <th>{m.serviceaccounts_keycol_status()}</th>
               <th />
             </tr>
           </thead>
@@ -524,7 +528,9 @@ function AccountKeys({
                       disabled={revoking.has(k._id)}
                       onClick={() => onRevoke(k)}
                     >
-                      {revoking.has(k._id) ? "Révocation…" : "Révoquer"}
+                      {revoking.has(k._id)
+                        ? m.serviceaccounts_revoking()
+                        : m.serviceaccounts_revoke()}
                     </Button>
                   ) : null}
                 </td>
@@ -582,15 +588,16 @@ function MintedKeyDialog({
           onEscapeKeyDown={(e) => e.preventDefault()}
         >
           <DialogHeader>
-            <DialogTitle>Clé API créée</DialogTitle>
+            <DialogTitle>{m.serviceaccounts_minted_title()}</DialogTitle>
             <DialogDescription>
-              Pour le compte « {minted.accountName} ». Copiez-la maintenant.
+              {m.serviceaccounts_minted_description({
+                name: minted.accountName,
+              })}
             </DialogDescription>
           </DialogHeader>
 
           <div className="oc-sa__minted-warning">
-            Stockez cette clé en lieu sûr. Vous ne la reverrez plus jamais. Pour
-            la remplacer, il faudra la révoquer et en générer une nouvelle.
+            {m.serviceaccounts_minted_warning()}
           </div>
 
           <div className="oc-sa__minted-box">
@@ -599,10 +606,10 @@ function MintedKeyDialog({
               variant="outline"
               size="sm"
               onClick={() => void copy()}
-              aria-label="Copier la clé"
+              aria-label={m.serviceaccounts_copy_key()}
             >
               {copied ? <Check /> : <Copy />}
-              {copied ? "Copié" : "Copier"}
+              {copied ? m.serviceaccounts_copied() : m.serviceaccounts_copy()}
             </Button>
           </div>
 
@@ -613,7 +620,7 @@ function MintedKeyDialog({
                 onClose();
               }}
             >
-              J’ai copié la clé
+              {m.serviceaccounts_minted_done()}
             </Button>
           </DialogFooter>
         </DialogContent>
@@ -634,7 +641,7 @@ function isStale(lastUsedAt: number | null): boolean {
 }
 
 function formatLastUsed(lastUsedAt: number | null): string {
-  if (lastUsedAt === null) return "Jamais";
+  if (lastUsedAt === null) return m.serviceaccounts_never();
   return new Date(lastUsedAt).toLocaleString("fr-FR");
 }
 
@@ -644,8 +651,9 @@ function formatExpiry(expiresAt: number | null): string {
 }
 
 function statusBadge(k: ApiKeyRow) {
-  if (k.disabled) return <Badge variant="destructive">révoquée</Badge>;
+  if (k.disabled)
+    return <Badge variant="destructive">{m.serviceaccounts_key_revoked()}</Badge>;
   if (k.expiresAt !== null && k.expiresAt < Date.now())
-    return <Badge variant="outline">expirée</Badge>;
-  return <Badge variant="outline">active</Badge>;
+    return <Badge variant="outline">{m.serviceaccounts_key_expired()}</Badge>;
+  return <Badge variant="outline">{m.serviceaccounts_key_active()}</Badge>;
 }

@@ -11,6 +11,7 @@ import type { Id } from "./_generated/dataModel";
 import { internal } from "./_generated/api";
 import { requireActive, requireOwnedChat } from "./lib/access";
 import { auditImpersonated } from "./lib/audit";
+import { deleteFilesByMessage } from "./lib/files";
 
 async function requireOwnedProject(
   ctx: MutationCtx,
@@ -208,6 +209,8 @@ export async function cascadeDeleteChat(
       .withIndex("by_message", (q) => q.eq("messageId", m._id))
       .take(500);
     for (const p of parts) await ctx.db.delete(p._id);
+    // Mirror the files-row invariant on the chat-cascade part deletion.
+    await deleteFilesByMessage(ctx, m._id);
     await ctx.db.delete(m._id);
   }
   const outbox = await ctx.db

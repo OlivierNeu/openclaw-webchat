@@ -49,6 +49,7 @@ import {
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import { useConfirm } from "@/components/ConfirmDialog";
+import { m } from "@/paraglide/messages.js";
 import { useConvexChatRuntime } from "./useConvexChatRuntime";
 import { RunStatus } from "./RunStatus";
 import { ToolCard } from "./ToolCard";
@@ -128,7 +129,7 @@ export function ConvexChat({ chatId }: ConvexChatProps) {
               />
             )
           ) : (
-            <div className="oc-empty">Select or create a chat to begin.</div>
+            <div className="oc-empty">{m.chat_empty_select()}</div>
           )}
         </div>
       </UiPrefsContext.Provider>
@@ -147,18 +148,15 @@ function ChatNotFound() {
       <div className="oc-notfound__icon" aria-hidden>
         <Search size={28} />
       </div>
-      <h2 className="oc-notfound__title">Conversation introuvable</h2>
-      <p className="oc-notfound__body">
-        Ce lien ne correspond à aucune conversation. Elle a peut-être été
-        supprimée, ou l’adresse est incomplète.
-      </p>
+      <h2 className="oc-notfound__title">{m.chat_notfound_title()}</h2>
+      <p className="oc-notfound__body">{m.chat_notfound_body()}</p>
       <button
         type="button"
         className="oc-notfound__cta"
         onClick={() => void navigate({ to: "/" })}
       >
         <Plus size={16} aria-hidden />
-        Nouvelle conversation
+        {m.chat_new_conversation()}
       </button>
     </div>
   );
@@ -201,7 +199,7 @@ function ChatThread({
       <ThreadPrimitive.If empty={false}>
         <ThreadPrimitive.ScrollToBottom className="oc-scrolldown">
           <IconArrowDown />
-          <span>Derniers messages</span>
+          <span>{m.chat_latest_messages()}</span>
         </ThreadPrimitive.ScrollToBottom>
       </ThreadPrimitive.If>
       {unavailable ? <BridgeUnavailableBanner /> : null}
@@ -221,11 +219,7 @@ function BridgeUnavailableBanner() {
   return (
     <div className="oc-chat-banner oc-chat-banner--error" role="status">
       <CircleAlert size={16} aria-hidden />
-      <span>
-        Le service de chat est momentanément indisponible. L’envoi de message est
-        suspendu — réessayez dans un instant. Si cela persiste, contactez votre
-        administrateur.
-      </span>
+      <span>{m.chat_unavailable_banner()}</span>
     </div>
   );
 }
@@ -268,7 +262,9 @@ function ThreadAnnouncer({ chatId }: { chatId: ConvexId<"chats"> }) {
       // Toggle a trailing space so the textContent actually CHANGES even for a
       // second identical cue (a polite region only announces on content change).
       setAnnouncement((prev) =>
-        prev === "Réponse reçue." ? "Réponse reçue. " : "Réponse reçue.",
+        prev === m.chat_announce_reply()
+          ? `${m.chat_announce_reply()} `
+          : m.chat_announce_reply(),
       );
     }
   }, [messages]);
@@ -290,7 +286,7 @@ function ThreadEmptyState() {
       <div className="oc-emptystate__avatar" aria-hidden>
         OC
       </div>
-      <h2 className="oc-emptystate__title">Comment puis-je aider ?</h2>
+      <h2 className="oc-emptystate__title">{m.chat_empty_help()}</h2>
     </div>
   );
 }
@@ -336,7 +332,7 @@ function ChatHeader({ chatId }: { chatId: ConvexId<"chats"> }) {
   return (
     <header className="oc-chathead">
       <div className="oc-chathead__title" title={meta?.title ?? undefined}>
-        {meta?.title || "Conversation"}
+        {meta?.title || m.chat_conversation_fallback()}
       </div>
       <div className="oc-chathead__meta">
         {agent ? (
@@ -345,12 +341,14 @@ function ChatHeader({ chatId }: { chatId: ConvexId<"chats"> }) {
               agent.state !== "ok" ? " is-warn" : ""
             }`}
             title={
-              `Agent de cette conversation : ${agent.displayName ?? agent.agentId}` +
-              (agent.inheritedDefault ? " (agent par défaut)" : "") +
+              m.chat_agent_of_conversation({
+                name: agent.displayName ?? agent.agentId,
+              }) +
+              (agent.inheritedDefault ? m.chat_agent_default_suffix() : "") +
               (agent.state === "deleted"
-                ? " — cet agent n’existe plus sur la gateway"
+                ? m.chat_agent_deleted_suffix()
                 : agent.state === "stale"
-                  ? " — état non confirmé (gateway injoignable)"
+                  ? m.chat_agent_stale_suffix()
                   : "")
             }
           >
@@ -367,7 +365,11 @@ function ChatHeader({ chatId }: { chatId: ConvexId<"chats"> }) {
         {sm?.model ? (
           <span
             className="oc-chip"
-            title={`Modèle${sm.modelProvider ? ` · ${sm.modelProvider}` : ""}`}
+            title={
+              sm.modelProvider
+                ? m.chat_model_with_provider({ provider: sm.modelProvider })
+                : m.chat_model()
+            }
           >
             <IconCpu />
             {sm.model}
@@ -378,21 +380,25 @@ function ChatHeader({ chatId }: { chatId: ConvexId<"chats"> }) {
             className="oc-chip"
             title={
               inherited
-                ? "Niveau de réflexion hérité de l’agent"
-                : "Niveau de réflexion (spécifique à ce chat)"
+                ? m.chat_thinking_inherited_title()
+                : m.chat_thinking_specific_title()
             }
           >
             <IconBrain />
-            Réflexion&nbsp;: {capitalize(sm.thinkingLevel)}
-            {inherited ? <span className="oc-chip__hint">héritée</span> : null}
+            {m.chat_thinking_label()}&nbsp;: {capitalize(sm.thinkingLevel)}
+            {inherited ? (
+              <span className="oc-chip__hint">{m.chat_thinking_inherited_hint()}</span>
+            ) : null}
           </span>
         ) : null}
         {sm && pct != null ? (
           <span
             className={`oc-meter ${meterLevel}`}
-            title={`Contexte utilisé : ${pct}% (${formatTokens(
-              sm.totalTokens as number,
-            )} / ${formatTokens(sm.contextTokens as number)} tokens)`}
+            title={m.chat_context_used({
+              pct,
+              used: formatTokens(sm.totalTokens as number),
+              total: formatTokens(sm.contextTokens as number),
+            })}
           >
             <span className="oc-meter__track">
               <span
@@ -470,16 +476,16 @@ function ExportMenu({
   return (
     <DropdownMenu>
       <DropdownMenuTrigger asChild>
-        <button type="button" className="oc-chip oc-chip--btn" title="Exporter la conversation">
+        <button type="button" className="oc-chip oc-chip--btn" title={m.chat_export_conversation()}>
           <Download size={13} aria-hidden />
-          Exporter
+          {m.chat_export()}
           <ChevronDown size={13} className="oc-chip__chev" aria-hidden />
         </button>
       </DropdownMenuTrigger>
       <DropdownMenuContent align="end" className="w-44">
-        <DropdownMenuLabel>Exporter</DropdownMenuLabel>
-        <DropdownMenuItem onClick={() => void run("md")}>Markdown (.md)</DropdownMenuItem>
-        <DropdownMenuItem onClick={() => void run("json")}>JSON (.json)</DropdownMenuItem>
+        <DropdownMenuLabel>{m.chat_export()}</DropdownMenuLabel>
+        <DropdownMenuItem onClick={() => void run("md")}>{m.chat_export_markdown()}</DropdownMenuItem>
+        <DropdownMenuItem onClick={() => void run("json")}>{m.chat_export_json()}</DropdownMenuItem>
       </DropdownMenuContent>
     </DropdownMenu>
   );
@@ -518,16 +524,16 @@ function SessionKnobsMenu({
   return (
     <DropdownMenu>
       <DropdownMenuTrigger asChild>
-        <button type="button" className="oc-chip oc-chip--btn" title="Réglages avancés (réflexion, modèle)">
+        <button type="button" className="oc-chip oc-chip--btn" title={m.chat_advanced_settings_title()}>
           <SlidersHorizontal size={13} aria-hidden />
-          Avancé
+          {m.chat_advanced()}
           <ChevronDown size={13} className="oc-chip__chev" aria-hidden />
         </button>
       </DropdownMenuTrigger>
       <DropdownMenuContent align="end" className="w-60">
         {levels.length > 0 ? (
           <>
-            <DropdownMenuLabel>Niveau de réflexion</DropdownMenuLabel>
+            <DropdownMenuLabel>{m.chat_thinking_level()}</DropdownMenuLabel>
             <DropdownMenuRadioGroup
               value={sm.thinkingLevel ?? ""}
               onValueChange={(v) => void setKnob({ chatId: chatId as Id<"chats">, thinkingLevel: v })}
@@ -536,7 +542,7 @@ function SessionKnobsMenu({
                 <DropdownMenuRadioItem key={l.id} value={l.id}>
                   {capitalize(l.label)}
                   {def && l.id === def ? (
-                    <span className="oc-menu__hint">défaut</span>
+                    <span className="oc-menu__hint">{m.chat_default_hint()}</span>
                   ) : null}
                 </DropdownMenuRadioItem>
               ))}
@@ -547,7 +553,9 @@ function SessionKnobsMenu({
                   void setKnob({ chatId: chatId as Id<"chats">, thinkingLevel: def })
                 }
               >
-                Hériter de l’agent{defLabel ? ` (${capitalize(defLabel)})` : ""}
+                {defLabel
+                  ? m.chat_inherit_from_agent_label({ label: capitalize(defLabel) })
+                  : m.chat_inherit_from_agent()}
               </DropdownMenuItem>
             ) : null}
           </>
@@ -555,7 +563,7 @@ function SessionKnobsMenu({
         {models.length > 0 ? (
           <>
             {levels.length > 0 ? <DropdownMenuSeparator /> : null}
-            <DropdownMenuLabel>Modèle</DropdownMenuLabel>
+            <DropdownMenuLabel>{m.chat_model()}</DropdownMenuLabel>
             <DropdownMenuRadioGroup
               value={sm.model ?? ""}
               onValueChange={(v) => void setKnob({ chatId: chatId as Id<"chats">, model: v })}
@@ -571,7 +579,7 @@ function SessionKnobsMenu({
         <DropdownMenuSeparator />
         {/* Surface the deliberate exclusion: verbosity is pinned by the bridge for
             complete streaming, so it is shown (not silently dropped) but not editable. */}
-        <div className="oc-menu__note">Verbosité : fixée à « full » pour le streaming</div>
+        <div className="oc-menu__note">{m.chat_verbosity_note()}</div>
       </DropdownMenuContent>
     </DropdownMenu>
   );
@@ -715,19 +723,17 @@ function DeleteMessageButton({ kind }: { kind: "user" | "assistant" }) {
     const ok = await confirm(
       kind === "assistant"
         ? {
-            title: "Supprimer et régénérer cette réponse ?",
-            description:
-              "Cette réponse sera supprimée, puis régénérée à partir de votre dernier message.",
-            confirmLabel: "Régénérer",
-            cancelLabel: "Annuler",
+            title: m.chat_delete_assistant_title(),
+            description: m.chat_delete_assistant_desc(),
+            confirmLabel: m.chat_regenerate(),
+            cancelLabel: m.chat_cancel(),
             destructive: true,
           }
         : {
-            title: "Supprimer ce message et les suivants ?",
-            description:
-              "Ce message et tous les messages qui le suivent seront supprimés de la conversation. Cette action est irréversible.",
-            confirmLabel: "Supprimer",
-            cancelLabel: "Annuler",
+            title: m.chat_delete_user_title(),
+            description: m.chat_delete_user_desc(),
+            confirmLabel: m.chat_delete(),
+            cancelLabel: m.chat_cancel(),
             destructive: true,
           },
     );
@@ -741,10 +747,10 @@ function DeleteMessageButton({ kind }: { kind: "user" | "assistant" }) {
       className="oc-iconbtn oc-iconbtn--danger"
       title={
         kind === "assistant"
-          ? "Supprimer et régénérer la réponse"
-          : "Supprimer ce message et les suivants"
+          ? m.chat_delete_assistant_btn_title()
+          : m.chat_delete_user_btn_title()
       }
-      aria-label="Supprimer le message"
+      aria-label={m.chat_delete_message_aria()}
       onClick={() => void onDelete()}
     >
       <Trash2 size={15} aria-hidden />
@@ -770,13 +776,15 @@ function MessageSource() {
     <div className="oc-msg__source">
       <div className="oc-msg__source-head">
         <span className="oc-msg__source-label">
-          Source · texte brut exact · {codePoints} caractère{codePoints > 1 ? "s" : ""}
+          {codePoints > 1
+            ? m.chat_source_label_plural({ count: codePoints })
+            : m.chat_source_label({ count: codePoints })}
         </span>
         <button
           type="button"
           className="oc-iconbtn"
-          title="Copier la source exacte"
-          aria-label="Copier la source exacte"
+          title={m.chat_copy_source()}
+          aria-label={m.chat_copy_source()}
           onClick={() => {
             void navigator.clipboard?.writeText(raw).then(() => {
               setCopied(true);
@@ -787,7 +795,7 @@ function MessageSource() {
           {copied ? <IconCheck /> : <IconCopy />}
         </button>
       </div>
-      <pre className="oc-msg__source-pre">{raw.length > 0 ? raw : "(aucun texte)"}</pre>
+      <pre className="oc-msg__source-pre">{raw.length > 0 ? raw : m.chat_source_empty()}</pre>
     </div>
   );
 }
@@ -806,8 +814,8 @@ function SourceToggleButton({
       className={`oc-iconbtn${active ? " is-on" : ""}`}
       onClick={onToggle}
       aria-pressed={active}
-      title={active ? "Afficher le message rendu" : "Afficher la source (texte brut exact)"}
-      aria-label="Afficher la source du message"
+      title={active ? m.chat_show_rendered() : m.chat_show_source()}
+      aria-label={m.chat_show_source_aria()}
     >
       <Code size={15} aria-hidden />
     </button>
@@ -835,7 +843,7 @@ function UserMessage() {
           autohide="not-last"
         >
           {ui.copyUser ? (
-            <ActionBarPrimitive.Copy className="oc-iconbtn" title="Copier le message">
+            <ActionBarPrimitive.Copy className="oc-iconbtn" title={m.chat_copy_message()}>
               <MessagePrimitive.If copied>
                 <IconCheck />
               </MessagePrimitive.If>
@@ -889,7 +897,7 @@ function AssistantMessage() {
           autohide="not-last"
         >
           {ui.copyAssistant ? (
-            <ActionBarPrimitive.Copy className="oc-iconbtn" title="Copier la réponse">
+            <ActionBarPrimitive.Copy className="oc-iconbtn" title={m.chat_copy_response()}>
               <MessagePrimitive.If copied>
                 <IconCheck />
               </MessagePrimitive.If>
@@ -963,7 +971,7 @@ function Composer({
       <ComposerPrimitive.Input
         className="oc-composer__input"
         placeholder={
-          unavailable ? "Chat indisponible…" : "Message OpenClaw…"
+          unavailable ? m.chat_composer_unavailable() : m.chat_composer_placeholder()
         }
         autoFocus
         rows={1}
@@ -979,7 +987,7 @@ function Composer({
         <div className="oc-composer__group">
           <ComposerPrimitive.AddAttachment
             className="oc-composer__icon"
-            aria-label="Joindre un fichier"
+            aria-label={m.chat_attach_file()}
           >
             <Plus size={18} aria-hidden />
           </ComposerPrimitive.AddAttachment>
@@ -989,13 +997,11 @@ function Composer({
             onClick={onToggleTools}
             aria-pressed={showTools}
             title={
-              showTools
-                ? "Masquer les outils exécutés par OpenClaw"
-                : "Afficher les outils exécutés par OpenClaw"
+              showTools ? m.chat_tools_hide() : m.chat_tools_show()
             }
           >
             <SlidersHorizontal size={15} aria-hidden />
-            Outils
+            {m.chat_tools()}
           </button>
         </div>
         <div className="oc-composer__group">
@@ -1003,8 +1009,8 @@ function Composer({
             <button
               type="button"
               className="oc-composer__icon"
-              title="Dictée vocale — bientôt disponible"
-              aria-label="Dictée vocale (bientôt disponible)"
+              title={m.chat_voice_soon_title()}
+              aria-label={m.chat_voice_soon_aria()}
             >
               <Mic size={18} aria-hidden />
             </button>
@@ -1016,14 +1022,14 @@ function Composer({
               type="button"
               className="oc-composer__send"
               disabled
-              aria-label="Envoi indisponible (service de chat hors ligne)"
+              aria-label={m.chat_send_unavailable_aria()}
             >
               <ArrowUp size={18} aria-hidden />
             </button>
           ) : (
             <>
               <ThreadPrimitive.If running={false}>
-                <ComposerPrimitive.Send className="oc-composer__send" aria-label="Envoyer">
+                <ComposerPrimitive.Send className="oc-composer__send" aria-label={m.chat_send()}>
                   <ArrowUp size={18} aria-hidden />
                 </ComposerPrimitive.Send>
               </ThreadPrimitive.If>
@@ -1039,8 +1045,8 @@ function Composer({
                   type="button"
                   className="oc-composer__send"
                   disabled
-                  aria-label="Réponse en cours…"
-                  title="Réponse en cours…"
+                  aria-label={m.chat_response_in_progress()}
+                  title={m.chat_response_in_progress()}
                 >
                   <ArrowUp size={18} aria-hidden />
                 </button>

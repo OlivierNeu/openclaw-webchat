@@ -6,6 +6,7 @@ import {
   TooltipProvider,
   TooltipTrigger,
 } from "@/components/ui/tooltip";
+import { m } from "@/paraglide/messages.js";
 
 // Live health dot on the "Bridge" settings tab: green when up, red when down,
 // grey before the first poll. Hover shows a one-line summary; the full detail
@@ -18,14 +19,16 @@ export function BridgeStatusBadge() {
 
   const tone = !a.known ? "idle" : a.available ? "ok" : "error";
   const summary = !a.known
-    ? "Bridge : pas encore de relevé (sondage chaque minute)"
+    ? m.bridgebadge_no_reading_yet()
     : a.available
-      ? `Bridge opérationnel${
+      ? `${m.bridgebadge_operational()}${
           a.checkedAt
-            ? ` · vérifié à ${new Date(a.checkedAt).toLocaleTimeString("fr-FR")}`
+            ? m.bridgebadge_verified_at({
+                time: new Date(a.checkedAt).toLocaleTimeString("fr-FR"),
+              })
             : ""
         }`
-      : `Bridge indisponible (${a.reason ?? "?"}) — ouvre l’onglet Bridge pour le détail`;
+      : m.bridgebadge_unavailable({ reason: a.reason ?? "?" });
 
   return (
     <TooltipProvider delayDuration={150}>

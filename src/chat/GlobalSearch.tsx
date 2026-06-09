@@ -21,6 +21,7 @@ import { Search, MessageSquare, Hash } from "lucide-react";
 import { api } from "./convexApi";
 import { Dialog, DialogContent, DialogTitle } from "@/components/ui/dialog";
 import { cn } from "@/lib/utils";
+import { m } from "@/paraglide/messages.js";
 
 // Mirror of the backend MIN_QUERY_LEN: below this we don't even subscribe.
 const MIN_QUERY_LEN = 2;
@@ -113,10 +114,10 @@ export function GlobalSearch() {
         type="button"
         className="oc-search-trigger"
         onClick={() => setOpen(true)}
-        aria-label="Rechercher dans les conversations"
+        aria-label={m.search_trigger_aria()}
       >
         <Search className="oc-search-trigger__icon" aria-hidden />
-        <span className="oc-search-trigger__label">Rechercher…</span>
+        <span className="oc-search-trigger__label">{m.search_trigger_label()}</span>
         <kbd className="oc-search-trigger__kbd">⌘K</kbd>
       </button>
 
@@ -133,7 +134,7 @@ export function GlobalSearch() {
           }}
         >
           <DialogTitle className="sr-only">
-            Rechercher dans les conversations
+            {m.search_dialog_title()}
           </DialogTitle>
 
           <div className="oc-search-palette__head">
@@ -143,24 +144,24 @@ export function GlobalSearch() {
               value={q}
               onChange={(e) => setQ(e.target.value)}
               onKeyDown={onInputKeyDown}
-              placeholder="Rechercher dans toutes les conversations…"
+              placeholder={m.search_input_placeholder()}
               className="oc-search-palette__field"
               autoComplete="off"
               spellCheck={false}
-              aria-label="Recherche"
+              aria-label={m.search_input_aria()}
             />
           </div>
 
           <div className="oc-search-palette__results" ref={listRef} role="listbox">
             {term.length < MIN_QUERY_LEN ? (
               <div className="oc-search-palette__hint">
-                Tapez au moins {MIN_QUERY_LEN} caractères pour rechercher.
+                {m.search_min_length_hint({ count: MIN_QUERY_LEN })}
               </div>
             ) : loading ? (
-              <div className="oc-search-palette__hint">Recherche…</div>
+              <div className="oc-search-palette__hint">{m.search_loading()}</div>
             ) : list.length === 0 ? (
               <div className="oc-search-palette__hint">
-                Aucune conversation ne correspond à « {term} ».
+                {m.search_no_results({ term })}
               </div>
             ) : (
               list.map((hit, i) => (
@@ -186,7 +187,7 @@ export function GlobalSearch() {
                   </span>
                   <span className="oc-search-result__body">
                     <span className="oc-search-result__title">
-                      {hit.title || "Nouveau chat"}
+                      {hit.title || m.search_untitled_chat()}
                     </span>
                     {hit.snippet ? (
                       <span className="oc-search-result__snippet">
@@ -195,7 +196,9 @@ export function GlobalSearch() {
                     ) : null}
                   </span>
                   <span className="oc-search-result__tag">
-                    {hit.matchedIn === "title" ? "Titre" : "Message"}
+                    {hit.matchedIn === "title"
+                      ? m.search_tag_title()
+                      : m.search_tag_message()}
                   </span>
                 </button>
               ))
@@ -205,13 +208,13 @@ export function GlobalSearch() {
           <div className="oc-search-palette__footer">
             <span>
               <kbd>↑</kbd>
-              <kbd>↓</kbd> naviguer
+              <kbd>↓</kbd> {m.search_footer_navigate()}
             </span>
             <span>
-              <kbd>↵</kbd> ouvrir
+              <kbd>↵</kbd> {m.search_footer_open()}
             </span>
             <span>
-              <kbd>Échap</kbd> fermer
+              <kbd>{m.search_footer_esc_key()}</kbd> {m.search_footer_close()}
             </span>
           </div>
         </DialogContent>

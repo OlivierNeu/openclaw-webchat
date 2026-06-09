@@ -22,6 +22,7 @@ import { requireActive, requireOwnedChat } from "./lib/access";
 import { auditImpersonated } from "./lib/audit";
 import { assertOwnsUpload } from "./uploads";
 import { writeTraceEvent } from "./observability";
+import { recordFileForPart } from "./lib/files";
 
 export const sendMessage = mutation({
   args: {
@@ -106,15 +107,23 @@ export const sendMessage = mutation({
     // in the thread, preserving the browser-supplied filename/mimeType.
     let order = 0;
     for (const attachment of attachments) {
-      await ctx.db.insert("messageParts", {
+      const part = {
+        kind: "file" as const,
+        storageId: attachment.storageId,
+        filename: attachment.filename,
+        mimeType: attachment.mimeType,
+      };
+      await ctx.db.insert("messageParts", { messageId, order: order++, part });
+      // Paired files-row write (invariant): an inbound user upload is listable in
+      // Settings → Fichiers immediately, NOT gated on the assistant's reply.
+      await recordFileForPart(ctx, {
         messageId,
-        order: order++,
-        part: {
-          kind: "file",
-          storageId: attachment.storageId,
-          filename: attachment.filename,
-          mimeType: attachment.mimeType,
-        },
+        chatId: chat._id,
+        userId,
+        direction: "inbound",
+        instanceName: chat.instanceName,
+        part,
+        createdAt: now,
       });
     }
 

@@ -11,6 +11,7 @@ import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Wrench } from "lucide-react";
 import { api } from "./convexApi";
+import { m } from "@/paraglide/messages.js";
 
 type Role = "pending" | "user" | "admin";
 const ROLES: Role[] = ["admin", "user", "pending"];
@@ -50,7 +51,7 @@ export function DevUserSwitcher() {
         type="button"
         className="oc-devfab"
         onClick={() => setOpen(true)}
-        title="Mode dev — comptes & rôles"
+        title={m.devswitch_fab_title()}
       >
         <Wrench size={13} />
         DEV
@@ -59,17 +60,16 @@ export function DevUserSwitcher() {
       <Dialog open={open} onOpenChange={setOpen}>
         <DialogContent>
           <DialogHeader>
-            <DialogTitle>Mode dev — comptes & rôles</DialogTitle>
+            <DialogTitle>{m.devswitch_dialog_title()}</DialogTitle>
             <DialogDescription>
-              Change de rôle et « agis en tant que » pour tester plusieurs
-              utilisateurs sans CLI. Visible uniquement en dev.
+              {m.devswitch_dialog_description()}
             </DialogDescription>
           </DialogHeader>
 
           {/* Current session — role self-service (escape hatch). */}
           <div className="oc-devsw__me">
             <span className="oc-devsw__melabel">
-              Moi — {me?.canonical ?? "…"}{" "}
+              {m.devswitch_me_label({ canonical: me?.canonical ?? "…" })}{" "}
               <Badge variant="outline">{me?.role ?? "…"}</Badge>
             </span>
             <div className="oc-devsw__roles">
@@ -83,10 +83,10 @@ export function DevUserSwitcher() {
                   onClick={() => void setMyRole({ role: r })}
                 >
                   {r === "admin"
-                    ? "Devenir admin"
+                    ? m.devswitch_become_admin()
                     : r === "user"
-                      ? "Devenir user"
-                      : "Devenir pending"}
+                      ? m.devswitch_become_user()
+                      : m.devswitch_become_pending()}
                 </Button>
               ))}
             </div>
@@ -94,14 +94,15 @@ export function DevUserSwitcher() {
 
           {impersonating ? (
             <div className="oc-devsw__imp">
-              Tu agis en tant que <strong>{imp.targetLabel}</strong>.
+              {m.devswitch_impersonating_prefix()}{" "}
+              <strong>{imp.targetLabel}</strong>.
               <Button
                 type="button"
                 size="xs"
                 variant="outline"
                 onClick={() => void stopImp()}
               >
-                Arrêter
+                {m.devswitch_stop()}
               </Button>
             </div>
           ) : null}
@@ -110,8 +111,7 @@ export function DevUserSwitcher() {
           <div className="oc-devsw__list">
             {others.length === 0 ? (
               <p className="oc-devsw__empty">
-                Aucun autre compte. Déconnecte-toi puis reconnecte-toi (nouvelle
-                identité anonyme) — elle sera active immédiatement.
+                {m.devswitch_empty_state()}
               </p>
             ) : (
               others.map((u) => (
@@ -144,17 +144,17 @@ export function DevUserSwitcher() {
                     disabled={!amAdmin || u.role === "pending"}
                     title={
                       !amAdmin
-                        ? "Deviens admin d'abord"
+                        ? m.devswitch_actas_need_admin()
                         : u.role === "pending"
-                          ? "Un compte pending ne peut pas être impersonné"
-                          : "Agir en tant que cet utilisateur"
+                          ? m.devswitch_actas_pending_blocked()
+                          : m.devswitch_actas_tooltip()
                     }
                     onClick={() => {
                       void startImp({ profileId: u.profileId });
                       setOpen(false);
                     }}
                   >
-                    Agir en tant que
+                    {m.devswitch_act_as()}
                   </Button>
                 </div>
               ))

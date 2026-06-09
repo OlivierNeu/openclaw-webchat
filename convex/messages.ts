@@ -22,6 +22,7 @@ import { internal } from "./_generated/api";
 import { Id } from "./_generated/dataModel";
 import { requireActive, requireOwnedChat } from "./lib/access";
 import { auditImpersonated } from "./lib/audit";
+import { deleteFilesByMessage } from "./lib/files";
 import { enrichUserAgents, resolveAgentForChat } from "./agents";
 
 // Hard upper bound on how many recent messages the reactive feed loads. Chosen
@@ -262,6 +263,8 @@ export const deleteMessage = mutation({
         .withIndex("by_message", (q) => q.eq("messageId", m._id))
         .collect();
       for (const p of parts) await ctx.db.delete(p._id);
+      // Mirror the files-row invariant on the part deletion (delete + regenerate).
+      await deleteFilesByMessage(ctx, m._id);
       await ctx.db.delete(m._id);
     }
 

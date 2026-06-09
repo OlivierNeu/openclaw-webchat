@@ -19,6 +19,9 @@ export default defineConfig({
   },
   test: {
     environment: "edge-runtime",
+    // Stub localStorage so tests importing Paraglide message fns (`m.*`) resolve
+    // to the baseLocale instead of crashing (see vitest.setup.ts).
+    setupFiles: ["./vitest.setup.ts"],
     server: {
       deps: {
         inline: ["convex-test"],

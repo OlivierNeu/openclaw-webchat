@@ -10,6 +10,7 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { coercePredicateValue, type Op, type Predicate } from "./types";
+import { m } from "@/paraglide/messages.js";
 
 // Collapsible "Filtre avancé" predicate builder (Traces + Audit). Each row is a
 // field <Select> (resource-provided list) + op <Select> + value <Input>. Rows
@@ -25,7 +26,7 @@ export type AdvancedField = { value: string; label: string };
 const OPS: { value: Op; label: string }[] = [
   { value: "eq", label: "=" },
   { value: "neq", label: "≠" },
-  { value: "contains", label: "contient" },
+  { value: "contains", label: m.advfilter_op_contains() },
   { value: "gt", label: ">" },
   { value: "gte", label: "≥" },
   { value: "lt", label: "<" },
@@ -127,7 +128,7 @@ export function AdvancedFilter({
           className={"oc-advfilter__chevron" + (open ? " is-open" : "")}
           aria-hidden
         />
-        Filtre avancé
+        {m.advfilter_toggle()}
         {activeCount > 0 ? (
           <span className="oc-advfilter__count">{activeCount}</span>
         ) : null}
@@ -136,10 +137,7 @@ export function AdvancedFilter({
       {open ? (
         <div className="oc-advfilter__body">
           {rows.length === 0 ? (
-            <p className="oc-admin__hint">
-              Aucun critère. Ajoutez une condition (toutes les conditions sont
-              cumulées avec ET).
-            </p>
+            <p className="oc-admin__hint">{m.advfilter_empty_state()}</p>
           ) : (
             <ul className="oc-advfilter__rows">
               {rows.map((row) => (
@@ -149,7 +147,7 @@ export function AdvancedFilter({
                     onValueChange={(v) => patch(row.id, { field: v })}
                   >
                     <SelectTrigger size="sm" className="w-40">
-                      <SelectValue placeholder="Champ" />
+                      <SelectValue placeholder={m.advfilter_field_placeholder()} />
                     </SelectTrigger>
                     <SelectContent>
                       {fields.map((f) => (
@@ -178,12 +176,12 @@ export function AdvancedFilter({
                     className="oc-advfilter__value"
                     value={row.value}
                     onChange={(e) => patch(row.id, { value: e.target.value })}
-                    placeholder="Valeur"
+                    placeholder={m.advfilter_value_placeholder()}
                   />
                   <Button
                     variant="ghost"
                     size="icon-sm"
-                    aria-label="Supprimer la condition"
+                    aria-label={m.advfilter_remove_condition()}
                     onClick={() => removeRow(row.id)}
                   >
                     <X />
@@ -199,7 +197,7 @@ export function AdvancedFilter({
             onClick={addRow}
           >
             <Plus />
-            Ajouter une condition
+            {m.advfilter_add_condition()}
           </Button>
         </div>
       ) : null}

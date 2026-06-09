@@ -1,6 +1,7 @@
 import { useMemo, useState } from "react";
 import { useMutation, useQuery } from "convex/react";
 import { useNavigate, useSearch } from "@tanstack/react-router";
+import { m } from "@/paraglide/messages.js";
 import { api } from "./convexApi";
 import type { Id } from "./convexApi";
 import { UserAccessSheet } from "./admin/UserAccessSheet";
@@ -75,6 +76,7 @@ export const TABS = [
   "traces",
   "kpi",
   "anomalies",
+  "files",
   "integrations",
   "theme",
   "uiprefs",
@@ -92,6 +94,7 @@ export const PARAMLESS_TABS = [
   "theme",
   "uiprefs",
   "feedbacks",
+  "files",
 ] as const;
 export type ParamlessTab = (typeof PARAMLESS_TABS)[number];
 
@@ -107,6 +110,8 @@ export const TAB_LABELS: Partial<Record<Tab, string>> = {
   feedbacks: "Feedbacks",
   uiprefs: "Préférences UI",
   bridge: "Bridge",
+  files: "Fichiers", // FR fallback; the nav renders the i18n label (m.files_tab_label)
+  theme: "Apparence", // FR fallback; nav renders m.appearance_tab_label
 };
 
 // --- Per-tab RBAC ----------------------------------------------------------
@@ -125,6 +130,10 @@ export const TAB_PERMISSION: Record<Tab, string> = {
   traces: "traces.read",
   kpi: "kpi.read",
   anomalies: "anomalies.read",
+  // Files is owner-scoped (each user sees only their own), so it's gated on the
+  // base `chats.read` permission every approved user already holds (admins via
+  // the wildcard) → visible to ALL users by default, NOT a grantable admin tab.
+  files: "chats.read",
   integrations: "admin.manage",
   theme: "admin.manage",
   uiprefs: "admin.manage",
@@ -186,12 +195,12 @@ function SettingsAccessCell({
           className="h-8 w-36 justify-start font-normal"
         >
           {count === 0
-            ? "Aucun onglet"
-            : `${count} onglet${count > 1 ? "s" : ""}`}
+            ? m.settings_tabs_none()
+            : m.settings_tabs_count({ count })}
         </Button>
       </DropdownMenuTrigger>
       <DropdownMenuContent align="start" className="w-52">
-        <DropdownMenuLabel>Onglets Settings autorisés</DropdownMenuLabel>
+        <DropdownMenuLabel>{m.settings_allowed_tabs_label()}</DropdownMenuLabel>
         {GRANTABLE_TABS.map((t) => {
           const perm = TAB_PERMISSION[t];
           return (
@@ -268,7 +277,7 @@ export function UsersTab() {
     try {
       await setRole(args);
     } catch (err) {
-      toast.error("Changement de rôle refusé", err);
+      toast.error(m.settings_role_change_refused(), err);
     }
   }
 
@@ -277,7 +286,7 @@ export function UsersTab() {
       await setPerms(args);
     } catch (err) {
       // Server rejects any non-grantable permission (whitelist) — surface it.
-      toast.error("Mise à jour des permissions refusée", err);
+      toast.error(m.settings_perms_update_refused(), err);
     }
   }
 
@@ -286,7 +295,7 @@ export function UsersTab() {
     <FilterBar
       q={q}
       onQChange={setQ}
-      searchPlaceholder="Rechercher (email, nom)"
+      searchPlaceholder={m.settings_users_search_placeholder()}
       onReset={reset}
       canReset={active}
     >
@@ -295,7 +304,7 @@ export function UsersTab() {
           <SelectValue />
         </SelectTrigger>
         <SelectContent>
-          <SelectItem value={ALL}>Tous les rôles</SelectItem>
+          <SelectItem value={ALL}>{m.settings_all_roles()}</SelectItem>
           {roleOptions.map((r) => (
             <SelectItem key={r} value={r}>
               {r}
@@ -305,9 +314,9 @@ export function UsersTab() {
       </Select>
     </FilterBar>
     <DataTableShell
-      title="Users"
+      title={m.settings_users_title()}
       rows={users}
-      emptyHint="Aucun utilisateur."
+      emptyHint={m.settings_users_empty()}
       rowActions={(u) =>
         // No self-impersonation (the server also rejects it); hide the action
         // on the admin's own row.
@@ -315,7 +324,7 @@ export function UsersTab() {
           ? []
           : [
               {
-                label: "Voir comme cet utilisateur",
+                label: m.settings_view_as_user(),
                 onSelect: () =>
                   void startImpersonation({ profileId: u._id }),
               },
@@ -323,12 +332,12 @@ export function UsersTab() {
       }
       columns={[
         {
-          header: "User",
+          header: m.settings_col_user(),
           cell: (u) =>
             u.email || u.name || u.canonical || u.userId.slice(0, 8),
         },
         {
-          header: "Role",
+          header: m.settings_col_role(),
           cell: (u) => (
             <Select
               value={u.role}
@@ -351,10 +360,10 @@ export function UsersTab() {
           ),
         },
         {
-          header: "Accès Settings",
+          header: m.settings_col_settings_access(),
           cell: (u) =>
             u.role === "admin" ? (
-              <span className="text-muted-foreground text-xs">Tous (admin)</span>
+              <span className="text-muted-foreground text-xs">{m.settings_all_admin()}</span>
             ) : (
               <SettingsAccessCell
                 granted={u.extraPermissions ?? []}
@@ -371,7 +380,7 @@ export function UsersTab() {
           // Agents are assignable to EVERY user, admins included: an admin is
           // also a chat user and needs >=1 agent to start a conversation (there
           // is NO server-side "admin uses all agents" bypass — Codex P2).
-          header: "Agents",
+          header: m.settings_col_agents(),
           cell: (u) => (
             <Button
               variant="outline"
@@ -385,7 +394,7 @@ export function UsersTab() {
                 })
               }
             >
-              Gérer les agents
+              {m.settings_manage_agents()}
             </Button>
           ),
         },
@@ -440,38 +449,36 @@ export function InstancesTab() {
       setSheetOpen(false);
     } catch (err) {
       // M5: surface server-side rejection instead of swallowing.
-      toast.error("Échec de l’enregistrement de l’instance", err);
+      toast.error(m.settings_instance_save_failed(), err);
     }
   }
 
   return (
     <>
       <p className="oc-admin__hint">
-        Métadonnées non-secrètes uniquement. Les agents sont <strong>découverts
-        par le bridge</strong> (jamais saisis à la main) ; les tokens gateway et
-        device identities vivent dans l’environnement du bridge, jamais ici.
+        {m.settings_instances_hint_before()}<strong>{m.settings_instances_hint_strong()}</strong>{m.settings_instances_hint_after()}
       </p>
       <DataTableShell
-        title="Instances"
+        title={m.settings_instances_title()}
         rows={instances}
-        addLabel="Add instance"
+        addLabel={m.settings_add_instance()}
         onAdd={() => {
           setForm(EMPTY_INSTANCE);
           setSheetOpen(true);
         }}
-        emptyHint="Aucune instance."
+        emptyHint={m.settings_instances_empty()}
         columns={[
-          { header: "Name", cell: (i) => i.name },
+          { header: m.settings_col_name(), cell: (i) => i.name },
           {
-            header: "Bridge",
+            header: m.settings_col_bridge(),
             cell: (i) => (
               <Badge variant="outline">{i.kind ?? "openclaw"}</Badge>
             ),
           },
-          { header: "Gateway URL", cell: (i) => i.gatewayUrl },
-          { header: "Display", cell: (i) => i.displayName ?? "—" },
+          { header: m.settings_col_gateway_url(), cell: (i) => i.gatewayUrl },
+          { header: m.settings_col_display(), cell: (i) => i.displayName ?? "—" },
           {
-            header: "Agents",
+            header: m.settings_col_agents(),
             cell: (i) => (
               <Button
                 variant="outline"
@@ -479,21 +486,21 @@ export function InstancesTab() {
                 className="h-8 font-normal"
                 onClick={() => setAgentsFor(i.name)}
               >
-                Voir les agents
+                {m.settings_view_agents()}
               </Button>
             ),
           },
         ]}
         rowActions={(i) => [
           {
-            label: "Delete",
+            label: m.settings_delete(),
             variant: "destructive",
             onSelect: () => void del({ instanceId: i._id }),
           },
         ]}
         bulkActions={[
           {
-            label: "Delete",
+            label: m.settings_delete(),
             variant: "destructive",
             onSelect: (ids) =>
               ids.forEach((id) => void del({ instanceId: id as never })),
@@ -503,20 +510,20 @@ export function InstancesTab() {
       <EntitySheet
         open={sheetOpen}
         onOpenChange={setSheetOpen}
-        title="Nouvelle instance"
-        description="Métadonnées non-secrètes."
+        title={m.settings_new_instance_title()}
+        description={m.settings_new_instance_desc()}
         canSubmit={Boolean(form.name && form.gatewayUrl)}
         onSubmit={submit}
-        submitLabel="Enregistrer"
+        submitLabel={m.settings_save()}
       >
         <div className="oc-form">
-          <Field label="Nom de l’instance (ex. olivier)">
+          <Field label={m.settings_field_instance_name()}>
             <Input
               value={form.name}
               onChange={(e) => setForm({ ...form, name: e.target.value })}
             />
           </Field>
-          <Field label="Technologie (bridge)">
+          <Field label={m.settings_field_technology()}>
             <Select
               value={form.kind}
               onValueChange={(v) =>
@@ -532,13 +539,13 @@ export function InstancesTab() {
               </SelectContent>
             </Select>
           </Field>
-          <Field label="Gateway URL (ws(s)://)">
+          <Field label={m.settings_field_gateway_url()}>
             <Input
               value={form.gatewayUrl}
               onChange={(e) => setForm({ ...form, gatewayUrl: e.target.value })}
             />
           </Field>
-          <Field label="Nom affiché (optionnel)">
+          <Field label={m.settings_field_display_name()}>
             <Input
               value={form.displayName}
               onChange={(e) => setForm({ ...form, displayName: e.target.value })}
@@ -577,25 +584,24 @@ function InstanceAgentsDialog({
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent>
         <DialogHeader>
-          <DialogTitle>Agents découverts — {instanceName}</DialogTitle>
+          <DialogTitle>{m.settings_discovered_agents_title({ name: instanceName ?? "" })}</DialogTitle>
           <DialogDescription>
-            Liste fournie par le bridge (OpenClaw <code>agents.list</code> /
-            Hermes). Lecture seule.
+            {m.settings_discovered_agents_desc_before()}<code>agents.list</code>{m.settings_discovered_agents_desc_after()}
           </DialogDescription>
         </DialogHeader>
         {data === undefined ? (
-          <p className="oc-access__hint">Chargement…</p>
+          <p className="oc-access__hint">{m.settings_loading()}</p>
         ) : (
           <>
             <div className="oc-access__poll">
               {data.discovery === null
-                ? "Jamais sondé."
+                ? m.settings_never_polled()
                 : data.discovery.lastPollOk
-                  ? "Découverte OK."
-                  : `Hors-ligne (${data.discovery.error ?? "?"}) — dernier bon résultat servi.`}
+                  ? m.settings_discovery_ok()
+                  : m.settings_discovery_offline({ error: data.discovery.error ?? "?" })}
             </div>
             {data.agents.length === 0 ? (
-              <p className="oc-access__hint">Aucun agent découvert.</p>
+              <p className="oc-access__hint">{m.settings_no_agents_discovered()}</p>
             ) : (
               <div className="oc-access__list">
                 {data.agents.map((a) => (
@@ -608,11 +614,11 @@ function InstanceAgentsDialog({
                       <span className="oc-access__model">{a.model}</span>
                     ) : null}
                     {a.isDefaultOnInstance ? (
-                      <Badge variant="outline">défaut</Badge>
+                      <Badge variant="outline">{m.settings_badge_default()}</Badge>
                     ) : null}
                     {a.presentInLastOk === false ? (
                       <Badge variant="outline" className="oc-access__gone">
-                        supprimé
+                        {m.settings_badge_removed()}
                       </Badge>
                     ) : null}
                   </div>
@@ -718,17 +724,15 @@ export function AuditTab() {
   return (
     <>
       <p className="oc-admin__hint">
-        Trace des actions effectuées sous usurpation d’identité : qui a
-        réellement agi (acteur réel) et au nom de quel utilisateur. Le contenu
-        des messages n’est jamais enregistré.{" "}
+        {m.settings_audit_hint()}{" "}
         <span className="oc-filter__window">
-          Fenêtre récente bornée — une plage antérieure peut être partielle.
+          {m.settings_audit_window_hint()}
         </span>
       </p>
       <FilterBar
         q={q}
         onQChange={setQ}
-        searchPlaceholder="Rechercher (action, acteur, ressource)"
+        searchPlaceholder={m.settings_audit_search_placeholder()}
         timeRange={range}
         onTimeRangeChange={setRange}
         onReset={reset}
@@ -736,10 +740,10 @@ export function AuditTab() {
       >
         <Select value={action} onValueChange={setAction}>
           <SelectTrigger size="sm" className="w-40">
-            <SelectValue placeholder="Action" />
+            <SelectValue placeholder={m.settings_action()} />
           </SelectTrigger>
           <SelectContent>
-            <SelectItem value={ALL}>Toutes les actions</SelectItem>
+            <SelectItem value={ALL}>{m.settings_all_actions()}</SelectItem>
             {actionOptions.map((a) => (
               <SelectItem key={a} value={a}>
                 {a}
@@ -752,17 +756,17 @@ export function AuditTab() {
             <SelectValue />
           </SelectTrigger>
           <SelectContent>
-            <SelectItem value={ALL}>Usurpation : toutes</SelectItem>
-            <SelectItem value="yes">Sous usurpation</SelectItem>
-            <SelectItem value="no">Sans usurpation</SelectItem>
+            <SelectItem value={ALL}>{m.settings_impersonation_all()}</SelectItem>
+            <SelectItem value="yes">{m.settings_impersonation_yes()}</SelectItem>
+            <SelectItem value="no">{m.settings_impersonation_no()}</SelectItem>
           </SelectContent>
         </Select>
         <Select value={resource} onValueChange={setResource}>
           <SelectTrigger size="sm" className="w-40">
-            <SelectValue placeholder="Ressource" />
+            <SelectValue placeholder={m.settings_resource()} />
           </SelectTrigger>
           <SelectContent>
-            <SelectItem value={ALL}>Toutes les ressources</SelectItem>
+            <SelectItem value={ALL}>{m.settings_all_resources()}</SelectItem>
             {resourceOptions.map((r) => (
               <SelectItem key={r} value={r}>
                 {r}
@@ -777,19 +781,19 @@ export function AuditTab() {
         onChange={setAdvanced}
       />
       <DataTableShell
-        title="Audit"
+        title={m.settings_audit_title()}
         rows={rows}
-        emptyHint="Aucune action tracée pour l’instant."
+        emptyHint={m.settings_audit_empty()}
         columns={[
           {
-            header: "Quand",
+            header: m.settings_col_when(),
             cell: (r) => new Date(r.at).toLocaleString("fr-FR"),
           },
-          { header: "Action", cell: (r) => r.action },
-          { header: "Acteur réel", cell: (r) => r.realLabel },
-          { header: "Au nom de", cell: (r) => r.targetLabel ?? "—" },
+          { header: m.settings_action(), cell: (r) => r.action },
+          { header: m.settings_col_real_actor(), cell: (r) => r.realLabel },
+          { header: m.settings_col_on_behalf_of(), cell: (r) => r.targetLabel ?? "—" },
           {
-            header: "Ressource",
+            header: m.settings_resource(),
             cell: (r) =>
               r.resource
                 ? r.resource +

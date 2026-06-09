@@ -51,6 +51,7 @@ import { api } from "./convexApi";
 import type { Id } from "./convexApi";
 import { AgentPickerDialog, type PickableAgent } from "./AgentPicker";
 import { relativeAge } from "./relativeAge";
+import { m } from "@/paraglide/messages.js";
 
 // Preset chat colors (token-driven, list display only). Value matches the
 // backend `chatColorValidator`. The dot uses oklch hues that read in both modes.
@@ -295,18 +296,18 @@ export function ChatSidebar({
           className="flex-1 justify-start"
           onClick={() => void startNewChat()}
         >
-          <Plus /> New chat
+          <Plus /> {m.sidebar_new_chat()}
         </Button>
         <Button
           variant="outline"
           size="icon"
-          aria-label="Nouveau projet"
+          aria-label={m.sidebar_new_project()}
           onClick={async () => {
             const name = await prompt({
-              title: "Nouveau projet",
-              label: "Nom du projet",
-              placeholder: "ex. Travail",
-              confirmLabel: "Créer",
+              title: m.sidebar_new_project(),
+              label: m.sidebar_project_name_label(),
+              placeholder: m.sidebar_project_name_placeholder(),
+              confirmLabel: m.sidebar_create(),
             });
             if (name) await createProject({ name });
           }}
@@ -327,7 +328,7 @@ export function ChatSidebar({
       >
         <div className="oc-sidebar__scroll">
           {pinned.length > 0 ? (
-            <Section label="Épinglés" chats={pinned}>
+            <Section label={m.sidebar_pinned()} chats={pinned}>
               {pinned.map((c) => (
                 <ChatItem
                   key={c._id}
@@ -360,7 +361,7 @@ export function ChatSidebar({
                 }
               >
                 {p.collapsed ? null : ch.length === 0 ? (
-                  <div className="oc-sidebar__empty">Glissez un chat ici</div>
+                  <div className="oc-sidebar__empty">{m.sidebar_drop_chat_here()}</div>
                 ) : (
                   ch.map((c) => (
                     <ChatItem
@@ -378,7 +379,7 @@ export function ChatSidebar({
           })}
 
           <Section
-            label="Chats"
+            label={m.sidebar_chats()}
             dropId={NO_PROJECT}
             chats={byProject(null)}
             collapsible
@@ -413,7 +414,7 @@ export function ChatSidebar({
                 <span className="oc-chatitem__dot oc-chatitem__dot--empty" />
               )}
               <span className="oc-chatitem__label">
-                {activeChat.title || "Untitled"}
+                {activeChat.title || m.sidebar_untitled()}
               </span>
             </div>
           ) : null}
@@ -484,18 +485,18 @@ function Section({
         {projectId ? (
           <button
             className="oc-sidebar__group-del"
-            aria-label="Supprimer le projet"
+            aria-label={m.sidebar_delete_project()}
             onClick={async (e) => {
               e.stopPropagation();
               const n = count ?? 0;
               const ok = await confirm({
-                title: `Supprimer le projet « ${label} » ?`,
+                title: m.sidebar_delete_project_confirm_title({ name: label }),
                 description:
                   n > 0
-                    ? `Cette action est irréversible : elle supprimera aussi définitivement ${n} conversation(s) et tous leurs messages.`
-                    : "Cette action est irréversible.",
-                confirmWord: "Supprimer",
-                confirmLabel: "Supprimer le projet",
+                    ? m.sidebar_delete_project_confirm_desc({ count: n })
+                    : m.sidebar_action_irreversible(),
+                confirmWord: m.sidebar_delete(),
+                confirmLabel: m.sidebar_delete_project(),
                 destructive: true,
               });
               if (ok) await deleteProject({ projectId });
@@ -570,7 +571,7 @@ function ChatItem({
       >
         <button
           className="oc-chatitem__grip"
-          aria-label="Déplacer / réordonner"
+          aria-label={m.sidebar_reorder()}
           {...attributes}
           {...listeners}
         >
@@ -582,14 +583,14 @@ function ChatItem({
           <span className="oc-chatitem__dot oc-chatitem__dot--empty" />
         )}
         <button className="oc-chatitem__label" onClick={() => onSelect(chat._id)}>
-          {chat.title || "Untitled"}
+          {chat.title || m.sidebar_untitled()}
         </button>
         {showProviderBadge && chat.providerKind ? (
           // Self-hiding: the parent only sets showProviderBadge when chats span
           // >1 bridge. Fades on hover (like the age) to make room for the kebab.
           <span
             className={`oc-chatitem__bridge oc-chatitem__bridge--${chat.providerKind} group-hover/row:opacity-0 group-focus-within/row:opacity-0`}
-            title={`Bridge : ${PROVIDER_LABEL[chat.providerKind]}`}
+            title={m.sidebar_bridge_title({ provider: PROVIDER_LABEL[chat.providerKind] })}
           >
             {PROVIDER_LABEL[chat.providerKind]}
           </span>
@@ -609,7 +610,7 @@ function ChatItem({
             <Button
               variant="ghost"
               size="icon-xs"
-              aria-label="Actions"
+              aria-label={m.sidebar_actions()}
               className="opacity-0 group-hover/row:opacity-100 group-focus-within/row:opacity-100 aria-expanded:opacity-100"
             >
               <MoreVertical />
@@ -622,21 +623,21 @@ function ChatItem({
                 setRenameOpen(true);
               }}
             >
-              <Pencil /> Renommer
+              <Pencil /> {m.sidebar_rename()}
             </DropdownMenuItem>
             <DropdownMenuItem
               onSelect={() => void pinChat({ chatId: chat._id, pinned: !chat.pinned })}
             >
               {chat.pinned ? <PinOff /> : <Pin />}
-              {chat.pinned ? "Désépingler" : "Épingler"}
+              {chat.pinned ? m.sidebar_unpin() : m.sidebar_pin()}
             </DropdownMenuItem>
 
-            <DropdownMenuLabel>Couleur</DropdownMenuLabel>
+            <DropdownMenuLabel>{m.sidebar_color()}</DropdownMenuLabel>
             <div className="oc-colorgrid" onClick={(e) => e.stopPropagation()}>
               <button
                 className="oc-colorgrid__none"
                 onClick={() => void setColor({ chatId: chat._id, color: null })}
-                aria-label="Aucune couleur"
+                aria-label={m.sidebar_no_color()}
               >
                 ✕
               </button>
@@ -664,17 +665,16 @@ function ChatItem({
                 // focus scope wins the race (avoids a menu↔dialog focus glitch).
                 requestAnimationFrame(async () => {
                   const ok = await confirm({
-                    title: "Supprimer ce chat ?",
-                    description:
-                      "Cette action est irréversible et supprimera ses messages.",
-                    confirmLabel: "Supprimer",
+                    title: m.sidebar_delete_chat_confirm_title(),
+                    description: m.sidebar_delete_chat_confirm_desc(),
+                    confirmLabel: m.sidebar_delete(),
                     destructive: true,
                   });
                   if (ok) await deleteChat({ chatId: chat._id });
                 });
               }}
             >
-              <Trash2 /> Supprimer
+              <Trash2 /> {m.sidebar_delete()}
             </DropdownMenuItem>
           </DropdownMenuContent>
         </DropdownMenu>
@@ -683,7 +683,7 @@ function ChatItem({
       <EntitySheet
         open={renameOpen}
         onOpenChange={setRenameOpen}
-        title="Renommer le chat"
+        title={m.sidebar_rename_chat_title()}
         canSubmit={renameValue.trim().length > 0}
         onSubmit={async () => {
           await renameChat({ chatId: chat._id, title: renameValue.trim() });
@@ -692,7 +692,7 @@ function ChatItem({
       >
         <div className="oc-form">
           <label className="oc-field">
-            <span className="oc-field__label">Titre</span>
+            <span className="oc-field__label">{m.sidebar_title_field()}</span>
             <Input
               value={renameValue}
               onChange={(e) => setRenameValue(e.target.value)}

@@ -4,6 +4,7 @@ import { CheckCircle2, AlertTriangle, WifiOff, RefreshCw } from "lucide-react";
 import { api } from "../convexApi";
 import { Badge } from "@/components/ui/badge";
 import { dispatchErrorInfo } from "@/lib/dispatchErrorInfo";
+import { m } from "@/paraglide/messages.js";
 
 // "Bridge" settings tab — the place to see EVERYTHING about the bridge's health:
 // reachability, per-connection state, the curated root cause + fix hint of any
@@ -21,18 +22,12 @@ export function BridgeTab() {
   const navigate = useNavigate();
   return (
     <div className="oc-bridge">
-      <p className="oc-admin__hint">
-        Santé du bridge — sondage actif toutes les minutes. Données non-secrètes
-        uniquement : joignabilité, état des connexions, dernière cause d’échec.
-        Les secrets (tokens, device identity) vivent dans l’environnement du
-        bridge, jamais ici.
-      </p>
+      <p className="oc-admin__hint">{m.bridge_health_hint()}</p>
       {health === undefined ? (
-        <p className="oc-admin__hint">Chargement…</p>
+        <p className="oc-admin__hint">{m.bridge_loading()}</p>
       ) : health === null ? (
         <div className="oc-bridge-card oc-bridge-card--idle">
-          Aucun relevé pour l’instant — le sondage tourne chaque minute. Reviens
-          dans un moment.
+          {m.bridge_no_reading_yet()}
         </div>
       ) : (
         <BridgeHealthDetail
@@ -78,16 +73,16 @@ function BridgeHealthDetail({
         <div className="oc-bridge-card__body">
           <div className="oc-bridge-card__title">
             {healthy
-              ? "Bridge opérationnel"
+              ? m.bridge_operational()
               : unreachable
-                ? "Bridge injoignable"
-                : `Bridge : ${errorTargets.length} connexion(s) en erreur`}
+                ? m.bridge_unreachable()
+                : m.bridge_targets_in_error({ count: errorTargets.length })}
           </div>
           <div className="oc-bridge-card__meta">
             <span>
-              <RefreshCw size={12} aria-hidden /> Vérifié à {checkedAt}
+              <RefreshCw size={12} aria-hidden /> {m.bridge_checked_at({ time: checkedAt })}
             </span>
-            {startedAt ? <span>· Bridge démarré le {startedAt}</span> : null}
+            {startedAt ? <span>{m.bridge_started_at({ time: startedAt })}</span> : null}
           </div>
           {unreachable ? (
             <p className="oc-bridge-card__hint">
@@ -100,16 +95,15 @@ function BridgeHealthDetail({
           ) : null}
         </div>
         <button type="button" className="oc-bridgebar__drill" onClick={onSeeAnomalies}>
-          ↗ Anomalies
+          {m.bridge_anomalies_link()}
         </button>
       </div>
 
-      <h3 className="oc-bridge__section">Connexions ({health.targets.length})</h3>
+      <h3 className="oc-bridge__section">
+        {m.bridge_connections_section({ count: health.targets.length })}
+      </h3>
       {health.targets.length === 0 ? (
-        <p className="oc-admin__hint">
-          Aucune connexion encore éprouvée. L’état d’une connexion apparaît dès
-          qu’un message la sollicite (le bridge se connecte à la demande).
-        </p>
+        <p className="oc-admin__hint">{m.bridge_no_connection_tested()}</p>
       ) : (
         <div className="oc-bridge-targets">
           {health.targets.map((t) => {
@@ -124,9 +118,15 @@ function BridgeHealthDetail({
                   <span className="oc-bridge-target__host">{t.gatewayHost}</span>
                 </div>
                 <div className="oc-bridge-target__stats">
-                  {t.okCount} OK · {t.errorCount} échec(s) · {t.attempts} tentative(s)
+                  {m.bridge_target_stats({
+                    ok: t.okCount,
+                    errors: t.errorCount,
+                    attempts: t.attempts,
+                  })}
                   {t.lastOkAt
-                    ? ` · dernier OK ${new Date(t.lastOkAt).toLocaleTimeString("fr-FR")}`
+                    ? m.bridge_target_last_ok({
+                        time: new Date(t.lastOkAt).toLocaleTimeString("fr-FR"),
+                      })
                     : ""}
                 </div>
                 {info ? (
@@ -149,7 +149,9 @@ function BridgeHealthDetail({
 }
 
 function TargetStateBadge({ state }: { state: string }) {
-  if (state === "connected") return <Badge variant="secondary">connectée</Badge>;
-  if (state === "error") return <Badge variant="destructive">erreur</Badge>;
-  return <Badge variant="outline">inactive</Badge>;
+  if (state === "connected")
+    return <Badge variant="secondary">{m.bridge_state_connected()}</Badge>;
+  if (state === "error")
+    return <Badge variant="destructive">{m.bridge_state_error()}</Badge>;
+  return <Badge variant="outline">{m.bridge_state_inactive()}</Badge>;
 }

@@ -21,6 +21,7 @@ import { internalMutation, internalQuery, MutationCtx } from "./_generated/serve
 import { Id } from "./_generated/dataModel";
 import { messagePart } from "./schema";
 import { writeTraceEvent } from "./observability";
+import { isFilePart, recordFileForPart } from "./lib/files";
 
 /**
  * Build the stable per-turn correlationId for an assistant message. Prefers
@@ -174,6 +175,22 @@ export const addPart = internalMutation({
       .collect();
     const order = existing.length;
     await ctx.db.insert("messageParts", { messageId, order, part });
+    // Paired files-row write (invariant): a file/media part gets an owner-scoped
+    // `files` row. addPart is append-only (no per-flush re-insert), so this never
+    // duplicates. Direction from the message role; instanceName = the chat's
+    // bound bridge snapshot.
+    if (isFilePart(part)) {
+      const chat = await ctx.db.get(message.chatId);
+      await recordFileForPart(ctx, {
+        messageId,
+        chatId: message.chatId,
+        userId: message.userId,
+        direction: message.role === "user" ? "inbound" : "outbound",
+        instanceName: chat?.instanceName,
+        part,
+        createdAt: Date.now(),
+      });
+    }
     await ctx.db.patch(messageId, { updatedAt: Date.now() });
   },
 });

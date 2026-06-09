@@ -10,6 +10,7 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Checkbox } from "@/components/ui/checkbox";
 import { Input } from "@/components/ui/input";
+import { m } from "@/paraglide/messages.js";
 
 // "Rôles" tab — permission MATRIX.
 //
@@ -33,44 +34,46 @@ import { Input } from "@/components/ui/input";
 
 // Frontend-decoupled copy of the closed permission set (rbac.PERMISSIONS),
 // grouped + labeled for the matrix columns. Keep in sync with convex/lib/rbac.ts.
+// label/group resolve through Paraglide at call time (thunks) → they re-localize
+// FR↔EN. A plain m.*() here would freeze the locale at module import.
 const PERMISSION_GROUPS: {
-  group: string;
-  keys: { key: string; label: string; phi?: boolean }[];
+  group: () => string;
+  keys: { key: string; label: () => string; phi?: boolean }[];
 }[] = [
   {
-    group: "Traces",
+    group: () => m.roles_group_traces(),
     keys: [
-      { key: "traces.read", label: "Lire" },
+      { key: "traces.read", label: () => m.roles_perm_read() },
       {
         key: "traces.read.content",
-        label: "Contenu",
+        label: () => m.roles_perm_content(),
         phi: true,
       },
-      { key: "traces.write", label: "Écrire" },
+      { key: "traces.write", label: () => m.roles_perm_write() },
     ],
   },
   {
-    group: "KPI",
+    group: () => m.roles_group_kpi(),
     keys: [
-      { key: "kpi.read", label: "Lire" },
-      { key: "kpi.write", label: "Écrire" },
+      { key: "kpi.read", label: () => m.roles_perm_read() },
+      { key: "kpi.write", label: () => m.roles_perm_write() },
     ],
   },
   {
-    group: "OpenClaw / Anomalies",
+    group: () => m.roles_group_openclaw_anomalies(),
     keys: [
-      { key: "openclaw.query", label: "Query" },
-      { key: "anomalies.read", label: "Anomalies" },
-      { key: "anomalies.report", label: "Signaler" },
+      { key: "openclaw.query", label: () => m.roles_perm_query() },
+      { key: "anomalies.read", label: () => m.roles_perm_anomalies() },
+      { key: "anomalies.report", label: () => m.roles_perm_report() },
     ],
   },
   {
-    group: "Chats",
-    keys: [{ key: "chats.read", label: "Lire" }],
+    group: () => m.roles_group_chats(),
+    keys: [{ key: "chats.read", label: () => m.roles_perm_read() }],
   },
   {
-    group: "Admin",
-    keys: [{ key: "admin.manage", label: "Gérer" }],
+    group: () => m.roles_group_admin(),
+    keys: [{ key: "admin.manage", label: () => m.roles_perm_manage() }],
   },
 ];
 
@@ -130,7 +133,7 @@ export function RolesTab() {
   // fresh deployment without a hand-maintained client baseline.
   useEffect(() => {
     void ensureRolesSeeded({}).catch((err) => {
-      toast.error("Échec de l’initialisation des rôles", err);
+      toast.error(m.roles_toast_seed_error(), err);
     });
   }, [ensureRolesSeeded, toast]);
 
@@ -150,11 +153,9 @@ export function RolesTab() {
     // Warn before editing a built-in role (they may be edited, with caution).
     if (role.builtin) {
       const ok = await confirm({
-        title: `Modifier le rôle intégré « ${role.name} » ?`,
-        description:
-          "Les rôles intégrés sont la base du modèle de permissions. Les " +
-          "modifier peut affecter les comptes existants. Continuer ?",
-        confirmLabel: "Modifier",
+        title: m.roles_confirm_edit_builtin_title({ name: role.name }),
+        description: m.roles_confirm_edit_builtin_desc(),
+        confirmLabel: m.roles_confirm_edit_builtin_label(),
       });
       if (!ok) return;
     }
@@ -165,7 +166,7 @@ export function RolesTab() {
     } catch (err) {
       // M5: surface the rejection (e.g. backend admin-wildcard guard). The
       // optimistic patch is auto-rolled-back by Convex on throw.
-      toast.error("Échec de la mise à jour des permissions", err);
+      toast.error(m.roles_toast_update_perms_error(), err);
     } finally {
       setPending((prev) => {
         const nextSet = new Set(prev);
@@ -187,7 +188,7 @@ export function RolesTab() {
       setSheetOpen(false);
     } catch (err) {
       // M5: surface duplicate-key ("Role already exists") and validation errors.
-      toast.error("Échec de la création du rôle", err);
+      toast.error(m.roles_toast_create_error(), err);
     }
   }
 
@@ -201,16 +202,13 @@ export function RolesTab() {
   return (
     <>
       <p className="oc-admin__hint">
-        Matrice de permissions. Lignes = rôles (intégrés + personnalisés),
-        colonnes = clés de permission. Le rôle <code>admin</code> détient le
-        joker « * » (toutes les permissions) et est verrouillé. La colonne{" "}
-        <code>traces.read.content</code> donne accès au contenu brut (PHI) — à
-        n’accorder qu’à bon escient.
+        {m.roles_hint_part1()} <code>admin</code> {m.roles_hint_part2()}{" "}
+        <code>traces.read.content</code> {m.roles_hint_part3()}
       </p>
 
       <div className="oc-dt">
         <div className="oc-dt__bar">
-        <h2 className="oc-dt__title">Rôles</h2>
+        <h2 className="oc-dt__title">{m.roles_title()}</h2>
         <div className="oc-dt__bar-actions">
           <Button
             size="sm"
@@ -219,30 +217,30 @@ export function RolesTab() {
               setSheetOpen(true);
             }}
           >
-            Ajouter un rôle
+            {m.roles_add()}
           </Button>
         </div>
       </div>
 
       {querying ? (
-        <p className="oc-admin__hint">Chargement…</p>
+        <p className="oc-admin__hint">{m.roles_loading()}</p>
       ) : seeding ? (
-        <p className="oc-admin__hint">Initialisation des rôles…</p>
+        <p className="oc-admin__hint">{m.roles_seeding()}</p>
       ) : (
         <div className="oc-matrix__scroll">
           <table className="oc-matrix">
             <thead>
               <tr>
                 <th className="oc-matrix__corner" rowSpan={2}>
-                  Rôle
+                  {m.roles_col_role()}
                 </th>
                 {PERMISSION_GROUPS.map((g) => (
                   <th
-                    key={g.group}
+                    key={g.group()}
                     className="oc-matrix__group"
                     colSpan={g.keys.length}
                   >
-                    {g.group}
+                    {g.group()}
                   </th>
                 ))}
               </tr>
@@ -254,11 +252,11 @@ export function RolesTab() {
                       className="oc-matrix__perm"
                       title={
                         k.phi
-                          ? `${k.key} — accès au contenu brut (PHI), à accorder avec prudence`
+                          ? m.roles_phi_tooltip({ key: k.key })
                           : k.key
                       }
                     >
-                      {k.label}
+                      {k.label()}
                       {k.phi ? <span className="oc-matrix__phi"> ⚠</span> : null}
                     </th>
                   )),
@@ -276,10 +274,10 @@ export function RolesTab() {
                         <span>{role.name}</span>
                         {role.builtin ? (
                           <Badge variant="outline" className="gap-1">
-                            <Lock /> intégré
+                            <Lock /> {m.roles_badge_builtin()}
                           </Badge>
                         ) : (
-                          <Badge variant="secondary">custom</Badge>
+                          <Badge variant="secondary">{m.roles_badge_custom()}</Badge>
                         )}
                       </div>
                       <code className="oc-matrix__rolekey">{role.key}</code>
@@ -298,9 +296,9 @@ export function RolesTab() {
                             aria-label={`${role.key} · ${permKey}`}
                             title={
                               wildcard
-                                ? "Accordé via « * » (toutes les permissions)"
+                                ? m.roles_cell_granted_wildcard()
                                 : rowPending
-                                  ? "Écriture en cours…"
+                                  ? m.roles_cell_writing()
                                   : permKey
                             }
                             onCheckedChange={() =>
@@ -322,30 +320,30 @@ export function RolesTab() {
       <EntitySheet
         open={sheetOpen}
         onOpenChange={setSheetOpen}
-        title="Nouveau rôle"
-        description="Rôle personnalisé. Ajustez les permissions dans la matrice après création."
+        title={m.roles_sheet_title()}
+        description={m.roles_sheet_desc()}
         canSubmit={Boolean(form.key && form.name)}
         onSubmit={submitRole}
-        submitLabel="Créer"
+        submitLabel={m.roles_sheet_submit()}
       >
         <div className="oc-form">
           <label className="oc-field">
-            <span className="oc-field__label">Clé (identifiant stable)</span>
+            <span className="oc-field__label">{m.roles_field_key()}</span>
             <Input
               value={form.key}
-              placeholder="ex. analyst"
+              placeholder={m.roles_field_key_placeholder()}
               onChange={(e) => setForm({ ...form, key: e.target.value })}
             />
           </label>
           <label className="oc-field">
-            <span className="oc-field__label">Nom affiché</span>
+            <span className="oc-field__label">{m.roles_field_name()}</span>
             <Input
               value={form.name}
               onChange={(e) => setForm({ ...form, name: e.target.value })}
             />
           </label>
           <label className="oc-field">
-            <span className="oc-field__label">Description (optionnel)</span>
+            <span className="oc-field__label">{m.roles_field_description()}</span>
             <Input
               value={form.description}
               onChange={(e) =>

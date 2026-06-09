@@ -245,6 +245,32 @@ export const setDefaultThemeMode = mutation({
   },
 });
 
+// App-wide default UI language (used when a user has no `locale` preference).
+// Mirror of setDefaultThemeMode. NOTE: unlike theme (a class swap), a user with
+// NO personal locale who inherits this default will RELOAD when it changes
+// (Paraglide's setLocale) — the Apparence panel warns the admin about this.
+export const setDefaultLocale = mutation({
+  args: {
+    locale: v.union(v.literal("fr"), v.literal("en"), v.null()),
+  },
+  handler: async (ctx, { locale }) => {
+    await requireAdmin(ctx);
+    const meta = await ctx.db
+      .query("appMeta")
+      .withIndex("by_key", (q) => q.eq("key", APP_META_KEY))
+      .unique();
+    if (meta === null) {
+      await ctx.db.insert("appMeta", {
+        key: APP_META_KEY,
+        adminAssigned: true,
+        defaultLocale: locale ?? undefined,
+      });
+      return;
+    }
+    await ctx.db.patch(meta._id, { defaultLocale: locale ?? undefined });
+  },
+});
+
 // --- UI preferences module (admin side) ------------------------------------
 
 /** Set the admin DEFAULT for a UI pref (inherited by users with no override).

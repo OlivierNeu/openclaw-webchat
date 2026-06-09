@@ -13,6 +13,7 @@ import {
 import { internal } from "./_generated/api";
 import { Doc, Id } from "./_generated/dataModel";
 import { generateApiKey, hashKey } from "./lib/apikeys";
+import { recordFileForPart } from "./lib/files";
 import { seedBuiltinRoles } from "./lib/rbac";
 import { resolveTargetForChat } from "./routing";
 import { requireRealUserId, getProfile } from "./lib/access";
@@ -752,6 +753,86 @@ export const seedImageAttachment = action({
 });
 
 /**
+ * Dev-only seed for the Settings › Fichiers tab: create a chat + message + a
+ * file `messagePart` AND its paired `files` row (via the real helper) for the
+ * user with `canonical`, with NO agent/dispatch needed. Lets us render a
+ * POPULATED Files table without a working bridge. Run:
+ *   npx convex run dev:devSeedFile '{"canonical":"u-...","direction":"inbound"}'
+ */
+export const devSeedFile = action({
+  args: {
+    canonical: v.string(),
+    filename: v.optional(v.string()),
+    mimeType: v.optional(v.string()),
+    direction: v.optional(
+      v.union(v.literal("inbound"), v.literal("outbound")),
+    ),
+  },
+  handler: async (ctx, args): Promise<{ ok: boolean; reason?: string }> => {
+    assertDev();
+    // storage.store is action-only; persist a tiny blob then hand the storageId
+    // to the mutation that writes the chat/message/part + paired files row.
+    const storageId = await ctx.storage.store(new Blob(["seed-bytes"]));
+    return await ctx.runMutation(internal.dev.devSeedFileRow, {
+      canonical: args.canonical,
+      storageId,
+      filename: args.filename ?? "rapport-trimestriel.pdf",
+      mimeType: args.mimeType ?? "application/pdf",
+      direction: args.direction ?? "inbound",
+    });
+  },
+});
+
+export const devSeedFileRow = internalMutation({
+  args: {
+    canonical: v.string(),
+    storageId: v.id("_storage"),
+    filename: v.string(),
+    mimeType: v.string(),
+    direction: v.union(v.literal("inbound"), v.literal("outbound")),
+  },
+  handler: async (ctx, args) => {
+    assertDev();
+    const profiles = await ctx.db.query("profiles").collect();
+    const profile = profiles.find((p) => p.canonical === args.canonical);
+    if (!profile) return { ok: false as const, reason: "no profile" };
+    const userId = profile.userId;
+    const now = Date.now();
+    const chatId = await ctx.db.insert("chats", {
+      userId,
+      title: "Conversation de démo",
+      updatedAt: now,
+    });
+    const messageId = await ctx.db.insert("messages", {
+      chatId,
+      userId,
+      role:
+        args.direction === "inbound" ? ("user" as const) : ("assistant" as const),
+      status: "complete" as const,
+      text: "seed",
+      updatedAt: now,
+    });
+    const part = {
+      kind: "file" as const,
+      storageId: args.storageId,
+      filename: args.filename,
+      mimeType: args.mimeType,
+    };
+    await ctx.db.insert("messageParts", { messageId, order: 0, part });
+    await recordFileForPart(ctx, {
+      messageId,
+      chatId,
+      userId,
+      direction: args.direction,
+      instanceName: undefined,
+      part,
+      createdAt: now,
+    });
+    return { ok: true as const };
+  },
+});
+
+/**
  * Internal half of #59 round-trip: insert the SAME outbox row shape that
  * send.sendMessage builds (attachmentIds + attachments + a `file` messagePart)
  * and schedule the SAME dispatch. Dev-gated. Reuses testSend's owner/routing
@@ -823,10 +904,16 @@ export const enqueueAttachmentTurn = internalMutation({
       updatedAt: now,
     });
     // Render the attachment in the thread (faithful to send.sendMessage step 4).
-    await ctx.db.insert("messageParts", {
+    const part = { kind: "file" as const, storageId, filename, mimeType };
+    await ctx.db.insert("messageParts", { messageId, order: 0, part });
+    // Dev-seed parity: same paired files-row write as the real send path.
+    await recordFileForPart(ctx, {
       messageId,
-      order: 0,
-      part: { kind: "file", storageId, filename, mimeType },
+      chatId: cid,
+      userId,
+      direction: "inbound",
+      part,
+      createdAt: now,
     });
     await ctx.db.patch(cid, { updatedAt: now });
 
@@ -937,6 +1024,7 @@ export const reset = mutation({
     assertDev();
     const tables = [
       "messageParts",
+      "files",
       "messages",
       "outbox",
       "uploads",

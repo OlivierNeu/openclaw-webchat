@@ -5,6 +5,7 @@ import type { Id } from "../convexApi";
 import { useConfirm } from "@/components/ConfirmDialog";
 import { Button } from "@/components/ui/button";
 import { DataTableShell } from "./DataTableShell";
+import { m } from "@/paraglide/messages.js";
 
 // Increment B — admin administration of recorded feedback (Settings › Feedbacks).
 //
@@ -69,16 +70,16 @@ type Snapshot = {
   };
 };
 
-const CATEGORY_LABELS: Record<string, string> = {
-  altered_words: "Mots modifiés / altérés",
-  incorrect: "Réponse incorrecte",
-  incoherence: "Incohérence",
-  formatting: "Formatage",
-  latency: "Latence",
-  api_error: "Erreur API",
-  other: "Autre",
+const CATEGORY_LABELS: Record<string, () => string> = {
+  altered_words: () => m.feedbacks_cat_altered_words(),
+  incorrect: () => m.feedbacks_cat_incorrect(),
+  incoherence: () => m.feedbacks_cat_incoherence(),
+  formatting: () => m.feedbacks_cat_formatting(),
+  latency: () => m.feedbacks_cat_latency(),
+  api_error: () => m.feedbacks_cat_api_error(),
+  other: () => m.feedbacks_cat_other(),
 };
-const cat = (id: string) => CATEGORY_LABELS[id] ?? id;
+const cat = (id: string) => CATEGORY_LABELS[id]?.() ?? id;
 
 function FidelityBadge({
   matches,
@@ -88,11 +89,12 @@ function FidelityBadge({
   sourceWasOpen: boolean;
 }) {
   // Honest: the strong "display" claim only holds when the source view was open.
-  if (!sourceWasOpen) return <span className="oc-fbadmin__pill">reçu = stocké</span>;
+  if (!sourceWasOpen)
+    return <span className="oc-fbadmin__pill">{m.feedbacks_fidelity_received_stored()}</span>;
   if (matches === true)
-    return <span className="oc-fbadmin__pill is-ok">affichage fidèle ✓</span>;
+    return <span className="oc-fbadmin__pill is-ok">{m.feedbacks_fidelity_faithful()}</span>;
   if (matches === false)
-    return <span className="oc-fbadmin__pill is-warn">écart ⚠</span>;
+    return <span className="oc-fbadmin__pill is-warn">{m.feedbacks_fidelity_mismatch()}</span>;
   return <span className="oc-fbadmin__pill">—</span>;
 }
 
@@ -133,7 +135,7 @@ function Detail({ data }: { data: Snapshot }) {
         />
         <span className="oc-fbadmin__meta">
           {cat(data.category)} · {s.messageRole}
-          {s.isRegeneration ? " · régénération" : ""}
+          {s.isRegeneration ? ` · ${m.feedbacks_regeneration()}` : ""}
           {s.openclawModel ? ` · ${s.openclawModel}` : ""}
           {s.openclawRuntime ? ` (${s.openclawRuntime})` : ""}
         </span>
@@ -141,33 +143,35 @@ function Detail({ data }: { data: Snapshot }) {
 
       {data.comment ? (
         <section>
-          <h4 className="oc-fbadmin__h">Commentaire du rapporteur</h4>
+          <h4 className="oc-fbadmin__h">{m.feedbacks_reporter_comment()}</h4>
           <p className="oc-fbadmin__comment">{data.comment}</p>
         </section>
       ) : null}
 
       <section>
-        <h4 className="oc-fbadmin__h">Échange avec l'utilisateur</h4>
+        <h4 className="oc-fbadmin__h">{m.feedbacks_exchange_title()}</h4>
         {thread.length > 0 ? (
           <div className="oc-fbadmin__thread">
-            {thread.map((m, i) => (
+            {thread.map((msg, i) => (
               <div
                 key={i}
-                className={`oc-notif__msg oc-notif__msg--${m.authorRole}`}
+                className={`oc-notif__msg oc-notif__msg--${msg.authorRole}`}
               >
                 <span className="oc-notif__msg-who">
-                  {m.authorRole === "admin" ? "Administrateur" : "Utilisateur"}
+                  {msg.authorRole === "admin"
+                    ? m.feedbacks_role_admin()
+                    : m.feedbacks_role_user()}
                 </span>
-                <span className="oc-notif__msg-text">{m.text}</span>
+                <span className="oc-notif__msg-text">{msg.text}</span>
               </div>
             ))}
           </div>
         ) : (
-          <p className="oc-fbadmin__meta">Aucune réponse envoyée.</p>
+          <p className="oc-fbadmin__meta">{m.feedbacks_no_reply_sent()}</p>
         )}
         <textarea
           className="oc-feedback__textarea"
-          placeholder="Répondre à l'utilisateur (visible dans sa zone de notification)…"
+          placeholder={m.feedbacks_reply_placeholder()}
           value={reply}
           maxLength={2000}
           rows={3}
@@ -179,28 +183,28 @@ function Detail({ data }: { data: Snapshot }) {
             onClick={() => void send()}
             disabled={!reply.trim() || sending}
           >
-            {sending ? "Envoi…" : "Répondre"}
+            {sending ? m.feedbacks_sending() : m.feedbacks_reply_action()}
           </Button>
         </div>
       </section>
 
       <section>
-        <h4 className="oc-fbadmin__h">Texte stocké (serveur, autoritatif)</h4>
-        <pre className="oc-msg__source-pre">{s.messageText || "(vide)"}</pre>
+        <h4 className="oc-fbadmin__h">{m.feedbacks_stored_text_title()}</h4>
+        <pre className="oc-msg__source-pre">{s.messageText || m.feedbacks_empty_value()}</pre>
       </section>
 
       {s.clientInfo?.sourceWasOpen && s.displayedText !== undefined ? (
         <section>
           <h4 className="oc-fbadmin__h">
-            Texte affiché (navigateur, au signalement)
+            {m.feedbacks_displayed_text_title()}
           </h4>
-          <pre className="oc-msg__source-pre">{s.displayedText || "(vide)"}</pre>
+          <pre className="oc-msg__source-pre">{s.displayedText || m.feedbacks_empty_value()}</pre>
         </section>
       ) : null}
 
       {s.promptText ? (
         <section>
-          <h4 className="oc-fbadmin__h">Prompt générateur</h4>
+          <h4 className="oc-fbadmin__h">{m.feedbacks_generator_prompt_title()}</h4>
           <pre className="oc-msg__source-pre">{s.promptText}</pre>
         </section>
       ) : null}
@@ -208,8 +212,12 @@ function Detail({ data }: { data: Snapshot }) {
       {context.length > 0 ? (
         <section>
           <h4 className="oc-fbadmin__h">
-            Contexte figé ({s.contextCount ?? context.length} tours
-            {s.contextTruncated ? ", tronqué" : ""})
+            {m.feedbacks_frozen_context_title({
+              count: s.contextCount ?? context.length,
+              truncated: s.contextTruncated
+                ? m.feedbacks_context_truncated_suffix()
+                : "",
+            })}
           </h4>
           <div className="oc-fbadmin__ctx">
             {context.map((m, i) => (
@@ -224,7 +232,7 @@ function Detail({ data }: { data: Snapshot }) {
 
       {s.outboxAvailable ? (
         <section>
-          <h4 className="oc-fbadmin__h">Payload dispatché (outbox)</h4>
+          <h4 className="oc-fbadmin__h">{m.feedbacks_outbox_title()}</h4>
           <pre className="oc-msg__source-pre">
             {s.outboxText ?? ""}
             {s.outboxStatus ? `\n[status: ${s.outboxStatus}]` : ""}
@@ -236,7 +244,7 @@ function Detail({ data }: { data: Snapshot }) {
       s.clientInfo.extensionsDetected.length > 0 ? (
         <section>
           <h4 className="oc-fbadmin__h">
-            Extensions de correction détectées (peuvent altérer le texte)
+            {m.feedbacks_extensions_detected_title()}
           </h4>
           <div className="oc-fbadmin__row">
             {s.clientInfo.extensionsDetected.map((e) => (
@@ -249,23 +257,24 @@ function Detail({ data }: { data: Snapshot }) {
       ) : null}
 
       <section>
-        <h4 className="oc-fbadmin__h">Environnement client</h4>
+        <h4 className="oc-fbadmin__h">{m.feedbacks_client_env_title()}</h4>
         <p className="oc-fbadmin__env">
           {[
             s.clientInfo?.language,
             s.clientInfo?.timezone,
-            s.clientInfo?.theme ? `thème ${s.clientInfo.theme}` : null,
+            s.clientInfo?.theme
+              ? m.feedbacks_env_theme({ theme: s.clientInfo.theme })
+              : null,
             s.runId ? `run ${s.runId.slice(0, 12)}…` : null,
           ]
             .filter(Boolean)
             .join(" · ") || "—"}
           {s.clientInfo?.plugins && s.clientInfo.plugins.length > 0 ? (
             <span className="oc-fbadmin__plugins">
-              Plugins : {s.clientInfo.plugins.join(", ")}
+              {m.feedbacks_plugins_label()} {s.clientInfo.plugins.join(", ")}
               <span className="oc-fbadmin__note">
                 {" "}
-                (navigator.plugins — neutralisé/partiel dans les navigateurs
-                modernes)
+                {m.feedbacks_plugins_note()}
               </span>
             </span>
           ) : null}
@@ -304,10 +313,9 @@ export function FeedbacksTab() {
 
   async function onDelete(row: Row) {
     const ok = await confirm({
-      title: "Supprimer ce signalement ?",
-      description:
-        "L'instantané forensique figé sera définitivement supprimé. Cette action est irréversible.",
-      confirmLabel: "Supprimer",
+      title: m.feedbacks_delete_confirm_title(),
+      description: m.feedbacks_delete_confirm_description(),
+      confirmLabel: m.feedbacks_delete_confirm_label(),
       destructive: true,
     });
     if (!ok) return;
@@ -318,33 +326,32 @@ export function FeedbacksTab() {
   return (
     <>
       <p className="oc-admin__hint">
-        Signalements « Report Feedback » enregistrés. La liste est en
-        métadonnées ; ouvrir le détail lit le contenu figé et{" "}
-        <strong>trace cet accès dans l'Audit</strong> (lecture de contenu d'un
-        autre utilisateur). Fenêtre récente bornée.
+        {m.feedbacks_hint_prefix()}{" "}
+        <strong>{m.feedbacks_hint_audit_strong()}</strong>{" "}
+        {m.feedbacks_hint_suffix()}
       </p>
       <DataTableShell<Row>
-        title="Signalements"
+        title={m.feedbacks_table_title()}
         rows={rows}
-        emptyHint="Aucun signalement pour l'instant."
+        emptyHint={m.feedbacks_empty_hint()}
         isExpanded={(r) => openId === r._id && !!byId[r._id]}
         renderExpanded={(r) =>
           byId[r._id] ? <Detail data={byId[r._id]} /> : null
         }
         columns={[
-          { header: "Quand", cell: (r) => new Date(r.at).toLocaleString("fr-FR") },
-          { header: "Catégorie", cell: (r) => cat(r.category) },
-          { header: "Type", cell: (r) => (r.messageRole === "user" ? "user" : "AI") },
+          { header: m.feedbacks_col_when(), cell: (r) => new Date(r.at).toLocaleString("fr-FR") },
+          { header: m.feedbacks_col_category(), cell: (r) => cat(r.category) },
+          { header: m.feedbacks_col_type(), cell: (r) => (r.messageRole === "user" ? m.feedbacks_type_user() : m.feedbacks_type_ai()) },
           {
-            header: "Rapporteur",
+            header: m.feedbacks_col_reporter(),
             cell: (r) =>
               (r.reporterEmail || r.reporterName || "—") +
               (r.impersonated && r.realOperatorEmail
-                ? ` (via ${r.realOperatorEmail})`
+                ? ` ${m.feedbacks_via({ operator: r.realOperatorEmail })}`
                 : ""),
           },
           {
-            header: "Fidélité",
+            header: m.feedbacks_col_fidelity(),
             cell: (r) => (
               <FidelityBadge
                 matches={r.displayedMatchesStored}
@@ -352,24 +359,24 @@ export function FeedbacksTab() {
               />
             ),
           },
-          { header: "Note", cell: (r) => (r.hasComment ? "✎" : "—") },
+          { header: m.feedbacks_col_note(), cell: (r) => (r.hasComment ? "✎" : "—") },
           {
-            header: "Statut",
+            header: m.feedbacks_col_status(),
             cell: (r) =>
               r.answered ? (
-                <span className="oc-fbadmin__pill is-ok">Répondu</span>
+                <span className="oc-fbadmin__pill is-ok">{m.feedbacks_status_answered()}</span>
               ) : (
-                <span className="oc-fbadmin__pill">En attente</span>
+                <span className="oc-fbadmin__pill">{m.feedbacks_status_pending()}</span>
               ),
           },
         ]}
         rowActions={(r) => [
           {
-            label: openId === r._id ? "Masquer" : "Voir le détail",
+            label: openId === r._id ? m.feedbacks_action_hide() : m.feedbacks_action_view(),
             onSelect: () => void toggle(r),
           },
           {
-            label: "Supprimer",
+            label: m.feedbacks_action_delete(),
             onSelect: () => void onDelete(r),
             variant: "destructive",
           },

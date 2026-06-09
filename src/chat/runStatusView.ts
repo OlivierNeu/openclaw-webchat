@@ -1,3 +1,5 @@
+import { m } from "@/paraglide/messages.js";
+
 // Pure mapping from a turn's (status, hasText) to the run-status chip view.
 //
 // Extracted as a pure function on purpose: the streaming states it drives
@@ -31,16 +33,17 @@ export function runStatusView(
   // switch so a real "complete" message still maps to null (no chip). Real
   // messages always carry a schema-required status, so this only ever matches
   // the placeholder.
-  if (status === undefined) return { kind: "thinking", label: "Réflexion…" };
+  if (status === undefined)
+    return { kind: "thinking", label: m.runstatus_thinking() };
   switch (status) {
     case "streaming":
       return hasText
-        ? { kind: "generating", label: "Génération…" }
-        : { kind: "thinking", label: "Réflexion…" };
+        ? { kind: "generating", label: m.runstatus_generating() }
+        : { kind: "thinking", label: m.runstatus_thinking() };
     case "error":
-      return { kind: "error", label: "Erreur" };
+      return { kind: "error", label: m.runstatus_error() };
     case "aborted":
-      return { kind: "aborted", label: "Interrompu" };
+      return { kind: "aborted", label: m.runstatus_aborted() };
     default:
       // "complete" (and any unknown/absent status) shows no chip.
       return null;

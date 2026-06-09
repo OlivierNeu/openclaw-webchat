@@ -15,8 +15,12 @@
     "dev": "vite",
     "dev:convex": "convex dev",
     "build": "vite build",
-    "typecheck": "tsc --noEmit",
-    "test": "vitest run",
+    "paraglide:compile": "paraglide-js compile --project ./project.inlang --outdir ./src/paraglide --emit-ts-declarations --strategy localStorage baseLocale",
+    "typecheck": "npm run paraglide:compile && tsc --noEmit",
+    "test": "npm run paraglide:compile && npm run i18n:check && vitest run",
+    "i18n:check": "npm run i18n:check-parity && npm run i18n:check-literals",
+    "i18n:check-parity": "node scripts/i18n-check-parity.mjs",
+    "i18n:check-literals": "node scripts/i18n-check-literals.mjs",
     "preview": "vite preview"
   },
   "dependencies": {
@@ -28,6 +32,7 @@
     "@dnd-kit/modifiers": "^9.0.0",
     "@dnd-kit/sortable": "^10.0.0",
     "@dnd-kit/utilities": "^3.2.2",
+    "@inlang/paraglide-js": "^2.18.2",
     "@tailwindcss/vite": "^4.3.0",
     "@tanstack/react-router": "^1.170.11",
     "class-variance-authority": "^0.7.1",

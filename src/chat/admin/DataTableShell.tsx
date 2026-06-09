@@ -17,6 +17,7 @@ import {
   DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
+import { m } from "@/paraglide/messages.js";
 
 // Reusable admin list pattern (the template the user asked for):
 //  - "Add" button in the header (opens a right Sheet, owned by the caller)
@@ -43,9 +44,9 @@ export function DataTableShell<T extends { _id: string }>({
   columns,
   rowActions,
   onAdd,
-  addLabel = "Add",
+  addLabel = m.datatable_add(),
   bulkActions,
-  emptyHint = "Aucun élément.",
+  emptyHint = m.datatable_empty_hint(),
   isExpanded,
   renderExpanded,
 }: {
@@ -112,7 +113,7 @@ export function DataTableShell<T extends { _id: string }>({
       </div>
 
       {rows === undefined ? (
-        <p className="oc-admin__hint">Chargement…</p>
+        <p className="oc-admin__hint">{m.datatable_loading()}</p>
       ) : list.length === 0 ? (
         <p className="oc-admin__hint">{emptyHint}</p>
       ) : (
@@ -122,7 +123,7 @@ export function DataTableShell<T extends { _id: string }>({
               {bulkActions ? (
                 <TableHead className="w-8">
                   <Checkbox
-                    aria-label="Tout sélectionner"
+                    aria-label={m.datatable_select_all()}
                     checked={allChecked ? true : someChecked ? "indeterminate" : false}
                     onCheckedChange={toggleAll}
                   />
@@ -146,7 +147,7 @@ export function DataTableShell<T extends { _id: string }>({
                   {bulkActions ? (
                     <TableCell>
                       <Checkbox
-                        aria-label="Sélectionner la ligne"
+                        aria-label={m.datatable_select_row()}
                         checked={selected.has(row._id)}
                         onCheckedChange={() => toggleOne(row._id)}
                       />
@@ -165,7 +166,7 @@ export function DataTableShell<T extends { _id: string }>({
                             <Button
                               variant="ghost"
                               size="icon-sm"
-                              aria-label="Actions"
+                              aria-label={m.datatable_actions()}
                               // Hidden until row hover OR keyboard focus within the row.
                               className="opacity-0 transition-opacity group-hover/row:opacity-100 group-focus-within/row:opacity-100 aria-expanded:opacity-100"
                             >

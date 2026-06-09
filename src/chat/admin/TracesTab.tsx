@@ -31,6 +31,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
+import { m } from "@/paraglide/messages.js";
 
 // "Traces" tab — recent observability events (D2: redacted metadata only, no
 // message content). Reads api.observability.listEvents, an admin query that
@@ -224,20 +225,16 @@ export function TracesTab() {
   return (
     <>
       <p className="oc-admin__hint">
-        Événements récents (fenêtre bornée, plus récents d’abord). Toutes les
-        traces sont des métadonnées <strong>expurgées</strong> : aucun contenu
-        de message, pièce jointe ou jeton n’est stocké — uniquement des
-        longueurs, codes et indicateurs.{" "}
+        {m.traces_hint_before()}<strong>{m.traces_hint_redacted()}</strong>{m.traces_hint_after()}{" "}
         <span className="oc-filter__window">
-          La plage temporelle filtre la fenêtre récente — une plage antérieure
-          peut être partielle.
+          {m.traces_hint_window()}
         </span>
       </p>
 
       <FilterBar
         q={q}
         onQChange={setQ}
-        searchPlaceholder="Rechercher (kind, principal, rôle, route, correlationId)"
+        searchPlaceholder={m.traces_search_placeholder()}
         timeRange={range}
         onTimeRangeChange={setRange}
         onReset={resetFilters}
@@ -245,10 +242,10 @@ export function TracesTab() {
       >
         <Select value={statusClassFilter} onValueChange={setStatusClassFilter}>
           <SelectTrigger size="sm" className="w-32">
-            <SelectValue placeholder="Statut" />
+            <SelectValue placeholder={m.traces_filter_status()} />
           </SelectTrigger>
           <SelectContent>
-            <SelectItem value={ALL}>Tous statuts</SelectItem>
+            <SelectItem value={ALL}>{m.traces_filter_status_all()}</SelectItem>
             {STATUS_CLASSES.map((c) => (
               <SelectItem key={c} value={c}>
                 {c}
@@ -258,10 +255,10 @@ export function TracesTab() {
         </Select>
         <Select value={principalType} onValueChange={setPrincipalType}>
           <SelectTrigger size="sm" className="w-32">
-            <SelectValue placeholder="Principal" />
+            <SelectValue placeholder={m.traces_filter_principal()} />
           </SelectTrigger>
           <SelectContent>
-            <SelectItem value={ALL}>Tous principaux</SelectItem>
+            <SelectItem value={ALL}>{m.traces_filter_principal_all()}</SelectItem>
             {PRINCIPAL_TYPES.map((p) => (
               <SelectItem key={p} value={p}>
                 {p}
@@ -271,10 +268,10 @@ export function TracesTab() {
         </Select>
         <Select value={direction} onValueChange={setDirection}>
           <SelectTrigger size="sm" className="w-32">
-            <SelectValue placeholder="Direction" />
+            <SelectValue placeholder={m.traces_filter_direction()} />
           </SelectTrigger>
           <SelectContent>
-            <SelectItem value={ALL}>Toutes directions</SelectItem>
+            <SelectItem value={ALL}>{m.traces_filter_direction_all()}</SelectItem>
             {DIRECTIONS.map((d) => (
               <SelectItem key={d} value={d}>
                 {d}
@@ -284,10 +281,10 @@ export function TracesTab() {
         </Select>
         <Select value={roleKey} onValueChange={setRoleKey}>
           <SelectTrigger size="sm" className="w-36">
-            <SelectValue placeholder="Rôle" />
+            <SelectValue placeholder={m.traces_filter_role()} />
           </SelectTrigger>
           <SelectContent>
-            <SelectItem value={ALL}>Tous les rôles</SelectItem>
+            <SelectItem value={ALL}>{m.traces_filter_role_all()}</SelectItem>
             {roleOptions.map((r) => (
               <SelectItem key={r} value={r}>
                 {r}
@@ -297,10 +294,10 @@ export function TracesTab() {
         </Select>
         <Select value={kind} onValueChange={setKind}>
           <SelectTrigger size="sm" className="w-44">
-            <SelectValue placeholder="Tous les kinds" />
+            <SelectValue placeholder={m.traces_filter_kind_placeholder()} />
           </SelectTrigger>
           <SelectContent>
-            <SelectItem value={ALL_KINDS}>tous les kinds</SelectItem>
+            <SelectItem value={ALL_KINDS}>{m.traces_filter_kind_all()}</SelectItem>
             {kindOptions.map((k) => (
               <SelectItem key={k} value={k}>
                 {k}
@@ -318,7 +315,7 @@ export function TracesTab() {
           <SelectContent>
             {LIMIT_OPTIONS.map((n) => (
               <SelectItem key={n} value={String(n)}>
-                {n} lignes
+                {m.traces_rows_count({ count: n })}
               </SelectItem>
             ))}
           </SelectContent>
@@ -337,29 +334,29 @@ export function TracesTab() {
             type="button"
             className="oc-traces__chip"
             onClick={() => setFollowCorr(null)}
-            title="Effacer le filtre de corrélation"
+            title={m.traces_clear_correlation_filter()}
           >
             <span className="oc-traces__chip-label">
-              filtre: correlationId=
+              {m.traces_chip_correlation_label()}
               <code>{shortId(followCorr)}</code>
             </span>
             <X className="oc-traces__chip-x" aria-hidden />
-            <span className="sr-only">Effacer</span>
+            <span className="sr-only">{m.traces_clear()}</span>
           </button>
         </div>
       ) : null}
 
       <DataTableShell
-        title="Traces"
+        title={m.traces_table_title()}
         rows={rows}
         emptyHint={
           followCorr
-            ? "Aucun événement pour cette corrélation dans la fenêtre."
-            : "Aucun événement tracé pour l’instant."
+            ? m.traces_empty_correlation()
+            : m.traces_empty_default()
         }
         columns={[
           {
-            header: "Quand",
+            header: m.traces_col_when(),
             cell: (r) => (
               <span className="oc-traces__time">
                 {new Date(r.at).toLocaleString("fr-FR")}
@@ -367,14 +364,14 @@ export function TracesTab() {
             ),
           },
           {
-            header: "Kind",
+            header: m.traces_col_kind(),
             cell: (r) => <Badge variant="secondary">{r.kind}</Badge>,
           },
           {
             // Failure marker — makes error rows (dispatch failed, stream
             // error/aborted, ingest denied, HTTP >=400) jump out across kinds,
             // with the curated cause code so the eye lands on what's wrong.
-            header: "Résultat",
+            header: m.traces_col_result(),
             cell: (r) => {
               const fail = traceFailureCode(r);
               return fail ? (
@@ -382,14 +379,14 @@ export function TracesTab() {
                   ✕ {fail}
                 </span>
               ) : (
-                <span className="oc-traces__ok" aria-label="ok">
+                <span className="oc-traces__ok" aria-label={m.traces_ok_aria()}>
                   ✓
                 </span>
               );
             },
           },
           {
-            header: "Direction",
+            header: m.traces_col_direction(),
             cell: (r) =>
               r.direction ? (
                 <Badge variant="outline">{r.direction}</Badge>
@@ -398,7 +395,7 @@ export function TracesTab() {
               ),
           },
           {
-            header: "Principal",
+            header: m.traces_col_principal(),
             cell: (r) => (
               <span className="oc-traces__principal">
                 <Badge variant="outline">{r.principalType}</Badge>
@@ -411,7 +408,7 @@ export function TracesTab() {
             ),
           },
           {
-            header: "Rôle",
+            header: m.traces_col_role(),
             cell: (r) =>
               r.roleKey ? (
                 <Badge variant="secondary">{r.roleKey}</Badge>
@@ -420,7 +417,7 @@ export function TracesTab() {
               ),
           },
           {
-            header: "Route",
+            header: m.traces_col_route(),
             cell: (r) =>
               r.route ? (
                 <span className="oc-traces__route">
@@ -434,7 +431,7 @@ export function TracesTab() {
               ),
           },
           {
-            header: "Statut",
+            header: m.traces_col_status(),
             cell: (r) =>
               r.status === null ? (
                 <span className="oc-traces__muted">—</span>
@@ -447,7 +444,7 @@ export function TracesTab() {
               ),
           },
           {
-            header: "Latence",
+            header: m.traces_col_latency(),
             cell: (r) =>
               r.latencyMs === null ? (
                 <span className="oc-traces__muted">—</span>
@@ -456,13 +453,13 @@ export function TracesTab() {
               ),
           },
           {
-            header: "Corrélation",
+            header: m.traces_col_correlation(),
             cell: (r) =>
               r.correlationId ? (
                 <button
                   type="button"
                   className="oc-traces__corr"
-                  title="Suivre ce tour (filtrer par correlationId)"
+                  title={m.traces_follow_turn()}
                   onClick={() => setFollowCorr(r.correlationId)}
                 >
                   {shortId(r.correlationId)}
@@ -472,7 +469,7 @@ export function TracesTab() {
               ),
           },
           {
-            header: "Meta",
+            header: m.traces_col_meta(),
             cell: (r) =>
               r.meta ? (
                 <Button
@@ -480,7 +477,7 @@ export function TracesTab() {
                   size="sm"
                   onClick={() => setMetaRow(r)}
                 >
-                  Voir
+                  {m.traces_view()}
                 </Button>
               ) : (
                 <span className="oc-traces__muted">—</span>
@@ -569,12 +566,11 @@ function MetaDialog({
         <DialogContent className="max-w-lg">
           <DialogHeader>
             <DialogTitle className="oc-traces__meta-title">
-              Meta · <code>{row.kind}</code>
-              <Badge variant="outline">expurgé</Badge>
+              {m.traces_meta_dialog_title()} <code>{row.kind}</code>
+              <Badge variant="outline">{m.traces_meta_redacted_badge()}</Badge>
             </DialogTitle>
             <DialogDescription>
-              Métadonnées non-PHI uniquement (longueurs, codes, indicateurs).
-              Aucun contenu de message n’est stocké.
+              {m.traces_meta_dialog_description()}
             </DialogDescription>
           </DialogHeader>
           <pre className="oc-traces__meta-json">{pretty}</pre>

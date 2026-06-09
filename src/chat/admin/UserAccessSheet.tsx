@@ -11,6 +11,7 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Star, Server } from "lucide-react";
 import { useToast } from "@/components/ui/toast";
+import { m } from "@/paraglide/messages.js";
 import { api } from "../convexApi";
 import type { Id } from "../convexApi";
 
@@ -44,19 +45,18 @@ export function UserAccessSheet({
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent className="oc-access">
         <DialogHeader>
-          <DialogTitle>Agents de {userLabel}</DialogTitle>
+          <DialogTitle>{m.useraccess_dialog_title({ user: userLabel })}</DialogTitle>
           <DialogDescription>
-            Associez les agents découverts (par instance) et désignez l’agent par
-            défaut. Au moins un agent est requis pour créer des conversations.
+            {m.useraccess_dialog_description()}
           </DialogDescription>
         </DialogHeader>
 
         <div className="oc-access__list">
           {instances === undefined ? (
-            <p className="oc-access__hint">Chargement…</p>
+            <p className="oc-access__hint">{m.useraccess_loading()}</p>
           ) : instances.length === 0 ? (
             <p className="oc-access__hint">
-              Aucune instance configurée. Ajoutez-en une dans l’onglet Instances.
+              {m.useraccess_no_instances()}
             </p>
           ) : (
             instances.map((inst) => (
@@ -111,14 +111,14 @@ function InstanceAgents({
         await assign({ profileId: profileId!, instanceName, agentId });
       }
     } catch (err) {
-      toast.error("Mise à jour de l’accès refusée", err);
+      toast.error(m.useraccess_toast_access_update_denied(), err);
     }
   }
   async function makeDefault(agentId: string) {
     try {
       await setDefault({ profileId: profileId!, instanceName, agentId });
     } catch (err) {
-      toast.error("Définition de l’agent par défaut refusée", err);
+      toast.error(m.useraccess_toast_set_default_denied(), err);
     }
   }
 
@@ -132,15 +132,17 @@ function InstanceAgents({
         </Badge>
         {stale ? (
           <Badge variant="outline" className="oc-access__stale">
-            hors-ligne
+            {m.useraccess_badge_offline()}
           </Badge>
         ) : null}
       </div>
       {data === undefined ? (
-        <p className="oc-access__hint">Chargement des agents…</p>
+        <p className="oc-access__hint">{m.useraccess_loading_agents()}</p>
       ) : agents.length === 0 ? (
         <p className="oc-access__hint">
-          Aucun agent découvert{stale ? " (instance hors-ligne)" : ""}.
+          {stale
+            ? m.useraccess_no_agents_offline()
+            : m.useraccess_no_agents()}
         </p>
       ) : (
         agents.map((a) => {
@@ -154,7 +156,9 @@ function InstanceAgents({
                 checked={isAssigned}
                 disabled={gone && !isAssigned}
                 onCheckedChange={() => void toggle(a.agentId, isAssigned)}
-                aria-label={`Assigner ${a.displayName ?? a.agentId}`}
+                aria-label={m.useraccess_assign_aria({
+                  name: a.displayName ?? a.agentId,
+                })}
               />
               <span className="oc-access__label">
                 {a.emoji ? `${a.emoji} ` : ""}
@@ -165,7 +169,7 @@ function InstanceAgents({
               ) : null}
               {gone ? (
                 <Badge variant="outline" className="oc-access__gone">
-                  supprimé
+                  {m.useraccess_badge_removed()}
                 </Badge>
               ) : null}
               {isAssigned ? (
@@ -177,8 +181,8 @@ function InstanceAgents({
                   <span
                     className="oc-access__fav"
                     role="img"
-                    aria-label="Agent par défaut"
-                    title="Agent par défaut"
+                    aria-label={m.useraccess_default_agent()}
+                    title={m.useraccess_default_agent()}
                   >
                     <Star size={14} fill="currentColor" />
                   </span>
@@ -190,8 +194,8 @@ function InstanceAgents({
                     size="icon-sm"
                     variant="ghost"
                     className="oc-access__setdefault"
-                    aria-label="Définir comme agent par défaut"
-                    title="Définir comme agent par défaut"
+                    aria-label={m.useraccess_set_default()}
+                    title={m.useraccess_set_default()}
                     onClick={() => void makeDefault(a.agentId)}
                   >
                     <Star size={14} />

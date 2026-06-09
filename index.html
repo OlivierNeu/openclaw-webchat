@@ -20,6 +20,14 @@
             window.matchMedia("(prefers-color-scheme: dark)").matches);
         document.documentElement.classList.toggle("dark", dark);
       })();
+      // Reflect the saved UI locale on <html lang> before first paint (a11y),
+      // mirror of the theme script above. Paraglide's localStorage strategy
+      // persists the locale under PARAGLIDE_LOCALE; useApplyLocale then keeps it
+      // in sync with the Convex-resolved value after hydration.
+      (function () {
+        var l = localStorage.getItem("PARAGLIDE_LOCALE");
+        if (l === "fr" || l === "en") document.documentElement.lang = l;
+      })();
     </script>
   </head>
   <body>

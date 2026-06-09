@@ -19,6 +19,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
+import { m } from "@/paraglide/messages.js";
 
 // "Anomalies" tab (D-3) — detector + agent-reported anomalies. Reads
 // api.anomalies.listAnomalies (admin) and offers a per-open-row Resolve /
@@ -51,10 +52,19 @@ const ALL = "__all__";
 // anomalyStatus options (the backend filter key is `anomalyStatus`, NOT the
 // top-level `status` arg). Default "open" preserves today's view.
 const STATUS_OPTIONS = [
-  { value: "open", label: "Ouvertes" },
-  { value: "acknowledged", label: "En sourdine" },
-  { value: "resolved", label: "Résolues" },
+  { value: "open" },
+  { value: "acknowledged" },
+  { value: "resolved" },
 ] as const;
+
+// Resolve a STATUS_OPTIONS label at RENDER time (not module scope) so it reacts
+// to a reload-free locale switch — module-level m.*() would evaluate once at
+// import and go stale.
+function statusOptionLabel(value: (typeof STATUS_OPTIONS)[number]["value"]): string {
+  if (value === "open") return m.anomalies_status_option_open();
+  if (value === "acknowledged") return m.anomalies_status_option_acknowledged();
+  return m.anomalies_status_option_resolved();
+}
 
 const SEVERITIES = ["info", "warn", "critical"] as const;
 const SOURCES = ["detector", "agent"] as const;
@@ -155,55 +165,55 @@ export function AnomaliesTab() {
 
   async function resolve(row: AnomalyView) {
     const ok = await confirm({
-      title: "Résoudre cette anomalie ?",
+      title: m.anomalies_resolve_confirm_title(),
       description: (
         <>
-          L’anomalie <span className="font-mono">{row.kind}</span> sera marquée
-          comme <strong>résolue</strong>. Elle sortira du décompte des anomalies
-          ouvertes (signal de self-repair OpenClaw).
+          {m.anomalies_resolve_confirm_desc_before()}{" "}
+          <span className="font-mono">{row.kind}</span>{" "}
+          {m.anomalies_resolve_confirm_desc_marked()}{" "}
+          <strong>{m.anomalies_resolve_confirm_desc_resolved()}</strong>.{" "}
+          {m.anomalies_resolve_confirm_desc_after()}
         </>
       ),
-      confirmLabel: "Résoudre",
+      confirmLabel: m.anomalies_resolve_confirm_label(),
     });
     if (!ok) return;
     try {
       await resolveAnomaly({ anomalyId: row._id, status: "resolved" });
-      toast.success("Anomalie résolue", row.kind);
+      toast.success(m.anomalies_toast_resolved(), row.kind);
     } catch (err) {
-      toast.error("Échec de la résolution", err);
+      toast.error(m.anomalies_toast_resolve_error(), err);
     }
   }
 
   async function acknowledge(row: AnomalyView) {
     try {
       await resolveAnomaly({ anomalyId: row._id, status: "acknowledged" });
-      toast.success("Anomalie acquittée", row.kind);
+      toast.success(m.anomalies_toast_acknowledged(), row.kind);
     } catch (err) {
-      toast.error("Échec de l’acquittement", err);
+      toast.error(m.anomalies_toast_acknowledge_error(), err);
     }
   }
 
   return (
     <>
       <p className="oc-admin__hint">
-        Anomalies détectées (cron) ou signalées par les agents OpenClaw. Données
-        non-PHI uniquement (type, sévérité, message, corrélation).{" "}
-        <strong>Ouverte</strong> = active, elle alerte et compte dans le heartbeat.{" "}
-        <strong>En sourdine</strong> = vue, plus d'alerte, mais pas forcément
-        corrigée (les admins sont notifiés des nouvelles anomalies).{" "}
-        <strong>Résolue</strong> = le problème est réglé (le détecteur résout
-        automatiquement quand la condition cesse). Les deux la sortent du
-        décompte heartbeat.{" "}
+        {m.anomalies_hint_intro()}{" "}
+        <strong>{m.anomalies_hint_open_label()}</strong>{" "}
+        {m.anomalies_hint_open_desc()}{" "}
+        <strong>{m.anomalies_hint_muted_label()}</strong>{" "}
+        {m.anomalies_hint_muted_desc()}{" "}
+        <strong>{m.anomalies_hint_resolved_label()}</strong>{" "}
+        {m.anomalies_hint_resolved_desc()}{" "}
         <span className="oc-filter__window">
-          La plage temporelle filtre la fenêtre récente — une plage antérieure
-          peut être partielle.
+          {m.anomalies_hint_time_window()}
         </span>
       </p>
 
       <FilterBar
         q={q}
         onQChange={setQ}
-        searchPlaceholder="Rechercher (message, type, corrélation)"
+        searchPlaceholder={m.anomalies_search_placeholder()}
         timeRange={range}
         onTimeRangeChange={setRange}
         onReset={resetFilters}
@@ -214,20 +224,20 @@ export function AnomaliesTab() {
             <SelectValue />
           </SelectTrigger>
           <SelectContent>
-            <SelectItem value={ALL}>Tous les statuts</SelectItem>
+            <SelectItem value={ALL}>{m.anomalies_all_statuses()}</SelectItem>
             {STATUS_OPTIONS.map((s) => (
               <SelectItem key={s.value} value={s.value}>
-                {s.label}
+                {statusOptionLabel(s.value)}
               </SelectItem>
             ))}
           </SelectContent>
         </Select>
         <Select value={severity} onValueChange={setSeverity}>
           <SelectTrigger size="sm" className="w-36">
-            <SelectValue placeholder="Sévérité" />
+            <SelectValue placeholder={m.anomalies_severity()} />
           </SelectTrigger>
           <SelectContent>
-            <SelectItem value={ALL}>Toutes sévérités</SelectItem>
+            <SelectItem value={ALL}>{m.anomalies_all_severities()}</SelectItem>
             {SEVERITIES.map((s) => (
               <SelectItem key={s} value={s}>
                 {s}
@@ -237,10 +247,10 @@ export function AnomaliesTab() {
         </Select>
         <Select value={source} onValueChange={setSource}>
           <SelectTrigger size="sm" className="w-32">
-            <SelectValue placeholder="Source" />
+            <SelectValue placeholder={m.anomalies_source()} />
           </SelectTrigger>
           <SelectContent>
-            <SelectItem value={ALL}>Toutes sources</SelectItem>
+            <SelectItem value={ALL}>{m.anomalies_all_sources()}</SelectItem>
             {SOURCES.map((s) => (
               <SelectItem key={s} value={s}>
                 {s}
@@ -250,10 +260,10 @@ export function AnomaliesTab() {
         </Select>
         <Select value={kind} onValueChange={setKind}>
           <SelectTrigger size="sm" className="w-36">
-            <SelectValue placeholder="Type" />
+            <SelectValue placeholder={m.anomalies_type()} />
           </SelectTrigger>
           <SelectContent>
-            <SelectItem value={ALL}>Tous les types</SelectItem>
+            <SelectItem value={ALL}>{m.anomalies_all_types()}</SelectItem>
             {kindOptions.map((k) => (
               <SelectItem key={k} value={k}>
                 {k}
@@ -264,19 +274,19 @@ export function AnomaliesTab() {
       </FilterBar>
 
       <DataTableShell
-        title="Anomalies"
+        title={m.anomalies_title()}
         rows={rows}
         emptyHint={
           anomalyStatus === "open"
-            ? "Aucune anomalie ouverte. 🎉"
-            : "Aucune anomalie enregistrée."
+            ? m.anomalies_empty_open()
+            : m.anomalies_empty_all()
         }
         rowActions={(r) =>
           canResolve && r.status === "open"
             ? [
-                { label: "Résoudre (corrigé)", onSelect: () => void resolve(r) },
+                { label: m.anomalies_action_resolve(), onSelect: () => void resolve(r) },
                 {
-                  label: "Marquer comme vue (sourdine)",
+                  label: m.anomalies_action_acknowledge(),
                   onSelect: () => void acknowledge(r),
                 },
               ]
@@ -284,7 +294,7 @@ export function AnomaliesTab() {
         }
         columns={[
           {
-            header: "Quand",
+            header: m.anomalies_col_when(),
             cell: (r) => (
               <span className="oc-traces__time">
                 {new Date(r.at).toLocaleString("fr-FR")}
@@ -292,31 +302,31 @@ export function AnomaliesTab() {
             ),
           },
           {
-            header: "Type",
+            header: m.anomalies_type(),
             cell: (r) => <code className="oc-traces__mono">{r.kind}</code>,
           },
           {
-            header: "Sévérité",
+            header: m.anomalies_severity(),
             cell: (r) => <SeverityBadge severity={r.severity} />,
           },
           {
-            header: "Statut",
+            header: m.anomalies_col_status(),
             cell: (r) => <StatusBadge status={r.status} />,
           },
           {
-            header: "Source",
+            header: m.anomalies_source(),
             cell: (r) => <Badge variant="outline">{r.source}</Badge>,
           },
           {
-            header: "Message",
+            header: m.anomalies_col_message(),
             cell: (r) => <span className="oc-anomaly__msg">{r.message}</span>,
           },
           {
-            header: "Cause & correctif",
+            header: m.anomalies_col_cause(),
             cell: (r) => <CauseCell row={r} />,
           },
           {
-            header: "Corrélation",
+            header: m.anomalies_col_correlation(),
             cell: (r) =>
               r.correlationId ? (
                 <code className="oc-traces__mono">
@@ -382,7 +392,7 @@ function CauseCell({ row }: { row: AnomalyView }) {
             })
           }
         >
-          ↗ Voir la trace
+          ↗ {m.anomalies_view_trace()}
         </button>
       ) : null}
     </div>
@@ -400,10 +410,11 @@ function SeverityBadge({ severity }: { severity: AnomalyView["severity"] }) {
 }
 
 function StatusBadge({ status }: { status: AnomalyView["status"] }) {
-  if (status === "open") return <Badge variant="destructive">ouverte</Badge>;
+  if (status === "open")
+    return <Badge variant="destructive">{m.anomalies_status_open()}</Badge>;
   if (status === "acknowledged")
-    return <Badge variant="secondary">en sourdine</Badge>;
-  return <Badge variant="outline">résolue</Badge>;
+    return <Badge variant="secondary">{m.anomalies_status_acknowledged()}</Badge>;
+  return <Badge variant="outline">{m.anomalies_status_resolved()}</Badge>;
 }
 
 // First 8 chars is enough to recognize a correlationId at a glance (mirrors

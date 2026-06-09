@@ -3,6 +3,8 @@
 // builds the SAME `filter` arg every list query consumes. This module is pure
 // (no React, no Convex) so it stays trivially testable and importable anywhere.
 
+import { m } from "@/paraglide/messages.js";
+
 /** Comparison operator for an advanced predicate (matches the backend `Op`). */
 export type Op = "eq" | "neq" | "contains" | "gt" | "gte" | "lt" | "lte";
 
@@ -64,18 +66,18 @@ export type RelativePreset = { label: string; from: string };
 
 /** The quick relative presets, newest-window first (Grafana ordering). */
 export const RELATIVE_PRESETS: RelativePreset[] = [
-  { label: "5 dernières minutes", from: "now-5m" },
-  { label: "15 dernières minutes", from: "now-15m" },
-  { label: "30 dernières minutes", from: "now-30m" },
-  { label: "Dernière heure", from: "now-1h" },
-  { label: "3 dernières heures", from: "now-3h" },
-  { label: "6 dernières heures", from: "now-6h" },
-  { label: "12 dernières heures", from: "now-12h" },
-  { label: "Dernières 24 heures", from: "now-24h" },
-  { label: "2 derniers jours", from: "now-2d" },
-  { label: "7 derniers jours", from: "now-7d" },
-  { label: "30 derniers jours", from: "now-30d" },
-  { label: "90 derniers jours", from: "now-90d" },
+  { label: m.filters_preset_last_5m(), from: "now-5m" },
+  { label: m.filters_preset_last_15m(), from: "now-15m" },
+  { label: m.filters_preset_last_30m(), from: "now-30m" },
+  { label: m.filters_preset_last_1h(), from: "now-1h" },
+  { label: m.filters_preset_last_3h(), from: "now-3h" },
+  { label: m.filters_preset_last_6h(), from: "now-6h" },
+  { label: m.filters_preset_last_12h(), from: "now-12h" },
+  { label: m.filters_preset_last_24h(), from: "now-24h" },
+  { label: m.filters_preset_last_2d(), from: "now-2d" },
+  { label: m.filters_preset_last_7d(), from: "now-7d" },
+  { label: m.filters_preset_last_30d(), from: "now-30d" },
+  { label: m.filters_preset_last_90d(), from: "now-90d" },
 ];
 
 /** Format an absolute instant for the trigger label (compact, fr-FR). */

@@ -1,6 +1,14 @@
 import { useMutation } from "convex/react";
 import { useAuthActions } from "@convex-dev/auth/react";
-import { ChevronDown, LogOut, Monitor, Moon, Sun, SlidersHorizontal } from "lucide-react";
+import {
+  ChevronDown,
+  Languages,
+  LogOut,
+  Monitor,
+  Moon,
+  Sun,
+  SlidersHorizontal,
+} from "lucide-react";
 import { Button } from "@/components/ui/button";
 import {
   DropdownMenu,
@@ -12,21 +20,33 @@ import {
   DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
+import { m } from "@/paraglide/messages.js";
+import { type Locale } from "@/paraglide/runtime.js";
 import { api } from "./convexApi";
 import { usePreferences } from "./PreferencesDialog";
 import type { ThemeMode } from "@/lib/useTheme";
 
-// Single top-right menu: identity header + theme mode (radio) + sign out.
-// `mode` is the user's OWN preference (null = following the admin default).
-// Writing it is an optimistic Convex mutation; Convex is the source of truth,
-// the reactive getMe then re-applies the theme everywhere.
+// Single top-right menu: identity header + theme mode (radio) + language (radio)
+// + sign out. `mode` is the user's OWN theme preference (null = following the
+// admin default). Writing it is an optimistic Convex mutation; Convex is the
+// source of truth, the reactive getMe then re-applies the theme everywhere.
+//
+// Language preference is written to Convex (the cross-device source of truth);
+// getMe.resolvedLocale then drives `useApplyLocale`, which applies it through
+// Paraglide (writing localStorage + reloading once on a real change). The radio
+// mirrors the theme one: its value is the user's OWN pref (`localePref`, null =
+// "default" -> follow the admin `defaultLocale`), NOT the applied locale -- so an
+// "app default" choice exists to RE-INHERIT after a personal pick (Codex P2).
 export function UserMenu({
   label,
   mode,
+  localePref,
   minimal = false,
 }: {
   label: string;
   mode: ThemeMode | null;
+  // The user's OWN language preference (null = following the admin default).
+  localePref: Locale | null;
   // Minimal surface for an UNAPPROVED (pending) account: ONLY sign out — no
   // theme controls, no UI preferences. A pending user has zero app permissions,
   // so it must not see any app config either.
@@ -34,9 +54,12 @@ export function UserMenu({
 }) {
   const { signOut } = useAuthActions();
   const setThemeMode = useMutation(api.me.setThemeMode);
+  const setLocalePref = useMutation(api.me.setLocale);
   const openPreferences = usePreferences();
-  // Radio value: a concrete mode, or "default" when the user follows the admin.
+  // Radio value: a concrete mode/locale, or "default" when the user follows the
+  // admin default (so there's always a path back to inheriting it).
   const value = mode ?? "default";
+  const localeValue = localePref ?? "default";
 
   return (
     <DropdownMenu>
@@ -49,11 +72,11 @@ export function UserMenu({
       <DropdownMenuContent align="end" className="w-52">
         {minimal ? (
           <DropdownMenuItem onClick={() => void signOut()}>
-            <LogOut /> Sign out
+            <LogOut /> {m.usermenu_sign_out()}
           </DropdownMenuItem>
         ) : (
           <>
-            <DropdownMenuLabel>Préférences</DropdownMenuLabel>
+            <DropdownMenuLabel>{m.usermenu_preferences()}</DropdownMenuLabel>
             <DropdownMenuRadioGroup
               value={value}
               onValueChange={(v) =>
@@ -63,16 +86,38 @@ export function UserMenu({
               }
             >
               <DropdownMenuRadioItem value="light">
-                <Sun /> Clair
+                <Sun /> {m.usermenu_theme_light()}
               </DropdownMenuRadioItem>
               <DropdownMenuRadioItem value="dark">
-                <Moon /> Sombre
+                <Moon /> {m.usermenu_theme_dark()}
               </DropdownMenuRadioItem>
               <DropdownMenuRadioItem value="system">
-                <Monitor /> Système
+                <Monitor /> {m.usermenu_theme_system()}
               </DropdownMenuRadioItem>
               <DropdownMenuRadioItem value="default">
-                Défaut de l’app
+                {m.usermenu_theme_default()}
+              </DropdownMenuRadioItem>
+            </DropdownMenuRadioGroup>
+            <DropdownMenuSeparator />
+            <DropdownMenuLabel className="flex items-center gap-1.5">
+              <Languages className="opacity-60" /> {m.usermenu_language()}
+            </DropdownMenuLabel>
+            <DropdownMenuRadioGroup
+              value={localeValue}
+              onValueChange={(v) =>
+                void setLocalePref({
+                  locale: v === "default" ? null : (v as Locale),
+                })
+              }
+            >
+              <DropdownMenuRadioItem value="fr">
+                {m.language_fr()}
+              </DropdownMenuRadioItem>
+              <DropdownMenuRadioItem value="en">
+                {m.language_en()}
+              </DropdownMenuRadioItem>
+              <DropdownMenuRadioItem value="default">
+                {m.usermenu_theme_default()}
               </DropdownMenuRadioItem>
             </DropdownMenuRadioGroup>
             <DropdownMenuSeparator />
@@ -85,11 +130,11 @@ export function UserMenu({
                 openPreferences();
               }}
             >
-              <SlidersHorizontal /> Préférences…
+              <SlidersHorizontal /> {m.usermenu_preferences_open()}
             </DropdownMenuItem>
             <DropdownMenuSeparator />
             <DropdownMenuItem onClick={() => void signOut()}>
-              <LogOut /> Sign out
+              <LogOut /> {m.usermenu_sign_out()}
             </DropdownMenuItem>
           </>
         )}

@@ -104,6 +104,12 @@ export default defineSchema({
     ),
     themeName: v.optional(v.string()),
 
+    // Per-user UI language preference (identity-level, like themeMode). OPTIONAL:
+    // unset => resolver falls back to the admin default, then baseLocale "fr".
+    // Mirror of the theme pref so the locale follows the user cross-device. Keep
+    // in sync with project.inlang/settings.json locales.
+    locale: v.optional(v.union(v.literal("fr"), v.literal("en"))),
+
     // DEPRECATED — superseded by `uiPrefs.showTools`. No longer READ by the
     // resolver (it shadowed the admin default + mislabeled as "default"); kept as
     // a column only so existing rows validate. Safe to ignore / GC later.
@@ -261,6 +267,11 @@ export default defineSchema({
       v.union(v.literal("light"), v.literal("dark"), v.literal("system")),
     ),
     defaultThemeName: v.optional(v.string()),
+    // Admin-defined default UI language, used when a user has no `locale` pref.
+    // OPTIONAL: unset => resolver falls back to baseLocale "fr". (The admin setter
+    // lands with the Theme/Settings refonte; the field exists now so the getMe
+    // resolution chain is complete.)
+    defaultLocale: v.optional(v.union(v.literal("fr"), v.literal("en"))),
     // Admin-defined DEFAULTS for the UI preferences module (inherited by users
     // who have no override). Same keys as profiles.uiPrefs / UI_PREF_KEYS.
     uiPrefDefaults: v.optional(
@@ -427,6 +438,71 @@ export default defineSchema({
     order: v.number(),
     part: messagePart,
   }).index("by_message", ["messageId"]),
+
+  // Owner-scoped DENORMALIZATION of every file/media `messagePart`, so a user's
+  // files are listable (Settings → Fichiers) WITHOUT iterating chats → messages →
+  // parts (`messageParts` is only indexed `by_message`, and `part.kind` can't be
+  // indexed inside the union). Same idiom as `messages.userId` / the `uploads`
+  // ownership record. INVARIANT: a `files` row exists IFF a file/media part
+  // exists for that message — enforced by routing every part insert/delete
+  // through the paired helpers in lib/files (recordFileForPart / deleteFilesByMessage).
+  //   - direction: "inbound" = user-uploaded (user message), "outbound" = agent-
+  //     produced (assistant message). Derived from the message role at creation.
+  //   - instanceName: the chat's bound bridge SNAPSHOT at creation (frozen so a
+  //     later rebind can't mislabel it); undefined for an unbound chat. Degenerate
+  //     today (single provider) — the filter self-hides like the sidebar badge.
+  files: defineTable({
+    userId: v.id("users"), // owner (denormalized)
+    chatId: v.id("chats"),
+    messageId: v.id("messages"),
+    storageId: v.id("_storage"),
+    filename: v.string(),
+    mimeType: v.string(),
+    kind: v.union(v.literal("file"), v.literal("media")),
+    direction: v.union(v.literal("inbound"), v.literal("outbound")),
+    instanceName: v.optional(v.string()),
+    // Coarse mimeType bucket, DENORMALIZED at creation so the listing can filter
+    // by category SERVER-SIDE (before the cap) instead of post-cap in memory —
+    // otherwise a category present only in files older than the cap window would
+    // wrongly show "no results". OPTIONAL: legacy rows fall back to mimeCategory().
+    category: v.optional(
+      v.union(
+        v.literal("image"),
+        v.literal("audio"),
+        v.literal("video"),
+        v.literal("pdf"),
+        v.literal("document"),
+        v.literal("archive"),
+        v.literal("other"),
+      ),
+    ),
+    createdAt: v.number(),
+  })
+    .index("by_user_created", ["userId", "createdAt"]) // unfiltered listing + facets
+    .index("by_message", ["messageId"]) // cascade-delete mirror
+    .index("by_storage", ["storageId"]) // GC / backfill dedup
+    // Filtered listings: each puts the filter dimension in the index prefix so a
+    // filter on a rare/old value scans only matching rows (not the whole owner
+    // set up to the cap). The trailing `createdAt` keeps the desc ordering inside
+    // the eq-constrained prefix. listMine picks the index of the most-selective
+    // active filter, then `.filter()`s any remaining dimensions.
+    .index("by_user_chat", ["userId", "chatId", "createdAt"])
+    .index("by_user_category", ["userId", "category", "createdAt"])
+    .index("by_user_direction", ["userId", "direction", "createdAt"])
+    .index("by_user_instance", ["userId", "instanceName", "createdAt"])
+    // Two-dimension cover for the ONE multi-filter combination reachable without
+    // chatId: category + direction (both low-cardinality, so neither alone bounds
+    // the residual scan). chatId-bearing combos stay bounded by the conversation
+    // via by_user_chat; the category×instanceName / direction×instanceName combos
+    // are only reachable under multi-provider (deferred #97) and get their own
+    // composite indexes then. Both prefix columns are eq-constrained by listMine
+    // so the trailing createdAt still drives desc ordering.
+    .index("by_user_category_direction", [
+      "userId",
+      "category",
+      "direction",
+      "createdAt",
+    ]),
 
   // Ownership record for browser-uploaded storage blobs. There is no
   // server-side "upload completed" hook in Convex: `generateUploadUrl` returns

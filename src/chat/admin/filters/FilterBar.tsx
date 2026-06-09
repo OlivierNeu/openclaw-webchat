@@ -2,6 +2,7 @@ import { useEffect, useRef, useState, type ReactNode } from "react";
 import { RotateCcw, Search } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
+import { m } from "@/paraglide/messages.js";
 import { TimeRangePicker } from "./TimeRangePicker";
 import type { TimeRange } from "./types";
 
@@ -15,7 +16,7 @@ const DEBOUNCE_MS = 250;
 export function FilterBar({
   q,
   onQChange,
-  searchPlaceholder = "Rechercher",
+  searchPlaceholder = m.filterbar_search_placeholder(),
   children,
   timeRange,
   onTimeRangeChange,
@@ -93,7 +94,7 @@ export function FilterBar({
         disabled={!canReset}
       >
         <RotateCcw />
-        Réinitialiser
+        {m.filterbar_reset()}
       </Button>
     </div>
   );

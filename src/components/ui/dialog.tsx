@@ -6,6 +6,7 @@ import { XIcon } from "lucide-react"
 
 import { cn } from "@/lib/utils"
 import { Button } from "@/components/ui/button"
+import { m } from "@/paraglide/messages.js"
 
 // Centered modal dialog (shadcn convention) built on the unified `radix-ui`
 // Dialog primitive — same package the Sheet uses, so the data-open/data-closed
@@ -74,7 +75,7 @@ function DialogContent({
           <DialogPrimitive.Close data-slot="dialog-close" asChild>
             <Button variant="ghost" size="icon-sm" className="absolute top-3 right-3">
               <XIcon />
-              <span className="sr-only">Fermer</span>
+              <span className="sr-only">{m.common_close()}</span>
             </Button>
           </DialogPrimitive.Close>
         )}
