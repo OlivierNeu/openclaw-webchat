@@ -136,6 +136,104 @@ describe("discovery cache resilience (B2)", () => {
     expect(rows.length).toBe(2);
     expect(rows.every((r) => r.presentInLastOk === false)).toBe(true);
   });
+
+  // IDEMPOTENT WRITES (prod incident): the 2-min discovery poll must NOT rewrite
+  // `agents` / `instanceDiscovery` when nothing a consumer reads changed — a
+  // steady-state rewrite invalidates the reactive chat queries (enrichUserAgents)
+  // every interval, a re-execution storm a constrained backend can't sustain.
+  test("a steady-state poll re-seeing identical agents does NOT rewrite the row (no churn), but a CHANGE does", async () => {
+    const t = convexTest(schema, modules);
+    await t.mutation(internal.agents.applyDiscovery, {
+      instanceName: "prod",
+      agents: [A("olivier", true, "Olivier")],
+    });
+    // Stamp a sentinel so a later write is detectable (lastSeenAt is unread).
+    await t.run(async (ctx) => {
+      const row = (await ctx.db.query("agents").collect())[0];
+      await ctx.db.patch(row._id, { lastSeenAt: 1 });
+    });
+    // IDENTICAL poll → SKIP → lastSeenAt stays 1.
+    await t.mutation(internal.agents.applyDiscovery, {
+      instanceName: "prod",
+      agents: [A("olivier", true, "Olivier")],
+    });
+    let row = (await t.run((ctx) => ctx.db.query("agents").collect()))[0];
+    expect(row.lastSeenAt).toBe(1);
+    expect(row.displayName).toBe("Olivier");
+    // A CHANGED poll (new displayName) → WRITES → lastSeenAt moves off the sentinel.
+    await t.mutation(internal.agents.applyDiscovery, {
+      instanceName: "prod",
+      agents: [A("olivier", true, "Renamed")],
+    });
+    row = (await t.run((ctx) => ctx.db.query("agents").collect()))[0];
+    expect(row.lastSeenAt).not.toBe(1);
+    expect(row.displayName).toBe("Renamed");
+  });
+
+  test("RECOVERY (deleted -> returned) STILL writes: presentInLastOk transition is consumer-visible, never swallowed by the idempotent skip", async () => {
+    const t = convexTest(schema, modules);
+    await t.mutation(internal.agents.applyDiscovery, {
+      instanceName: "prod",
+      agents: [A("olivier", true)],
+    });
+    // Genuine empty gateway → olivier flips deleted.
+    await t.mutation(internal.agents.applyDiscovery, {
+      instanceName: "prod",
+      agents: [],
+      allowEmpty: true,
+    });
+    let row = (await t.run((ctx) => ctx.db.query("agents").collect()))[0];
+    expect(row.presentInLastOk).toBe(false);
+    // It REAPPEARS on a later poll → must flip back to present (a write happens).
+    await t.mutation(internal.agents.applyDiscovery, {
+      instanceName: "prod",
+      agents: [A("olivier", true)],
+    });
+    row = (await t.run((ctx) => ctx.db.query("agents").collect()))[0];
+    expect(row.presentInLastOk).toBe(true);
+  });
+
+  test("instanceDiscovery: a steady-state successful poll is a NO-OP write (lastPollOk already true); a fail then a recovery DO write", async () => {
+    const t = convexTest(schema, modules);
+    await t.mutation(internal.agents.applyDiscovery, {
+      instanceName: "prod",
+      agents: [A("olivier", true)],
+    });
+    const discOf = () =>
+      t.run((ctx) =>
+        ctx.db
+          .query("instanceDiscovery")
+          .withIndex("by_instance", (q) => q.eq("instanceName", "prod"))
+          .unique(),
+      );
+    // Sentinel the timestamps; nothing reads them, so the idempotent skip must
+    // leave them untouched on a steady-state success.
+    await t.run(async (ctx) => {
+      const d = (await ctx.db.query("instanceDiscovery").collect())[0];
+      await ctx.db.patch(d._id, { lastPollAt: 1, lastOkAt: 1 });
+    });
+    await t.mutation(internal.agents.applyDiscovery, {
+      instanceName: "prod",
+      agents: [A("olivier", true)],
+    });
+    expect((await discOf())!.lastPollAt).toBe(1); // no-op: not rewritten
+
+    // A FAILURE is a state change → writes lastPollOk=false.
+    await t.mutation(internal.agents.recordDiscoveryFailure, {
+      instanceName: "prod",
+      error: "unreachable",
+    });
+    expect((await discOf())!.lastPollOk).toBe(false);
+
+    // Recovery (success after a failure) is a state change → writes lastPollOk=true.
+    await t.mutation(internal.agents.applyDiscovery, {
+      instanceName: "prod",
+      agents: [A("olivier", true)],
+    });
+    const d = await discOf();
+    expect(d!.lastPollOk).toBe(true);
+    expect(d!.lastPollAt).not.toBe(1);
+  });
 });
 
 describe("assignAgent — discovered-only whitelist + first-is-default", () => {

@@ -44,6 +44,16 @@ async function upsertInstanceDiscovery(
     .withIndex("by_instance", (q) => q.eq("instanceName", instanceName))
     .first();
   if (patch.ok) {
+    // IDEMPOTENT WRITE: the ONLY consumer-read field is the `lastPollOk` BOOLEAN
+    // (enrichUserAgents / groups state = "stale" iff !lastPollOk; there is NO
+    // time-based staleness on the timestamps — verified). So a steady-state
+    // success (already ok, no error) changes only `lastPollAt`/`lastOkAt`, which
+    // nothing reads to decide behavior. Skipping that no-op write keeps
+    // instanceDiscovery — read by enrichUserAgents per grant — cache-stable across
+    // polls, avoiding a per-interval invalidation of the chat queries.
+    if (existing && existing.lastPollOk === true && existing.error === undefined) {
+      return; // nothing a consumer reads changed
+    }
     const fields = {
       instanceName,
       lastPollAt: patch.now,
@@ -99,23 +109,43 @@ export const applyDiscovery = internalMutation({
     for (const a of agents) {
       seen.add(a.agentId);
       const cur = byId.get(a.agentId);
-      const fields = {
+      // The fields any CONSUMER reads (enrichUserAgents / the picker). `lastSeenAt`
+      // is a heartbeat NOTHING reads, so it is DELIBERATELY excluded from the
+      // change check below.
+      const next = {
         displayName: a.displayName ?? undefined,
         emoji: a.emoji ?? undefined,
         model: a.model ?? undefined,
         isDefaultOnInstance: a.isDefaultOnInstance,
         source: "discovered" as const,
         presentInLastOk: true,
-        lastSeenAt: now,
       };
-      if (cur) await ctx.db.patch(cur._id, fields);
-      else
+      if (cur) {
+        // IDEMPOTENT WRITE: only patch when a consumer-visible field actually
+        // CHANGED. A steady-state poll that re-sees identical agents must NOT
+        // rewrite the row — that would invalidate every reactive query reading
+        // `agents` (enrichUserAgents -> chat sidebar/header chip, new-chat picker)
+        // on EVERY poll interval, forcing a re-execution storm that a constrained
+        // backend can't keep up with. Bumping `lastSeenAt` alone never justifies a
+        // write (no one reads it). `presentInLastOk` IS in the check, so a
+        // deleted->returned recovery still writes (routing-critical).
+        const changed =
+          cur.displayName !== next.displayName ||
+          cur.emoji !== next.emoji ||
+          cur.model !== next.model ||
+          cur.isDefaultOnInstance !== next.isDefaultOnInstance ||
+          cur.source !== next.source ||
+          cur.presentInLastOk !== next.presentInLastOk;
+        if (changed) await ctx.db.patch(cur._id, { ...next, lastSeenAt: now });
+      } else {
         await ctx.db.insert("agents", {
           instanceName,
           agentId: a.agentId,
           firstSeenAt: now,
-          ...fields,
+          lastSeenAt: now,
+          ...next,
         });
+      }
     }
     // Discovered rows absent from this successful poll => deleted on the gateway.
     // GUARD (red-team MAJOR 1): flip presence when the poll returned agents, OR
