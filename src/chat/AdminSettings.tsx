@@ -69,14 +69,17 @@ const ALL = "__all__";
 // `/settings/<tab>`, and this tuple is what both sides validate against.
 export const TABS = [
   "users",
+  "groups",
   "instances",
   "bridge",
   "serviceAccounts",
   "roles",
+  "access",
   "traces",
   "kpi",
   "anomalies",
   "files",
+  "preferences",
   "integrations",
   "theme",
   "uiprefs",
@@ -87,6 +90,8 @@ export type Tab = (typeof TABS)[number];
 
 // The paramless tabs — they ride the shared `/settings/$tab` route in the router.
 export const PARAMLESS_TABS = [
+  "groups",
+  "access",
   "roles",
   "integrations",
   "instances",
@@ -95,12 +100,15 @@ export const PARAMLESS_TABS = [
   "uiprefs",
   "feedbacks",
   "files",
+  "preferences",
 ] as const;
 export type ParamlessTab = (typeof PARAMLESS_TABS)[number];
 
 // FR labels for tabs whose raw key isn't a clean capitalized word. Tabs absent
 // from this map fall back to the CSS text-transform: capitalize on the raw key.
 export const TAB_LABELS: Partial<Record<Tab, string>> = {
+  groups: "Groupes", // FR fallback; the nav renders m.settings_tab_groups
+  access: "Accès", // FR fallback; the nav renders m.settings_tab_access
   serviceAccounts: "Comptes de service",
   roles: "Rôles",
   traces: "Traces",
@@ -112,6 +120,7 @@ export const TAB_LABELS: Partial<Record<Tab, string>> = {
   bridge: "Bridge",
   files: "Fichiers", // FR fallback; the nav renders the i18n label (m.files_tab_label)
   theme: "Apparence", // FR fallback; nav renders m.appearance_tab_label
+  preferences: "Préférences", // FR fallback; nav renders m.settings_tab_preferences
 };
 
 // --- Per-tab RBAC ----------------------------------------------------------
@@ -123,10 +132,14 @@ export const TAB_LABELS: Partial<Record<Tab, string>> = {
 // boundary. Keep this map total over TABS (Record<Tab,...> enforces that).
 export const TAB_PERMISSION: Record<Tab, string> = {
   users: "admin.manage",
+  groups: "groups.manage",
   instances: "admin.manage",
   bridge: "bridge.read",
   serviceAccounts: "admin.manage",
   roles: "admin.manage",
+  // Introspection ("who has access to what") reads ANOTHER user's access map, so
+  // it is admin-only (the query re-checks admin.manage on the REAL identity).
+  access: "admin.manage",
   traces: "traces.read",
   kpi: "kpi.read",
   anomalies: "anomalies.read",
@@ -134,8 +147,16 @@ export const TAB_PERMISSION: Record<Tab, string> = {
   // base `chats.read` permission every approved user already holds (admins via
   // the wildcard) → visible to ALL users by default, NOT a grantable admin tab.
   files: "chats.read",
+  // Personal preferences (language + UI toggles) — owner-scoped, gated on the
+  // base `chats.read` every approved user holds → visible to ALL, not grantable.
+  preferences: "chats.read",
   integrations: "admin.manage",
-  theme: "admin.manage",
+  // Apparence: the per-user "charte graphique" picker is owner-scoped, gated on
+  // the base `chats.read` every approved user holds -> visible to ALL. The admin
+  // controls (global default chart, per-builtin availability, default theme-mode
+  // / language) are gated INSIDE the component on me.role==="admin", and the
+  // server independently gates each admin mutation on CHARTS_MANAGE / admin.
+  theme: "chats.read",
   uiprefs: "admin.manage",
   audit: "admin.manage",
   feedbacks: "admin.manage",

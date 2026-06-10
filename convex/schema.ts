@@ -98,10 +98,14 @@ export default defineSchema({
 
     // Per-user theme preference (identity-level: even a pending user controls
     // it). OPTIONAL: when unset, the resolver falls back to the admin default,
-    // then "system". `themeName` is reserved for future named palettes.
+    // then "system".
     themeMode: v.optional(
       v.union(v.literal("light"), v.literal("dark"), v.literal("system")),
     ),
+    // The user's SELECTED chart (charte graphique) key (P3). A builtin key from
+    // convex/lib/charts.BUILTIN_CHART_KEYS, or unset = the app default (resolved
+    // to the admin default, then the native index.css look). Written ONLY via
+    // charts.setMyChart, which rejects a key not available to the user.
     themeName: v.optional(v.string()),
 
     // Per-user UI language preference (identity-level, like themeMode). OPTIONAL:
@@ -249,6 +253,108 @@ export default defineSchema({
     // never has to scan the whole table — Convex read/write doc limits (Codex P2).
     .index("by_instance", ["instanceName"]),
 
+  // ===========================================================================
+  // GROUPS (P2). Regroup users + share agents by group. Admin-managed only (no
+  // intra-group RBAC, no soft-delete — see docs/GROUPS_CHARTS_P2_SPEC.md). Group
+  // agents are NOT materialized into `userAgents`: the user↔agent union is
+  // computed at READ time (enrichUserAgents / resolveTargetForChat), so there is
+  // no drift and the "exactly one isDefault per user" invariant stays on DIRECT
+  // userAgents only.
+  // ===========================================================================
+
+  // A named group of users. `key` is a stable slug derived from `name` at
+  // creation (collision-safe), used as the provenance token in resolvers
+  // (`via: { group: key }`). Renaming never changes the key.
+  groups: defineTable({
+    key: v.string(), // stable slug, unique
+    name: v.string(),
+    description: v.optional(v.string()),
+    createdBy: v.id("users"),
+    createdAt: v.number(),
+  }).index("by_key", ["key"]),
+
+  // M:N membership user↔group (multi-membership allowed). `by_user_group` serves
+  // both the dedup-on-add check and the per-user membership lookup feeding the
+  // agents union; `by_user` powers listMyGroups (and is ready to back a
+  // groupMembers purge WHEN a user-deletion path is added — none exists today).
+  groupMembers: defineTable({
+    groupId: v.id("groups"),
+    userId: v.id("users"),
+    joinedAt: v.number(),
+  })
+    .index("by_group", ["groupId"])
+    .index("by_user", ["userId"])
+    .index("by_user_group", ["userId", "groupId"]),
+
+  // Agents shared with a group (M:N group↔agent). `isDefault` is an OPTIONAL
+  // per-group default with NO "exactly one per group" invariant (unlike
+  // userAgents) — the read-time precedence simply picks the lowest deterministic
+  // one when several are set. `by_instance` serves the deleteInstance cascade.
+  groupAgents: defineTable({
+    groupId: v.id("groups"),
+    instanceName: v.string(),
+    agentId: v.string(),
+    isDefault: v.optional(v.boolean()),
+    createdAt: v.number(),
+  })
+    .index("by_group", ["groupId"])
+    .index("by_instance", ["instanceName"])
+    .index("by_group_instance_agent", ["groupId", "instanceName", "agentId"]),
+
+  // Charts (charte graphique) shared with a group (M:N group<->builtin chart).
+  // Parallel to groupAgents. P3 stores ONLY this join (the `charts` custom table
+  // arrives in P4). Availability convention (no scope column on builtins): a
+  // builtin is COMMON (available to ALL users) UNLESS it has >=1 groupCharts row,
+  // in which case it is RESTRICTED to members of those groups. `chartKey` is a
+  // builtin key (convex/lib/charts.BUILTIN_CHART_KEYS); the assign mutation
+  // rejects an unknown key. `by_group` serves the deleteGroup cascade; `by_chart`
+  // powers the availability computation; `by_group_chart` serves the
+  // assign/remove unique() dedup (mirrors groupAgents' by_group_instance_agent).
+  groupCharts: defineTable({
+    groupId: v.id("groups"),
+    chartKey: v.string(),
+    createdAt: v.number(),
+  })
+    .index("by_group", ["groupId"])
+    .index("by_chart", ["chartKey"])
+    .index("by_group_chart", ["groupId", "chartKey"]),
+
+  // Custom charts (charte graphique) IMPORTED by users (P4) -- builtins stay in
+  // code (convex/lib/charts.ts). `key` is a server-minted unique slug, DISJOINT
+  // from BUILTIN_CHART_KEYS (importChart rejects/retries a collision) so the
+  // key -> tokens dispatch in getMe/listMyCharts is unambiguous. `tokens` holds
+  // the SERVER-RE-SERIALIZED tokens (validateChartTokens output) -- NEVER the raw
+  // client string (the typed-token allowlist closes the injection surface). The
+  // color-token map is stored as a free string->string record (the closed set of
+  // keys is enforced at WRITE time by the validator, not by the column shape --
+  // the schema cannot express "only COLOR_TOKENS keys").
+  //   - scope "personal": ownerUserId REQUIRED; available to the owner + members
+  //     of the groups it is assigned to (groupCharts).
+  //   - scope "common":   ownerUserId ABSENT; available to ALL (promoteChartToCommon
+  //     clears ownerUserId). Admin-managed only.
+  // groupCharts.chartKey already references a chart key (builtin OR custom); the
+  // assign gate (admin OR owner+member) governs which keys a non-admin may join.
+  charts: defineTable({
+    key: v.string(), // unique slug, disjoint from builtins
+    name: v.string(),
+    scope: v.union(v.literal("personal"), v.literal("common")),
+    ownerUserId: v.optional(v.id("users")), // REQUIRED for personal, absent for common
+    tokens: v.object({
+      colors: v.object({
+        light: v.record(v.string(), v.string()),
+        dark: v.record(v.string(), v.string()),
+      }),
+      radius: v.optional(v.string()),
+      fontSans: v.optional(v.string()),
+      fontMono: v.optional(v.string()),
+    }),
+    createdBy: v.id("users"),
+    createdAt: v.number(),
+  })
+    .index("by_key", ["key"])
+    .index("by_owner", ["ownerUserId"])
+    .index("by_scope", ["scope"]),
+
   // Singleton app metadata. Exactly one row (key === "singleton"). Acts as the
   // serialization point for first-admin bootstrap: the first sign-in that finds
   // `adminAssigned === false` claims admin AND flips the flag in one
@@ -261,11 +367,14 @@ export default defineSchema({
     // pending->user approval flow is always on for now.
     requireApproval: v.optional(v.boolean()),
     // Admin-defined default theme mode, used when a user has no preference.
-    // OPTIONAL: when unset, the resolver falls back to "system". `defaultThemeName`
-    // is reserved for future named palettes.
+    // OPTIONAL: when unset, the resolver falls back to "system".
     defaultThemeMode: v.optional(
       v.union(v.literal("light"), v.literal("dark"), v.literal("system")),
     ),
+    // Admin-defined GLOBAL default chart (charte graphique) key (P3). Used when a
+    // user has no pick (or their pick is no longer available). A builtin key, or
+    // unset = the native index.css look. Written ONLY via charts.setDefaultChart
+    // (CHARTS_MANAGE), which rejects a key not in BUILTIN_CHART_KEYS.
     defaultThemeName: v.optional(v.string()),
     // Admin-defined default UI language, used when a user has no `locale` pref.
     // OPTIONAL: unset => resolver falls back to baseLocale "fr". (The admin setter

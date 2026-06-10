@@ -278,6 +278,30 @@ export const listAgentsForInstance = query({
   },
 });
 
+// Provenance of an agent in the effective (unioned) set: a DIRECT userAgents
+// grant ("user"), or shared via a group the user belongs to ({ group: <key> }).
+// Direct WINS on dedup, so a direct grant always reports "user". Foundation for
+// the P5 "who has what" introspection screen (spec §6).
+export type AgentVia = "user" | { group: string };
+
+// The raw user↔agent union BEFORE enrichment/state classification: direct
+// userAgents ∪ the agents of the user's groups, deduped by (instanceName,
+// agentId) with DIRECT membership winning. `isDefault` is the EFFECTIVE default
+// per the precedence (direct default > group default > instance native > code),
+// computed WITHOUT regard to deletion (resolve-time skips deleted, exactly as
+// pre-P2). Shared by enrichUserAgents (adds `state` + UI fields) AND
+// routing.resolveTargetForChat (keeps its own `isDeleted` loop) so the union
+// lives in ONE place and the no-group path stays byte-identical.
+type EffectiveGrant = {
+  instanceName: string;
+  agentId: string;
+  isDefault: boolean;
+  // Carried through for direct grants so enrichment can preserve the existing
+  // `source` field verbatim; group-only grants have no userAgents.source.
+  source: "manual" | "auto" | null;
+  via: AgentVia;
+};
+
 type EnrichedUserAgent = {
   instanceName: string;
   agentId: string;
@@ -289,7 +313,135 @@ type EnrichedUserAgent = {
   kind: "openclaw" | "hermes";
   // Resolution health for the UI (red-team B2): deleted vs stale vs ok.
   state: "ok" | "deleted" | "stale" | "unknown";
+  // Provenance for introspection (P2 §6): direct grant vs which group shares it.
+  via: AgentVia;
 };
+
+const grantKey = (instanceName: string, agentId: string): string =>
+  `${instanceName.length}:${instanceName}/${agentId}`;
+
+/** THE union resolver (P2 §4). Computes the effective set of agents a user may
+ *  use — direct `userAgents` ∪ agents shared by the user's groups — deduped by
+ *  (instanceName, agentId) with DIRECT membership winning, and assigns ONE
+ *  effective default by precedence:
+ *    direct userAgents.isDefault > group default (lowest groupId, then agentId)
+ *    > instance native default (isDefaultOnInstance) > code (first deterministic).
+ *  The "exactly one isDefault per user" invariant stays on DIRECT userAgents
+ *  (the mutations enforce it); group agents are never materialized. With NO
+ *  groups the output is the user's direct rows in by_user order with `via:"user"`
+ *  and `isDefault` === the row's own — i.e. byte-identical to the pre-P2 set the
+ *  callers consume. Deletion is IGNORED here (resolve-time skips deleted). */
+export async function getEffectiveGrants(
+  ctx: QueryCtx | MutationCtx,
+  userId: Id<"users">,
+): Promise<EffectiveGrant[]> {
+  const direct = await ctx.db
+    .query("userAgents")
+    .withIndex("by_user", (q) => q.eq("userId", userId))
+    .collect();
+
+  // Direct grants first (they WIN on dedup). Preserve by_user order and each
+  // row's own isDefault so the no-group path is identical to pre-P2.
+  const out: EffectiveGrant[] = direct.map((r) => ({
+    instanceName: r.instanceName,
+    agentId: r.agentId,
+    isDefault: r.isDefault,
+    source: r.source,
+    via: "user" as const,
+  }));
+  const seen = new Set(out.map((g) => grantKey(g.instanceName, g.agentId)));
+
+  // Group agents: read the user's memberships, then each group's shared agents.
+  const memberships = await ctx.db
+    .query("groupMembers")
+    .withIndex("by_user", (q) => q.eq("userId", userId))
+    .collect();
+  // Deterministic group order (by groupId) so the group-default tiebreak is
+  // stable across calls (spec: lowest groupId, then agentId).
+  const groupIds = memberships
+    .map((m) => m.groupId)
+    .sort((a, b) => (a < b ? -1 : a > b ? 1 : 0));
+
+  // Per-group shared rows (sorted by agentId), cached so the default election
+  // below reuses them instead of re-reading. Ordered by groupId asc to match the
+  // deterministic "lowest groupId, then agentId" tiebreak.
+  const sharedByGroup: Array<{ groupId: Id<"groups">; rows: Doc<"groupAgents">[] }> = [];
+  for (const groupId of groupIds) {
+    const group = await ctx.db.get(groupId);
+    if (group === null) continue; // tolerate a dangling membership
+    const shared = await ctx.db
+      .query("groupAgents")
+      .withIndex("by_group", (q) => q.eq("groupId", groupId))
+      .collect();
+    // Within a group, order by agentId for a stable group-default tiebreak.
+    shared.sort((a, b) =>
+      a.agentId < b.agentId ? -1 : a.agentId > b.agentId ? 1 : 0,
+    );
+    sharedByGroup.push({ groupId, rows: shared });
+    for (const ga of shared) {
+      const key = grantKey(ga.instanceName, ga.agentId);
+      if (seen.has(key)) continue; // direct (or an earlier group) already covers it
+      seen.add(key);
+      out.push({
+        instanceName: ga.instanceName,
+        agentId: ga.agentId,
+        // Group `isDefault` is provisional here; the effective default is
+        // re-derived below across the WHOLE set so precedence holds.
+        isDefault: false,
+        source: null,
+        via: { group: group.key },
+      });
+    }
+  }
+
+  // Effective default. Direct default wins and is ALREADY set verbatim above
+  // (and the invariant guarantees at most one direct default). Only when there
+  // is NO direct default do we elect ONE default among the GROUP-ONLY candidates
+  // by precedence (a direct-covered agent keeps `via:"user"` and is never the
+  // group/native default — direct provenance with no direct default means the
+  // user simply has no default among direct agents).
+  const hasDirectDefault = out.some((g) => g.via === "user" && g.isDefault);
+  if (!hasDirectDefault) {
+    const groupCandidates = out.filter((g) => g.via !== "user");
+    if (groupCandidates.length > 0) {
+      let chosen: EffectiveGrant | null = null;
+      // Tier 1: the first group (lowest groupId) that marked one of its shared
+      // agents as its default AND that agent is a group-only candidate here.
+      for (const { rows } of sharedByGroup) {
+        const def = rows.find((ga) => ga.isDefault === true);
+        if (!def) continue;
+        const cand = groupCandidates.find(
+          (g) =>
+            g.instanceName === def.instanceName && g.agentId === def.agentId,
+        );
+        if (cand) {
+          chosen = cand;
+          break;
+        }
+      }
+      // Tier 2: instance native default (isDefaultOnInstance) among candidates.
+      if (chosen === null) {
+        for (const g of groupCandidates) {
+          const agent = await ctx.db
+            .query("agents")
+            .withIndex("by_instance_agent", (q) =>
+              q.eq("instanceName", g.instanceName).eq("agentId", g.agentId),
+            )
+            .first();
+          if (agent?.isDefaultOnInstance) {
+            chosen = g;
+            break;
+          }
+        }
+      }
+      // Tier 3: code default — the first candidate in deterministic order.
+      if (chosen === null) chosen = groupCandidates[0];
+      if (chosen) chosen.isDefault = true;
+    }
+  }
+
+  return out;
+}
 
 /** SINGLE resolver for "which agent does this chat route to" — used by BOTH the
  *  header chip (getChatAgent) AND the sidebar bridge badge (messages.listChats),
@@ -320,15 +472,15 @@ export function resolveAgentForChat(
 }
 
 export async function enrichUserAgents(
-  ctx: QueryCtx,
+  ctx: QueryCtx | MutationCtx,
   userId: Id<"users">,
 ): Promise<EnrichedUserAgent[]> {
-  const rows = await ctx.db
-    .query("userAgents")
-    .withIndex("by_user", (q) => q.eq("userId", userId))
-    .collect();
+  // Consume the shared union (P2): with NO groups this is the user's direct rows
+  // in by_user order with the same isDefault, so the loop below — and therefore
+  // the whole output (agents, default, states) — is identical to pre-P2.
+  const grants = await getEffectiveGrants(ctx, userId);
   const out: EnrichedUserAgent[] = [];
-  for (const r of rows) {
+  for (const r of grants) {
     const agent = await ctx.db
       .query("agents")
       .withIndex("by_instance_agent", (q) =>
@@ -358,12 +510,15 @@ export async function enrichUserAgents(
       instanceName: r.instanceName,
       agentId: r.agentId,
       isDefault: r.isDefault,
-      source: r.source,
+      // A group-only grant has no userAgents.source; surface it as "auto" (it is
+      // not a manual per-user assignment). Direct grants keep their own source.
+      source: r.source ?? "auto",
       displayName: agent?.displayName ?? null,
       emoji: agent?.emoji ?? null,
       model: agent?.model ?? null,
       kind: instance?.kind ?? "openclaw",
       state,
+      via: r.via,
     });
   }
   return out;
@@ -444,7 +599,15 @@ export const listUserAgents = query({
     await requireAdmin(ctx);
     const profile = await ctx.db.get(profileId);
     if (profile === null) throw new Error("Not found: profile");
-    return enrichUserAgents(ctx, profile.userId);
+    // DIRECT grants ONLY (via "user"). This editor MUTATES the userAgents table
+    // (assign/remove/setDefaultAgent all key on a direct row), so it must show
+    // exactly what those mutations can act on -- a group-INHERITED agent has no
+    // userAgents row, so removeAgent would no-op and setDefaultAgent would throw.
+    // The full union WITH provenance is the read-only Accès (introspection) tab.
+    // Direct entries keep their own isDefault verbatim (getEffectiveGrants only
+    // elects a default among via!="user" candidates), so the star stays correct.
+    const enriched = await enrichUserAgents(ctx, profile.userId);
+    return enriched.filter((a) => a.via === "user");
   },
 });
 

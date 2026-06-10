@@ -69,6 +69,7 @@ import {
 } from "./chat/AdminSettings";
 import { ServiceAccountsTab } from "./chat/admin/ServiceAccountsTab";
 import { RolesTab } from "./chat/admin/RolesTab";
+import { GroupsTab } from "./chat/admin/GroupsTab";
 import { TracesTab } from "./chat/admin/TracesTab";
 import { KpiTab } from "./chat/admin/KpiTab";
 import { AnomaliesTab } from "./chat/admin/AnomaliesTab";
@@ -76,6 +77,8 @@ import { IntegrationsTab } from "./chat/admin/IntegrationsTab";
 import { FeedbacksTab } from "./chat/admin/FeedbacksTab";
 import { UiPrefsTab } from "./chat/admin/UiPrefsTab";
 import { FilesTab } from "./chat/admin/FilesTab";
+import { PreferencesTab } from "./chat/admin/PreferencesTab";
+import { AccessTab } from "./chat/admin/AccessTab";
 import { BridgeTab } from "./chat/admin/BridgeTab";
 import { SettingsNav } from "./chat/admin/SettingsNav";
 import { ThemeShowroom } from "./chat/ThemeShowroom";
@@ -91,7 +94,9 @@ import { Button } from "@/components/ui/button";
 import { ToastProvider } from "@/components/ui/toast";
 import { m } from "@/paraglide/messages.js";
 import { useApplyTheme, type ThemeMode } from "@/lib/useTheme";
+import { useApplyChart, useResolvedMode } from "@/lib/useChart";
 import { useApplyLocale, type Locale } from "@/lib/useLocale";
+import type { ChartTokens } from "../convex/lib/charts";
 import { useSidebarLayout } from "@/lib/useSidebarLayout";
 import { Link, useMatchRoute } from "@tanstack/react-router";
 
@@ -107,6 +112,13 @@ type Me = {
   themeMode: ThemeMode | null;
   resolvedThemeMode: ThemeMode;
   defaultThemeMode: ThemeMode | null;
+  // Charte graphique (P3): the user's raw pick + the server-resolved effective
+  // key (user pick if still available, else admin default, else null = native).
+  chartKey: string | null;
+  resolvedChartKey: string | null;
+  // P4: the resolved chart's TOKENS (builtin from the registry OR custom from the
+  // DB, resolved server-side). null = native look. Fed straight to useApplyChart.
+  resolvedChartTokens: ChartTokens | null;
   locale: Locale | null;
   resolvedLocale: Locale;
   defaultLocale: Locale | null;
@@ -213,6 +225,15 @@ function RoleGate() {
   // loads -> the hook falls back to the localStorage cache (no flash).
   useApplyTheme(me?.resolvedThemeMode);
 
+  // Apply the Convex-resolved charte graphique on top of the theme mode. The
+  // chart's COLOR tokens are mode-scoped, so we first resolve the (possibly
+  // "system") mode down to a concrete light/dark — state-backed so an OS flip
+  // re-applies — then feed the SERVER-RESOLVED tokens (P4 moved key->tokens
+  // resolution server-side; builtin or custom). Coordinated with useApplyTheme,
+  // which owns the `.dark` class for the SAME resolved mode.
+  const effectiveMode = useResolvedMode(me?.resolvedThemeMode);
+  useApplyChart(me?.resolvedChartTokens, effectiveMode);
+
   // Apply the Convex-resolved UI language (source of truth). undefined until
   // getMe loads -> Paraglide's localStorage strategy already owns first-paint.
   // On a real cross-device mismatch the hook reloads ONCE (loop-safe).
@@ -245,12 +266,7 @@ function RoleGate() {
         <header className="oc-topbar">
           <span className="oc-topbar__brand">OpenClaw</span>
           <div className="oc-topbar__actions">
-            <UserMenu
-              label={userLabel}
-              mode={me.themeMode}
-              localePref={me.locale}
-              minimal
-            />
+            <UserMenu label={userLabel} mode={me.themeMode} minimal />
           </div>
         </header>
         <div className="oc-pending">
@@ -271,7 +287,6 @@ function RoleGate() {
       canOpenSettings={visibleTabs(me.permissions ?? []).length > 0}
       userLabel={userLabel}
       themeMode={me.themeMode}
-      localePref={me.locale}
     />
   );
 }
@@ -318,13 +333,11 @@ function ImpersonationBanner() {
 function AppTopBar({
   userLabel,
   themeMode,
-  localePref,
   collapsed,
   onToggleSidebar,
 }: {
   userLabel: string;
   themeMode: ThemeMode | null;
-  localePref: Locale | null;
   collapsed: boolean;
   onToggleSidebar: () => void;
 }) {
@@ -350,7 +363,7 @@ function AppTopBar({
       </div>
       <div className="oc-topbar__actions">
         <NotificationBell />
-        <UserMenu label={userLabel} mode={themeMode} localePref={localePref} />
+        <UserMenu label={userLabel} mode={themeMode} />
       </div>
     </header>
   );
@@ -364,12 +377,10 @@ function AuthenticatedChrome({
   canOpenSettings,
   userLabel,
   themeMode,
-  localePref,
 }: {
   canOpenSettings: boolean;
   userLabel: string;
   themeMode: ThemeMode | null;
-  localePref: Locale | null;
 }) {
   const { width, collapsed, toggleCollapsed, startResize } = useSidebarLayout();
   const matchRoute = useMatchRoute();
@@ -387,7 +398,6 @@ function AuthenticatedChrome({
       <AppTopBar
         userLabel={userLabel}
         themeMode={themeMode}
-        localePref={localePref}
         collapsed={collapsed}
         onToggleSidebar={toggleCollapsed}
       />
@@ -524,6 +534,8 @@ function SettingsIndexRedirect() {
 function SettingsParamlessScreen() {
   const { tab } = useParams({ from: "/settings/$tab" });
   switch (tab) {
+    case "groups":
+      return <GroupsTab />;
     case "integrations":
       return <IntegrationsTab />;
     case "instances":
@@ -538,6 +550,10 @@ function SettingsParamlessScreen() {
       return <UiPrefsTab />;
     case "files":
       return <FilesTab />;
+    case "preferences":
+      return <PreferencesTab />;
+    case "access":
+      return <AccessTab />;
     case "roles":
     default:
       return <RolesTab />;

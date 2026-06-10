@@ -36,6 +36,7 @@ import { m } from "@/paraglide/messages.js";
 // (the rest still fall back to the FR TAB_LABELS until the full migration).
 const TAB_I18N: Partial<Record<Tab, () => string>> = {
   users: () => m.settings_tab_users(),
+  groups: () => m.settings_tab_groups(),
   instances: () => m.settings_tab_instances(),
   bridge: () => m.settings_tab_bridge(),
   serviceAccounts: () => m.settings_tab_serviceaccounts(),
@@ -44,6 +45,8 @@ const TAB_I18N: Partial<Record<Tab, () => string>> = {
   kpi: () => m.settings_tab_kpi(),
   anomalies: () => m.settings_tab_anomalies(),
   files: () => m.files_tab_label(),
+  preferences: () => m.settings_tab_preferences(),
+  access: () => m.settings_tab_access(),
   integrations: () => m.settings_tab_integrations(),
   theme: () => m.appearance_tab_label(),
   uiprefs: () => m.uiprefs_tab_label(),

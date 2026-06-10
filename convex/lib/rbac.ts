@@ -33,6 +33,8 @@ export const PERMISSIONS = {
   ANOMALIES_REPORT: "anomalies.report",
   BRIDGE_READ: "bridge.read", // read bridge health (Settings → Bridge tab)
   CHATS_READ: "chats.read", // read conversational data
+  GROUPS_MANAGE: "groups.manage", // create/manage groups + group agents (admin-only)
+  CHARTS_MANAGE: "charts.manage", // manage chart defaults + group availability (admin-only)
   ADMIN_MANAGE: "admin.manage", // superset; UI/admin only
 } as const;
 

@@ -32,6 +32,8 @@ import {
   type FeaturesEnabled,
   type UiPrefsObject,
 } from "./lib/uiPrefs";
+import { resolveChart } from "./lib/charts";
+import { isChartAvailableToUser, resolveChartTokens } from "./charts";
 
 const APP_META_KEY = "singleton";
 
@@ -100,6 +102,35 @@ export const getMe = query({
     const userMode = profile?.themeMode as ThemeMode | undefined;
     const adminDefaultLocale = meta?.defaultLocale as Locale | undefined;
     const userLocale = profile?.locale as Locale | undefined;
+    // Chart (charte graphique): resolve the user's pick against availability, then
+    // against the admin global default. BOUNDED hot path: only the user's OWN pick
+    // needs an availability check (resolveChart applies the admin default WITHOUT
+    // one), so we probe THAT single key (isChartAvailableToUser) instead of
+    // enumerating every chart — getMe must not subscribe to all common customs
+    // (an unrelated chart edit would otherwise invalidate every session). The KEY
+    // is resolved to its TOKENS server-side below (resolvedChartTokens).
+    const userChartKey = profile?.themeName ?? null;
+    const adminDefaultChart = meta?.defaultThemeName ?? null;
+    const availableChartKeys = new Set<string>();
+    if (
+      userChartKey !== null &&
+      (await isChartAvailableToUser(ctx, userId, userChartKey))
+    ) {
+      availableChartKeys.add(userChartKey);
+    }
+    const resolvedChart = resolveChart(
+      userChartKey,
+      adminDefaultChart,
+      availableChartKeys,
+    );
+    // P4: resolve the chart KEY to its TOKENS server-side (builtin from the code
+    // registry, custom from the `charts` table) so the client applies tokens
+    // directly (no client-side key->tokens map, no builtin/custom branching in
+    // the browser). null for the native index.css look.
+    const resolvedChartTokens = await resolveChartTokens(
+      ctx,
+      resolvedChart.chartKey,
+    );
     return {
       userId,
       role: roleOf(profile),
@@ -111,6 +142,19 @@ export const getMe = query({
       themeMode: userMode ?? null,
       resolvedThemeMode: resolveThemeMode(userMode, adminDefaultMode),
       defaultThemeMode: adminDefaultMode ?? null,
+      // Chart (charte graphique): the user's own pick (or null) + the resolved
+      // effective key + its source ("user" | "common/admin" | "code") + the
+      // admin global default (so the Apparence tab can show it). The resolved
+      // TOKENS are returned too (resolvedChartTokens, below) -- the client
+      // applies them directly, no key->tokens map.
+      chartKey: userChartKey,
+      resolvedChartKey: resolvedChart.chartKey,
+      chartSource: resolvedChart.source,
+      defaultChartKey: adminDefaultChart,
+      // P4: the resolved chart's TOKENS (builtin from the registry OR custom from
+      // the DB, resolved server-side). null = native look. The client applies
+      // these directly via applyChartTokens (no client-side resolution).
+      resolvedChartTokens,
       // UI language (mirror of theme): the user's own pref (or null) + the
       // resolved effective locale the client applies via Paraglide + the admin
       // default. The client's useApplyLocale reconciles localStorage to this.

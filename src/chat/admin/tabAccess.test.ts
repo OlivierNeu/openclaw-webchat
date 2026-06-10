@@ -61,11 +61,18 @@ describe("visibleTabs", () => {
     ]);
   });
 
-  test("a plain user (chats.read only) sees exactly the Files tab", () => {
-    // Files is owner-scoped and gated on the base `chats.read` permission every
-    // approved user holds, so they see it (and land on it) — the explicit
-    // requirement. A permission-less (pending) user still sees nothing.
-    expect(visibleTabs(["chats.read"])).toEqual(["files"]);
+  test("a plain user (chats.read only) sees the owner-scoped tabs (Files + Preferences + Apparence)", () => {
+    // Files, Preferences AND Apparence (theme) are owner-scoped and gated on the
+    // base `chats.read` permission every approved user holds, so they see all
+    // three (and land on the first, Files). Apparence is visible to all because
+    // the per-user charte graphique picker lives there (P3); its admin controls
+    // are gated INSIDE the component on me.role==="admin". Order follows TABS
+    // (files, preferences, theme). A permission-less (pending) user sees nothing.
+    expect(visibleTabs(["chats.read"])).toEqual([
+      "files",
+      "preferences",
+      "theme",
+    ]);
     expect(visibleTabs([])).toEqual([]);
   });
 });

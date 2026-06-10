@@ -1669,6 +1669,131 @@
   .oc-show__section { grid-template-columns: 1fr; gap: 0.75rem; }
 }
 
+/* --- Apparence: charte graphique (P3) ----------------------------------- */
+.oc-appearance { display: flex; flex-direction: column; gap: 2rem; }
+.oc-appearance-admin {
+  display: flex; flex-direction: column; gap: 1.5rem;
+  padding-top: 1.5rem; border-top: 1px solid var(--border);
+}
+
+/* Per-user chart picker: a responsive grid of selectable palette cards. */
+.oc-chart-grid {
+  display: grid; gap: 0.75rem;
+  grid-template-columns: repeat(auto-fill, minmax(190px, 1fr));
+}
+.oc-chart-card {
+  display: flex; flex-direction: column; gap: 0.625rem;
+  padding: 0.75rem; text-align: left; cursor: pointer;
+  border: 1px solid var(--border); border-radius: var(--radius);
+  background: var(--card); color: var(--card-foreground);
+  transition: border-color 0.15s ease, box-shadow 0.15s ease;
+}
+.oc-chart-card:hover { border-color: var(--ring); }
+.oc-chart-card--selected {
+  border-color: var(--primary);
+  box-shadow: 0 0 0 1px var(--primary);
+}
+.oc-chart-card__head {
+  display: flex; align-items: center; justify-content: space-between;
+  gap: 0.5rem; min-height: 1.25rem;
+}
+.oc-chart-card__title { font-size: 0.9rem; font-weight: 600; }
+.oc-chart-card__meta {
+  display: flex; align-items: center; justify-content: space-between;
+  gap: 0.5rem;
+}
+.oc-chart-card__subtitle { font-size: 0.75rem; color: var(--muted-foreground); }
+
+.oc-chart-swatches {
+  display: grid; grid-template-columns: repeat(6, 1fr);
+  gap: 0.25rem; height: 1.5rem;
+}
+.oc-chart-swatch {
+  border-radius: 0.25rem; border: 1px solid var(--border);
+  background: var(--muted);
+}
+.oc-chart-swatches--native {
+  border: 1px dashed var(--border); border-radius: 0.25rem;
+  background:
+    repeating-linear-gradient(
+      45deg, var(--muted), var(--muted) 4px,
+      transparent 4px, transparent 8px
+    );
+}
+
+/* Admin availability matrix: one row per builtin. */
+.oc-chart-avail-list { display: flex; flex-direction: column; gap: 0.75rem; }
+.oc-chart-avail {
+  display: flex; flex-direction: column; gap: 0.5rem;
+  padding: 0.625rem 0.75rem;
+  border: 1px solid var(--border); border-radius: var(--radius);
+}
+.oc-chart-avail__head {
+  display: flex; align-items: center; gap: 0.5rem; flex-wrap: wrap;
+}
+.oc-chart-avail__name { font-size: 0.9rem; font-weight: 600; }
+.oc-chart-avail__groups {
+  display: flex; align-items: center; gap: 0.375rem; flex-wrap: wrap;
+}
+.oc-chart-avail__chip {
+  display: inline-flex; align-items: center; gap: 0.25rem;
+}
+.oc-chart-avail__chip-x {
+  display: inline-flex; align-items: center; cursor: pointer;
+  color: var(--muted-foreground);
+}
+.oc-chart-avail__chip-x:hover { color: var(--foreground); }
+
+/* Import a chart (P4): name + JSON textarea + .json file picker. */
+.oc-chart-import {
+  display: flex; flex-direction: column; gap: 0.75rem;
+  max-width: 640px;
+}
+.oc-chart-import__field {
+  display: flex; flex-direction: column; gap: 0.375rem;
+}
+.oc-chart-import__label {
+  font-size: 0.8rem; font-weight: 600; color: var(--muted-foreground);
+}
+.oc-chart-import__textarea {
+  width: 100%; min-height: 8rem; resize: vertical;
+  padding: 0.5rem 0.75rem;
+  font-family: var(--font-mono); font-size: 0.8rem; line-height: 1.5;
+  border: 1px solid var(--border); border-radius: var(--radius);
+  background: var(--background); color: var(--foreground);
+}
+.oc-chart-import__textarea:focus-visible {
+  outline: none; border-color: var(--ring);
+  box-shadow: 0 0 0 1px var(--ring);
+}
+.oc-chart-import__file {
+  display: inline-flex; align-items: center; gap: 0.375rem; cursor: pointer;
+}
+.oc-chart-import__file-input { display: none; }
+.oc-chart-import__error { font-size: 0.8rem; color: var(--destructive); }
+.oc-chart-import__ok { font-size: 0.8rem; color: var(--primary); }
+
+/* My charts (P4): per-chart edit/delete + group association. */
+.oc-chart-mine-list { display: flex; flex-direction: column; gap: 0.75rem; }
+.oc-chart-mine__row {
+  display: flex; flex-direction: column; gap: 0.625rem;
+  padding: 0.75rem;
+  border: 1px solid var(--border); border-radius: var(--radius);
+}
+.oc-chart-mine__head {
+  display: flex; align-items: center; justify-content: space-between;
+  gap: 0.5rem; flex-wrap: wrap;
+}
+.oc-chart-mine__name { font-size: 0.9rem; font-weight: 600; }
+.oc-chart-mine__editor {
+  display: flex; flex-direction: column; gap: 0.625rem;
+  max-width: 640px;
+}
+.oc-chart-mine__groups-label {
+  font-size: 0.8rem; font-weight: 600; color: var(--muted-foreground);
+  margin-right: 0.25rem;
+}
+
 /* --- Data table shell + sheet form -------------------------------------- */
 .oc-dt { display: flex; flex-direction: column; gap: 0.75rem; }
 .oc-dt__bar {
@@ -2772,6 +2897,35 @@
 .oc-access__poll { font-size: 0.78rem; color: var(--muted-foreground); padding: 0 0.25rem 0.4rem; }
 .oc-access__gone { color: var(--destructive); border-color: var(--destructive); }
 .oc-access__stale { color: var(--muted-foreground); }
+
+/* ── Introspection screen (Settings ▸ Accès, P5) ────────────────────────────
+   Read-only "who has access to what". Its OWN `.oc-introspect` namespace, fully
+   self-contained: it deliberately does NOT reuse the `.oc-access__list / __row`
+   classes — those are shared by the Users-Access agent editor + GroupsTab and
+   carry a 22rem scroll cap meant for the long agent picker. Keeping a separate
+   namespace guarantees zero cross-leak into those editors. */
+.oc-introspect {
+  display: flex; flex-direction: column; gap: 1.25rem;
+  margin-top: 0.75rem;
+}
+.oc-introspect__section { display: flex; flex-direction: column; gap: 0.5rem; }
+.oc-introspect__title {
+  font-size: 0.72rem; font-weight: 600; text-transform: uppercase;
+  letter-spacing: 0.05em; color: var(--muted-foreground); margin: 0;
+}
+.oc-introspect__id { display: flex; align-items: center; gap: 0.6rem; }
+.oc-introspect__chips { display: flex; flex-wrap: wrap; gap: 0.4rem; }
+/* Short, owner-scoped fact lists: flex column, no scroll cap, no bullets. */
+.oc-introspect__list {
+  display: flex; flex-direction: column; gap: 0.35rem;
+  list-style: none; margin: 0; padding: 0;
+}
+.oc-introspect__row {
+  display: flex; align-items: center; flex-wrap: wrap; gap: 0.45rem;
+  padding: 0.35rem 0.25rem;
+}
+.oc-introspect__name { font-weight: 500; }
+
 .oc-admin__toolbar { display: flex; justify-content: flex-end; margin-bottom: 0.5rem; }
 
 /* ── DEV user switcher (dev-only floating affordance) ───────────────────────── */

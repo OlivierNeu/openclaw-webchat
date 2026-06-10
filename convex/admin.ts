@@ -492,6 +492,14 @@ export const deleteInstance = mutation({
       .withIndex("by_instance", (q) => q.eq("instanceName", name))
       .collect();
     for (const a of agentRows) await ctx.db.delete(a._id);
+    // Group-shared agents on this instance (P2). Same bounded by_instance read as
+    // userAgents; no default re-election (groupAgents has no "one default per
+    // group" invariant — the read-time precedence simply re-picks).
+    const groupAgentRows = await ctx.db
+      .query("groupAgents")
+      .withIndex("by_instance", (q) => q.eq("instanceName", name))
+      .collect();
+    for (const ga of groupAgentRows) await ctx.db.delete(ga._id);
     // Orphaned per-user grants — read ONLY this instance's rows via by_instance
     // (never a whole-table scan; Convex doc limits — Codex P2). Track affected
     // users so we can re-elect a default among their remaining grants (never leave

@@ -6,7 +6,6 @@ import { RouterProvider } from "@tanstack/react-router";
 import { router } from "./router";
 import { DialogsProvider } from "@/components/ConfirmDialog";
 import { FeedbackProvider } from "./chat/FeedbackDialog";
-import { PreferencesProvider } from "./chat/PreferencesDialog";
 import { resolveConvexUrl } from "@/lib/runtimeConfig";
 import "./index.css";
 import "./chat/convexChat.css";
@@ -67,9 +66,7 @@ resolveConvexUrl()
         <ConvexAuthProvider client={convex}>
           <DialogsProvider>
             <FeedbackProvider>
-              <PreferencesProvider>
-                <RouterProvider router={router} />
-              </PreferencesProvider>
+              <RouterProvider router={router} />
             </FeedbackProvider>
             <React.Suspense fallback={null}>
               {/* Dev-only. Toggle button bottom-RIGHT so it doesn't overlap the

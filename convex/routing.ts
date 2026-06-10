@@ -10,6 +10,7 @@
 import { Doc, Id } from "./_generated/dataModel";
 import { QueryCtx, MutationCtx } from "./_generated/server";
 import { getProfile } from "./lib/access";
+import { getEffectiveGrants } from "./agents";
 
 export interface ResolvedTarget {
   instanceName: string;
@@ -58,10 +59,15 @@ export async function resolveTargetForChat(
   const profile = await getProfile(ctx, userId);
   const canonical = profile?.canonical ?? `u-${userId.slice(0, 10)}`;
 
-  const uas = await ctx.db
-    .query("userAgents")
-    .withIndex("by_user", (q) => q.eq("userId", userId))
-    .collect();
+  // Candidate set = the EFFECTIVE union (direct userAgents ∪ group agents), the
+  // dispatch-time authorization boundary (IDOR defense). With NO groups this is
+  // the direct `by_user` rows in the same order with the same effective default,
+  // so the resolution below is byte-identical to pre-P2; a group-only user can
+  // now dispatch, and a group-bound chat is honored by the membership check.
+  // Deletion is applied here via isDeleted() (NOT via the enriched `state`),
+  // preserving the exact pre-P2 "absent row + successful poll => still served"
+  // semantics that `state` cannot reconstruct.
+  const uas = await getEffectiveGrants(ctx, userId);
   if (uas.length === 0) {
     return { target: null, rebind: null, failReason: "no_agent" };
   }
