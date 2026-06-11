@@ -34,7 +34,23 @@ export function UserMenu({
   minimal?: boolean;
 }) {
   const { signOut } = useAuthActions();
-  const setThemeMode = useMutation(api.me.setThemeMode);
+  // OPTIMISTIC: apply the chosen mode to the local getMe cache IMMEDIATELY (the app
+  // reads resolvedThemeMode from there), then persist in the background. Without it
+  // the theme only flips AFTER the server round-trip + the getMe-invalidation
+  // cascade — on a constrained backend that's the "have to click several times" lag.
+  const setThemeMode = useMutation(api.me.setThemeMode).withOptimisticUpdate(
+    (store, { mode }) => {
+      const cur = store.getQuery(api.me.getMe, {});
+      if (!cur) return;
+      const resolved =
+        mode !== null ? mode : (cur.defaultThemeMode ?? "system");
+      store.setQuery(
+        api.me.getMe,
+        {},
+        { ...cur, themeMode: mode, resolvedThemeMode: resolved },
+      );
+    },
+  );
   // Radio value: a concrete mode, or "default" when the user follows the admin
   // default (so there's always a path back to inheriting it).
   const value = mode ?? "default";

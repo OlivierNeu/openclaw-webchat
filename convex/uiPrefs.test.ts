@@ -119,3 +119,62 @@ describe("me.setUiPref (single write path + server gate)", () => {
     expect(me.ui.userOverrides.showSource).toBe(false);
   });
 });
+
+// ===========================================================================
+// IDEMPOTENT profile writes (prod incident): a no-op setUiPref/setThemeMode must
+// NOT patch the profile — every profile write invalidates getMe, which cascades
+// a re-run of EVERY profile-reading query on the page (~14 on the chat screen).
+// These pin the OBSERVABLE side of the skip (the same-value case is content-
+// identical either way, so we pin the two cases where the skip IS observable).
+// ===========================================================================
+
+describe("idempotent profile writes (skip the no-op)", () => {
+  test("setUiPref(value:null) on a profile with NO uiPrefs does NOT create an empty uiPrefs object", async () => {
+    const t = convexTest(schema, modules);
+    const { userId, as } = await seedUser(t);
+    // Reset (null) a key that was never set: pre-fix this patched uiPrefs:{} onto
+    // the profile (a pure-churn write); post-fix it must be a no-op.
+    await as.mutation(api.me.setUiPref, { key: "showSource", value: null });
+    const profile = await t.run(async (ctx) =>
+      (await ctx.db.query("profiles").collect()).find(
+        (p) => p.userId === userId,
+      ),
+    );
+    expect(profile!.uiPrefs).toBeUndefined();
+  });
+
+  test("setThemeMode with the ALREADY-active mode skips (no second audit row); a real change writes", async () => {
+    const t = convexTest(schema, modules);
+    // Impersonating admin: auditImpersonated writes ONE auditLog row per REAL
+    // theme.set — the observable discriminator for the skip path.
+    const { userId: targetId } = await seedUser(t);
+    const adminId = await t.run(async (ctx) => {
+      const uid = await ctx.db.insert("users", {});
+      await ctx.db.insert("profiles", {
+        userId: uid,
+        role: "admin",
+        impersonatingUserId: targetId,
+      });
+      return uid;
+    });
+    const asAdmin = t.withIdentity({ subject: `${adminId}|session` });
+    const auditCount = () =>
+      t.run(async (ctx) => (await ctx.db.query("auditLog").collect()).length);
+
+    await asAdmin.mutation(api.me.setThemeMode, { mode: "dark" });
+    expect(await auditCount()).toBe(1);
+    // Same mode again -> SKIP (no write, no audit).
+    await asAdmin.mutation(api.me.setThemeMode, { mode: "dark" });
+    expect(await auditCount()).toBe(1);
+    // A REAL change still writes (+ audits).
+    await asAdmin.mutation(api.me.setThemeMode, { mode: "light" });
+    expect(await auditCount()).toBe(2);
+    // The target's profile carries the latest mode (the skip never ate a change).
+    const target = await t.run(async (ctx) =>
+      (await ctx.db.query("profiles").collect()).find(
+        (p) => p.userId === targetId,
+      ),
+    );
+    expect(target!.themeMode).toBe("light");
+  });
+});

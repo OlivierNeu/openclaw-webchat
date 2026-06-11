@@ -51,6 +51,7 @@ import {
 import { useConfirm } from "@/components/ConfirmDialog";
 import { m } from "@/paraglide/messages.js";
 import { useConvexChatRuntime } from "./useConvexChatRuntime";
+import { uiPrefOptimisticUpdate } from "./uiPrefOptimistic";
 import { RunStatus } from "./RunStatus";
 import { ToolCard } from "./ToolCard";
 import { MediaPart } from "./MediaPart";
@@ -99,7 +100,12 @@ export function ConvexChat({ chatId }: ConvexChatProps) {
   const me = useQuery(api.me.getMe);
   const ui = (me?.ui?.effective as UiEffective | undefined) ?? DEFAULT_UI;
   const showTools = ui.showTools;
-  const setUiPref = useMutation(api.me.setUiPref);
+  // OPTIMISTIC (shared updater — see uiPrefOptimistic.ts): the toggle flips in the
+  // local getMe cache IMMEDIATELY; the write + its getMe-invalidation cascade run
+  // in the background instead of blocking the click.
+  const setUiPref = useMutation(api.me.setUiPref).withOptimisticUpdate(
+    uiPrefOptimisticUpdate,
+  );
 
   // Not-found detection for a deep-linked chat. getSessionMeta returns `null` once
   // LOADED for a malformed/deleted chat (and `undefined` while still loading), so

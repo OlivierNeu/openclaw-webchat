@@ -205,7 +205,13 @@ export const setUiPref = mutation({
       }
     }
 
-    const next: UiPrefsObject = { ...(profile.uiPrefs ?? {}) };
+    const cur = (profile.uiPrefs ?? {}) as UiPrefsObject;
+    // IDEMPOTENT: a write here invalidates getMe, which cascades a re-run of EVERY
+    // profile-reading query (the whole chat page). So skip a no-op (same value).
+    const curVal = cur[key];
+    const nextVal = value === null ? undefined : value;
+    if (curVal === nextVal) return;
+    const next: UiPrefsObject = { ...cur };
     if (value === null) delete next[key];
     else next[key] = value;
     await ctx.db.patch(profile._id, { uiPrefs: next });
@@ -259,7 +265,11 @@ export const setThemeMode = mutation({
       });
       return;
     }
-    await ctx.db.patch(profile._id, { themeMode: mode ?? undefined });
+    // IDEMPOTENT: skip a no-op (selecting the already-active mode) — it would
+    // invalidate getMe and cascade a full re-query of the chat page for nothing.
+    const nextMode = mode ?? undefined;
+    if (profile.themeMode === nextMode) return;
+    await ctx.db.patch(profile._id, { themeMode: nextMode });
     await auditImpersonated(ctx, actor, "theme.set", {
       resource: "profile",
       resourceId: userId,

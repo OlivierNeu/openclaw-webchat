@@ -5,6 +5,7 @@ import { Checkbox } from "@/components/ui/checkbox";
 import { Input } from "@/components/ui/input";
 import { m } from "@/paraglide/messages.js";
 import { PREF_META, groupAndFilterPrefs } from "./prefsMeta";
+import { uiPrefOptimisticUpdate } from "./uiPrefOptimistic";
 
 // User UI-preferences form (the interface-config toggles). Extracted from the
 // former PreferencesDialog so it can live inside the Settings > Preferences tab
@@ -26,7 +27,12 @@ export function PreferencesPanel() {
   const [query, setQuery] = useState("");
   const me = useQuery(api.me.getMe, {});
   const ui = me?.ui as UiState | undefined;
-  const setPref = useMutation(api.me.setUiPref);
+  // OPTIMISTIC (shared updater): each checkbox flips instantly; the write + its
+  // getMe-invalidation cascade run in the background. Convex rolls the patch back
+  // if the server rejects (e.g. a gated feature), so the box snaps back.
+  const setPref = useMutation(api.me.setUiPref).withOptimisticUpdate(
+    uiPrefOptimisticUpdate,
+  );
 
   const groups = useMemo(
     () => (ui ? groupAndFilterPrefs(Object.keys(ui.effective), query) : []),
