@@ -26,6 +26,7 @@ fixes, and irritations. Append on every version bump.
 |---|---|---|---|---|---|---|---|
 | **2026.5.19** | 0.133.0 | **required** (flag bug) | ✅ | ⚠️ **was PASS, now ALL SENDS FAIL** (2026-06-05 pm, see log) | **8/8 complete, 0 err** (2026-06-05 am) — but UNREPRODUCIBLE now (sends broken) | reorder wrapper for the codex flag bug; **OPEN/UNRESOLVED: every send (text AND attachment) on a freshly reset 5.19 container returns `unauthorized: gateway token mismatch (set gateway.remote.token to match gateway.auth.token)` even though all 5 token values hash-match — root cause NOT isolated; CONTRADICTS the earlier same-day PASS** | ⚠️ **trust DOWNGRADED** — cannot currently send on a clean 5.19 harness |
 | **2026.6.1** | 0.137.0 | not needed (native fix) | ✅ | ✅ PASS¹ | **8/8 complete, 0 err** (2026-06-05) | none from the agent itself; BUT see ¹ — a fresh `reset → up 6.1` ALSO can't send (same harness bring-up break as 5.19) | candidate bump — agent stable; **harness bring-up currently broken** |
+| **2026.6.5** | 0.139.0 | not needed (v3 `-c` wrapper baked + entrypoint config.toml enforce) | ✅ | ✅ **PASS** (2026-06-11, fresh reset→up, v3 wrapper path: 1 media part, byte-exact 23B, no dead link) | **6/6 complete, 0 err, 0 timeout** (2026-06-11, fresh `reset → up → pair` via the #61-fixed loopback path) | none observed; **0 approval popups** across 6 file-creation exec turns (YOLO 3-layer verified de facto); discovery `agents.list` normalizes clean (runtime codex implicit) | ✅ **GO for NAS olivier** (then jerome) — local pre-filter green on every axis |
 
 > ¹ **HARNESS BRING-UP REGRESSION (version-independent), 2026-06-05 pm.** The `smoke PASS` / `8/8` /
 > #59 "Rouge" results above were obtained on gateway containers brought up **earlier** (and, for the
@@ -37,6 +38,48 @@ fixes, and irritations. Append on every version bump.
 > these numbers until a clean bring-up can send again.
 
 ## Observations log (newest first)
+- **2026-06-11 — 2026.6.5 stability 6/6 + YOLO verified on a FRESH bring-up (the
+  first clean post-#61 validation).** `test-stability.sh 2026.6.5 6` → **6/6
+  complete, 0 error, 0 timeout** (codex CLI 0.139.0, emulated amd64 harness).
+  The bring-up regression of 2026-06-05 is GONE: fresh `reset → up → pair.sh →
+  bridge` sends fine — provided the bridge connects via the **loopback sidecar
+  :18790** (#61). Both test scripts had stayed on the direct `:18789` (untrusted
+  → AUTH_TOKEN_MISMATCH on every send) and were fixed to `PORT=18790`; they also
+  gained a `cvx()` helper (the C3 bridge-repo extraction broke bare `npx convex
+  run`) and a live default chat. A third breakage was found in `convex/dev.ts`:
+  `DEV_LIVE_ALLOWED_INSTANCES` only allowed the pre-multi-agent instance name
+  `"admin"`, so every `dev:testSend` against the current `"olivier"` binding was
+  refused (turn timeouts with an EMPTY bridge log); allowlist updated to
+  `{"admin","olivier"}` (jerome stays excluded — the guard's actual intent).
+  **YOLO de facto proof:** 6 exec-bearing turns (file writes), **zero approval
+  popups** in the gateway log. The image's YOLO is now 3-layered: openclaw.json
+  (`tools.exec full/off` + `approvals.exec=false` + `sandbox off`) + baked v3
+  wrapper (`-c approval_policy="never" -c sandbox_mode="danger-full-access"`)
+  + **NEW: entrypoint enforces `approval_policy = "never"` into
+  `~/.codex/config.toml` on every boot** (`[entrypoint] Enforced…` log line) —
+  this third layer plugs the §2 hole from HANDOFF-BUMP-2026.5.19 (popups
+  despite wrapper v2/v3). Discovery `agents.list` on 6.5 normalizes clean
+  (agent olivier, `agentRuntime: {id: codex, source: implicit}`). Frame shapes
+  unchanged (`event/agent`, `event/chat delta/final`, `tick`, `health`) — the
+  normalizer needs no per-version adaptation. Streaming-wise the short turns
+  emitted 1 delta + 1 final each (codex still no token-streaming; a long-form
+  probe is the discriminating test, pending).
+  **Long-form streaming probe (same day, DISCRIMINATING): codex 0.139 still
+  does NOT token-stream.** The prod-replica prompt ("actualités IA …
+  10 points") ran a full web-search turn (162 agent frames, 3054-byte answer)
+  and the gateway delivered exactly **1 `chat/delta` carrying the full text +
+  1 `chat/final`** (bridge finalize postMs=15). So the prod display-lag of the
+  final text is NOT fixed by 2026.6.5 — it is structural to the codex
+  app-server harness (no mid-turn text deltas), not a webchat/bridge defect,
+  and not a regression 6.5 could repair. Keep expectations accordingly.
+  **Same day, file-exchange smoke: ✅ PASS** on a second fresh `reset → up`
+  cycle, this time with the local bind-mounted wrapper REPLACED by the image's
+  v3 wrapper (`-c approval_policy + -c sandbox_mode`) — i.e. the exact
+  NAS-equivalent YOLO path: 1 media part, byte-exact 23 B, mime text/markdown,
+  no dead link. The 5.19-era reorder wrapper is gone from the bench.
+  Promotion artifacts: `openclaw-notes/docs/HANDOFF-BUMP-2026.6.5-CODEX-HARNESS-2026-06-11.md`
+  (NAS olivier procedure: snapshot → auth.json oauth placement → tag bump →
+  doctor → codex plugin re-enable → 4 discriminating post-checks → rollback).
 - **2026-06-05 (eve) — INBOUND VISION: a per-version codex difference, NOT a bridge bug.**
   After the #61 harness fix, the #59 inbound round-trip (upload a 96×96 red square →
   "what colour dominates?") was re-run on both versions. **6.1 (codex 0.137): agent

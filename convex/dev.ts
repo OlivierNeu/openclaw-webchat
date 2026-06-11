@@ -24,11 +24,13 @@ function assertDev() {
   }
 }
 
-// SAFETY (red-team must-fix): live tests hit ONLY the olivier DEV instance
-// ("admin"/gateway.lacneu.com) — NEVER jerome ("family"/ataraxis, the protected
-// instance). Code-enforced, not just prose: routeUser + testSend refuse any
-// instance outside this allowlist so no autonomous live test can reach prod.
-const DEV_LIVE_ALLOWED_INSTANCES = new Set(["admin"]);
+// SAFETY (red-team must-fix): live tests hit ONLY the olivier DEV instance —
+// NEVER jerome ("family"/ataraxis, the protected instance). Code-enforced, not
+// just prose: routeUser + testSend refuse any instance outside this allowlist
+// so no autonomous live test can reach the protected tenant. "admin" is the
+// instance's pre-multi-agent name, kept for old bindings; "olivier" is its
+// current name (BRIDGE_INSTANCE_NAME since the multi-agent redesign).
+const DEV_LIVE_ALLOWED_INSTANCES = new Set(["admin", "olivier"]);
 function assertDevInstance(instanceName: string): void {
   if (!DEV_LIVE_ALLOWED_INSTANCES.has(instanceName)) {
     throw new Error(
