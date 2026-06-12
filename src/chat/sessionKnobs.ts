@@ -86,6 +86,23 @@ export function capitalize(s: string): string {
   return s.length ? s[0].toUpperCase() + s.slice(1) : s;
 }
 
+// Display abbreviations for the KNOWN gateway thinking-level ids. Long labels
+// ("Minimal", "Medium") ellipsize inside 1/6-width segments; unknown ids fall
+// back to the gateway label untouched (full label always goes in `title`).
+const LEVEL_ABBREV: Record<string, string> = {
+  off: "Off",
+  minimal: "Min",
+  low: "Low",
+  medium: "Med",
+  high: "High",
+  xhigh: "XHigh",
+};
+
+/** Short segment label for a thinking level; full label belongs in `title`. */
+export function shortLevelLabel(id: string, label: string): string {
+  return LEVEL_ABBREV[id] ?? label;
+}
+
 /** Context-window usage percentage, or null when the meta is unusable. */
 export function contextPct(
   totalTokens?: number,

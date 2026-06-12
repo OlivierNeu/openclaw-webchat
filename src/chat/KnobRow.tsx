@@ -8,6 +8,7 @@ import { m } from "@/paraglide/messages.js";
 import {
   SPEED_OPTIONS,
   capitalize,
+  shortLevelLabel,
   isOverridden,
   speedKnobValue,
   speedOptionLabel,
@@ -134,7 +135,7 @@ export function KnobSegmented({
   onChange,
   disabled,
 }: {
-  options: { id: string; label: string }[];
+  options: { id: string; label: string; title?: string }[];
   value: string | null;
   onChange: (id: string) => void;
   disabled: boolean;
@@ -147,6 +148,8 @@ export function KnobSegmented({
           type="button"
           className={`oc-spanel__seg-btn${value === o.id ? " is-active" : ""}`}
           aria-pressed={value === o.id}
+          title={o.title ?? o.label}
+          aria-label={o.title ?? o.label}
           disabled={disabled}
           onClick={() => {
             if (o.id !== value) onChange(o.id);
@@ -259,7 +262,11 @@ export function SessionKnobsGroup({
           onRetry={retry}
         >
           <KnobSegmented
-            options={levels.map((l) => ({ id: l.id, label: capitalize(l.label) }))}
+            options={levels.map((l) => ({
+              id: l.id,
+              label: shortLevelLabel(l.id, capitalize(l.label)),
+              title: capitalize(l.label),
+            }))}
             value={sm.thinkingLevel ?? null}
             onChange={(id) => void apply("thinkingLevel", id)}
             disabled={busy}
