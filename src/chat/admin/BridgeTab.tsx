@@ -1,9 +1,20 @@
 import { useQuery } from "convex/react";
 import type { FunctionReturnType } from "convex/server";
 import { useNavigate } from "@tanstack/react-router";
-import { CheckCircle2, AlertTriangle, WifiOff, RefreshCw } from "lucide-react";
+import {
+  CheckCircle2,
+  AlertTriangle,
+  WifiOff,
+  RefreshCw,
+  ChevronDown,
+} from "lucide-react";
 import { api } from "../convexApi";
 import { Badge } from "@/components/ui/badge";
+import {
+  Popover,
+  PopoverContent,
+  PopoverTrigger,
+} from "@/components/ui/popover";
 import { dispatchErrorInfo } from "@/lib/dispatchErrorInfo";
 import { m } from "@/paraglide/messages.js";
 import {
@@ -117,11 +128,7 @@ function CompatDetail({
           ) : (
             <span>{m.compat_unknown()}</span>
           )}
-          {support.validatedVersions.map((v) => (
-            <Badge key={v} variant="secondary">
-              {v}
-            </Badge>
-          ))}
+          <ValidatedVersions versions={support.validatedVersions} />
         </div>
       )}
       {data.targets.length === 0 ? (
@@ -158,6 +165,40 @@ function CompatDetail({
         <p className="oc-admin__hint">{m.compat_hermes_coming()}</p>
       ) : null}
     </div>
+  );
+}
+
+/**
+ * The validated-version list, SUMMARIZED: the support window above already
+ * carries the durable information; the full list only matters on demand. Over
+ * the app's life this list grows with every bench-validated gateway release —
+ * a flat badge row would crowd the panel within months, so it collapses to one
+ * count chip opening a BOUNDED, scrollable popover (newest first).
+ */
+function ValidatedVersions({ versions }: { versions: string[] }) {
+  if (versions.length === 0) return null;
+  const newestFirst = [...versions].reverse();
+  return (
+    <Popover>
+      <PopoverTrigger asChild>
+        <button type="button" className="oc-compat__versions-btn">
+          {versions.length === 1
+            ? m.compat_versions_count()
+            : m.compat_versions_count_plural({ count: versions.length })}
+          <ChevronDown size={13} aria-hidden />
+        </button>
+      </PopoverTrigger>
+      <PopoverContent className="oc-compat__versions-pop" align="start">
+        <p className="oc-compat__versions-title">{m.compat_versions_pop_title()}</p>
+        <div className="oc-compat__versions-list">
+          {newestFirst.map((v) => (
+            <Badge key={v} variant="secondary">
+              {v}
+            </Badge>
+          ))}
+        </div>
+      </PopoverContent>
+    </Popover>
   );
 }
 
