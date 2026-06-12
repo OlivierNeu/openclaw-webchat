@@ -61,6 +61,12 @@ describe("visibleTabs", () => {
     ]);
   });
 
+  test("agents.files.read grants exactly the agentFiles tab (CONF-4c)", () => {
+    expect(visibleTabs(["agents.files.read"])).toEqual(["agentFiles"]);
+    // chatDefaults stays admin-only — never reachable through a granted perm.
+    expect(visibleTabs(["agents.files.read"])).not.toContain("chatDefaults");
+  });
+
   test("a plain user (chats.read only) sees the owner-scoped tabs (Files + Preferences + Apparence)", () => {
     // Files, Preferences AND Apparence (theme) are owner-scoped and gated on the
     // base `chats.read` permission every approved user holds, so they see all

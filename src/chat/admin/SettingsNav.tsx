@@ -45,7 +45,9 @@ const TAB_I18N: Partial<Record<Tab, () => string>> = {
   kpi: () => m.settings_tab_kpi(),
   anomalies: () => m.settings_tab_anomalies(),
   files: () => m.files_tab_label(),
+  agentFiles: () => m.afiles_tab_label(),
   preferences: () => m.settings_tab_preferences(),
+  chatDefaults: () => m.cdefaults_tab_label(),
   access: () => m.settings_tab_access(),
   integrations: () => m.settings_tab_integrations(),
   theme: () => m.appearance_tab_label(),
@@ -59,8 +61,10 @@ const TAB_I18N: Partial<Record<Tab, () => string>> = {
 // (me.setSettingsTabOrder); a grip handle reorders, the link itself still
 // navigates. The brand + a back link return to chat.
 
+// A tab is "labeled" (no CSS capitalize) when it renders a human label — either
+// the i18n override or the FR fallback (chatDefaults has only the i18n label).
 const TAB_CLASS = (t: Tab) =>
-  "oc-admin__tab" + (TAB_LABELS[t] ? " oc-admin__tab--labeled" : "");
+  "oc-admin__tab" + (TAB_I18N[t] || TAB_LABELS[t] ? " oc-admin__tab--labeled" : "");
 const TAB_ACTIVE_CLASS = (t: Tab) => TAB_CLASS(t) + " is-active";
 
 type FilteredTabPath =

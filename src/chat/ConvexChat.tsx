@@ -28,6 +28,7 @@ import {
 import {
   SlidersHorizontal,
   ChevronDown,
+  ChevronRight,
   Download,
   Plus,
   ArrowUp,
@@ -43,11 +44,13 @@ import {
   DropdownMenuContent,
   DropdownMenuItem,
   DropdownMenuLabel,
-  DropdownMenuRadioGroup,
-  DropdownMenuRadioItem,
-  DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
+import {
+  Popover,
+  PopoverContent,
+  PopoverTrigger,
+} from "@/components/ui/popover";
 import { useConfirm } from "@/components/ConfirmDialog";
 import { m } from "@/paraglide/messages.js";
 import { useConvexChatRuntime } from "./useConvexChatRuntime";
@@ -57,6 +60,15 @@ import { ToolCard } from "./ToolCard";
 import { MediaPart } from "./MediaPart";
 import { MarkdownText } from "./MarkdownText";
 import { FeedbackButton } from "./FeedbackDialog";
+import { SessionKnobsGroup } from "./KnobRow";
+import { SessionPanel } from "./SessionPanel";
+import {
+  capitalize,
+  formatTokens,
+  isOverridden,
+  type SessionMetaView,
+  type SessionSettingsView,
+} from "./sessionKnobs";
 
 // Top-level chat surface. Wires the reactive Convex-backed runtime into
 // assistant-ui and renders the thread with custom renderers for run status,
@@ -317,8 +329,11 @@ function ChatHeader({ chatId }: { chatId: ConvexId<"chats"> }) {
   const agentInfo = useQuery(api.agents.getChatAgent, {
     chatId: chatId as Id<"chats">,
   });
-  const sm = meta?.sessionMeta ?? null;
+  const sm = (meta?.sessionMeta ?? null) as SessionMetaView | null;
+  const settings = (meta?.sessionSettings ?? null) as SessionSettingsView;
   const agent = agentInfo?.multiAgent ? agentInfo.agent : null;
+  // "All session settings" Sheet, opened from the popover's footer.
+  const [panelOpen, setPanelOpen] = useState(false);
   // Render the strip when there is EITHER session meta OR a multi-agent chip to
   // show (a returning chat with no meta yet must still name its agent).
   if (!sm && !agent) return null;
@@ -330,10 +345,10 @@ function ChatHeader({ chatId }: { chatId: ConvexId<"chats"> }) {
   // "Spotted" meter color: calm until the context window fills, then escalates.
   const meterLevel =
     pct == null ? "" : pct >= 90 ? "is-critical" : pct >= 75 ? "is-warn" : "is-ok";
-  const inherited =
-    !!sm?.thinkingLevel &&
-    !!sm?.thinkingDefault &&
-    sm.thinkingLevel === sm.thinkingDefault;
+  // BINARY, intent-based provenance (CONF amendment A1): inherited = no
+  // thinkingLevel key in sessionSettings. The old value-equality heuristic
+  // (level === default) was wrong when overriding TO the default's value.
+  const inherited = !isOverridden(settings, "thinkingLevel");
 
   return (
     <header className="oc-chathead">
@@ -419,8 +434,20 @@ function ChatHeader({ chatId }: { chatId: ConvexId<"chats"> }) {
           </span>
         ) : null}
         <ExportMenu chatId={chatId} title={meta?.title ?? null} />
-        {sm ? <SessionKnobsMenu chatId={chatId} sm={sm} /> : null}
+        {sm ? (
+          <SessionKnobsMenu
+            chatId={chatId}
+            sm={sm}
+            settings={settings}
+            onOpenPanel={() => setPanelOpen(true)}
+          />
+        ) : null}
       </div>
+      <SessionPanel
+        chatId={chatId}
+        open={panelOpen}
+        onOpenChange={setPanelOpen}
+      />
     </header>
   );
 }
@@ -497,108 +524,57 @@ function ExportMenu({
   );
 }
 
-// "Advanced" write-back panel: change the OpenClaw reasoning level / model for
-// THIS chat. The selected value is applied IMMEDIATELY by the bridge
-// (sessions.patch) and the live `sessionMeta` (this menu's source of truth)
-// refreshes — so the radio always reflects the gateway's real state, never an
-// optimistic guess. `verboseLevel` is intentionally NOT exposed (the bridge pins
-// it to "full" for complete streaming frames; see chats.setSessionKnob).
+// "Advanced" write-back popover (CONF-4a): the daily session knobs (model,
+// reasoning, speed) rendered by the SAME SessionKnobsGroup the session panel
+// mounts (amendment A11: one implementation). A real Popover (not a menu): the
+// segmented controls are adjusted repeatedly without the surface closing. The
+// applied value is pushed IMMEDIATELY by the bridge (sessions.patch) and the
+// live `sessionMeta` refreshes, so the controls reflect the gateway's real
+// state, never an optimistic guess. ↺ per row = explicit gateway unset (A2,
+// bench-lifted) — never a patch-to-default-value fake override. `verboseLevel`
+// is intentionally NOT exposed (pinned by the bridge; read-only row in the
+// session panel). Footer opens the all-session-settings Sheet — the
+// 2nd and LAST disclosure level.
 function SessionKnobsMenu({
   chatId,
   sm,
+  settings,
+  onOpenPanel,
 }: {
   chatId: ConvexId<"chats">;
-  sm: {
-    model?: string;
-    thinkingLevel?: string;
-    thinkingDefault?: string;
-    thinkingLevels?: { id: string; label: string }[];
-    availableModels?: { id: string; label: string }[];
-  };
+  sm: SessionMetaView;
+  settings: SessionSettingsView;
+  onOpenPanel: () => void;
 }) {
-  const setKnob = useMutation(api.chats.setSessionKnob);
-  const levels = sm.thinkingLevels ?? [];
-  const models = sm.availableModels ?? [];
-  // Nothing the gateway lets us change -> no menu (keeps the strip clean).
-  if (levels.length === 0 && models.length === 0) return null;
-
-  const def = sm.thinkingDefault;
-  const defLabel = def
-    ? (levels.find((l) => l.id === def)?.label ?? def)
-    : null;
-
+  const [open, setOpen] = useState(false);
   return (
-    <DropdownMenu>
-      <DropdownMenuTrigger asChild>
+    <Popover open={open} onOpenChange={setOpen}>
+      <PopoverTrigger asChild>
         <button type="button" className="oc-chip oc-chip--btn" title={m.chat_advanced_settings_title()}>
           <SlidersHorizontal size={13} aria-hidden />
           {m.chat_advanced()}
           <ChevronDown size={13} className="oc-chip__chev" aria-hidden />
         </button>
-      </DropdownMenuTrigger>
-      <DropdownMenuContent align="end" className="w-60">
-        {levels.length > 0 ? (
-          <>
-            <DropdownMenuLabel>{m.chat_thinking_level()}</DropdownMenuLabel>
-            <DropdownMenuRadioGroup
-              value={sm.thinkingLevel ?? ""}
-              onValueChange={(v) => void setKnob({ chatId: chatId as Id<"chats">, thinkingLevel: v })}
-            >
-              {levels.map((l) => (
-                <DropdownMenuRadioItem key={l.id} value={l.id}>
-                  {capitalize(l.label)}
-                  {def && l.id === def ? (
-                    <span className="oc-menu__hint">{m.chat_default_hint()}</span>
-                  ) : null}
-                </DropdownMenuRadioItem>
-              ))}
-            </DropdownMenuRadioGroup>
-            {def && sm.thinkingLevel !== def ? (
-              <DropdownMenuItem
-                onClick={() =>
-                  void setKnob({ chatId: chatId as Id<"chats">, thinkingLevel: def })
-                }
-              >
-                {defLabel
-                  ? m.chat_inherit_from_agent_label({ label: capitalize(defLabel) })
-                  : m.chat_inherit_from_agent()}
-              </DropdownMenuItem>
-            ) : null}
-          </>
-        ) : null}
-        {models.length > 0 ? (
-          <>
-            {levels.length > 0 ? <DropdownMenuSeparator /> : null}
-            <DropdownMenuLabel>{m.chat_model()}</DropdownMenuLabel>
-            <DropdownMenuRadioGroup
-              value={sm.model ?? ""}
-              onValueChange={(v) => void setKnob({ chatId: chatId as Id<"chats">, model: v })}
-            >
-              {models.map((m) => (
-                <DropdownMenuRadioItem key={m.id} value={m.id}>
-                  {m.label}
-                </DropdownMenuRadioItem>
-              ))}
-            </DropdownMenuRadioGroup>
-          </>
-        ) : null}
-        <DropdownMenuSeparator />
-        {/* Surface the deliberate exclusion: verbosity is pinned by the bridge for
-            complete streaming, so it is shown (not silently dropped) but not editable. */}
-        <div className="oc-menu__note">{m.chat_verbosity_note()}</div>
-      </DropdownMenuContent>
-    </DropdownMenu>
+      </PopoverTrigger>
+      {/* w-80/p-2 go through tw-merge (they MUST beat the component's w-72/p-4;
+          relying on stylesheet cascade order against utilities is not safe). */}
+      <PopoverContent align="end" className="oc-spanel-pop w-80 p-2">
+        <SessionKnobsGroup chatId={chatId} sm={sm} settings={settings} />
+        <button
+          type="button"
+          className="oc-spanel-pop__all"
+          onClick={() => {
+            setOpen(false);
+            onOpenPanel();
+          }}
+        >
+          <SlidersHorizontal size={13} aria-hidden />
+          {m.conf_all_settings()}
+          <ChevronRight size={13} aria-hidden />
+        </button>
+      </PopoverContent>
+    </Popover>
   );
-}
-
-/** Compact token count: 62226 -> "62.2k", 980 -> "980". */
-function formatTokens(n: number): string {
-  if (n >= 1000) return `${(n / 1000).toFixed(1)}k`;
-  return String(n);
-}
-
-function capitalize(s: string): string {
-  return s.length ? s[0].toUpperCase() + s.slice(1) : s;
 }
 
 // Inline Lucide-style icons (no emoji, no extra dep). 16px, currentColor.

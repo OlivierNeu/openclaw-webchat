@@ -19,6 +19,8 @@ describe("isGrantableUserPermission (server-side grant whitelist)", () => {
     expect(isGrantableUserPermission("kpi.read")).toBe(true);
     expect(isGrantableUserPermission("anomalies.read")).toBe(true);
     expect(isGrantableUserPermission("bridge.read")).toBe(true);
+    // agents.files.read (CONF-4c): read-only, server-restricted to rule files.
+    expect(isGrantableUserPermission("agents.files.read")).toBe(true);
   });
   test("admin.manage and any sensitive/unknown perm are NOT grantable", () => {
     expect(isGrantableUserPermission("admin.manage")).toBe(false);

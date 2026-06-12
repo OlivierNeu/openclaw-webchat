@@ -2980,3 +2980,192 @@
   font-size: 0.75rem; padding: 0.15rem 0.3rem; border-radius: 0.4rem;
   background: var(--background); color: var(--foreground); border: 1px solid var(--border);
 }
+
+/* ── CONF-4 session panel */
+/* Shared knob rows (KnobRow / SessionKnobsGroup) for the composer "Advanced"
+   popover AND the session-settings Sheet. Provenance gutter mirrors
+   .oc-prefs__row (VS Code pattern): accent border-left = overridden here. */
+/* Width/padding are passed as utilities at the call site (w-80 p-2) so they
+   deterministically replace the popover component's own w-72/p-4 via tw-merge. */
+.oc-spanel-pop {
+  display: flex;
+  flex-direction: column;
+  max-width: calc(100vw - 1rem);
+}
+.oc-spanel-pop__all {
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+  margin-top: 0.35rem;
+  padding: 0.45rem 0.55rem;
+  border: none;
+  border-top: 1px solid var(--border);
+  background: none;
+  color: var(--foreground);
+  font-size: 0.8rem;
+  font-weight: 500;
+  cursor: pointer;
+  border-radius: 0 0 var(--radius-md) var(--radius-md);
+}
+.oc-spanel-pop__all:hover { background: var(--muted); }
+.oc-spanel-pop__all > svg:last-child { margin-left: auto; color: var(--muted-foreground); }
+
+.oc-spanel__row {
+  display: flex;
+  flex-direction: column;
+  gap: 0.35rem;
+  padding: 0.5rem 0.1rem 0.55rem 0.55rem;
+  border-bottom: 1px solid var(--border);
+  /* provenance gutter: transparent until overridden at the session level */
+  border-left: 2px solid transparent;
+}
+.oc-spanel__row:last-child { border-bottom: none; }
+.oc-spanel__row.is-overridden { border-left-color: var(--primary); }
+.oc-spanel__rowhead { display: flex; align-items: center; gap: 0.45rem; }
+.oc-spanel__label {
+  flex: 1 1 auto;
+  font-size: 0.72rem;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--foreground);
+}
+.oc-spanel__badge {
+  font-size: 0.64rem;
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
+  padding: 0.05rem 0.4rem;
+  border-radius: 999px;
+  background: var(--muted);
+  color: var(--muted-foreground);
+  border: 1px solid var(--border);
+}
+.oc-spanel__reset {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0.15rem;
+  border: none;
+  background: none;
+  border-radius: var(--radius-sm);
+  color: var(--muted-foreground);
+  cursor: pointer;
+}
+.oc-spanel__reset:hover { color: var(--foreground); background: var(--muted); }
+.oc-spanel__spin { color: var(--muted-foreground); animation: oc-spin 1s linear infinite; }
+.oc-spanel__ctl { display: flex; }
+.oc-spanel__help {
+  margin: 0;
+  font-size: 0.74rem;
+  color: var(--muted-foreground);
+}
+.oc-spanel__error {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  margin: 0;
+  font-size: 0.74rem;
+  color: var(--destructive);
+}
+.oc-spanel__retry {
+  border: none;
+  background: none;
+  padding: 0;
+  font-size: 0.74rem;
+  color: var(--foreground);
+  text-decoration: underline;
+  cursor: pointer;
+}
+
+/* Segmented control (≤ 6 named ordered options — widget rules + A5). */
+.oc-spanel__seg {
+  display: flex;
+  width: 100%;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  background: var(--muted);
+  overflow: hidden;
+}
+.oc-spanel__seg-btn {
+  flex: 1 1 0;
+  min-width: 0;
+  padding: 0.32rem 0.2rem;
+  border: none;
+  background: transparent;
+  color: var(--muted-foreground);
+  font-size: 0.72rem;
+  line-height: 1.15;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  cursor: pointer;
+}
+.oc-spanel__seg-btn + .oc-spanel__seg-btn { border-left: 1px solid var(--border); }
+.oc-spanel__seg-btn.is-active {
+  background: var(--background);
+  color: var(--foreground);
+  font-weight: 600;
+}
+.oc-spanel__seg-btn:disabled { opacity: 0.6; cursor: default; }
+.oc-spanel__select {
+  width: 100%;
+  font-size: 0.8rem;
+  padding: 0.32rem 0.4rem;
+  border-radius: var(--radius-md);
+  background: var(--background);
+  color: var(--foreground);
+  border: 1px solid var(--border);
+}
+
+/* The Sheet itself: 26rem on desktop, full width on small screens (A11).
+   !important needed to beat the sheet primitive's width utilities (same
+   specificity, earlier in the cascade is not guaranteed). */
+.oc-spanel[data-slot="sheet-content"] {
+  width: min(26rem, 100vw) !important;
+  max-width: 100vw !important;
+}
+.oc-spanel__body {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow-y: auto;
+  padding: 0 1rem 0.5rem;
+  display: flex;
+  flex-direction: column;
+}
+.oc-spanel__loading { color: var(--muted-foreground); font-size: 0.85rem; }
+/* Layer-cake section headers (mirrors .oc-prefs__cat). */
+.oc-spanel__cat {
+  margin: 1.1rem 0 0.2rem;
+  font-size: 0.72rem;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  color: var(--muted-foreground);
+}
+.oc-spanel__body section:first-child .oc-spanel__cat { margin-top: 0.2rem; }
+/* Read-only meta rows (SESSION / AGENT sections). */
+.oc-spanel__static {
+  display: flex;
+  flex-direction: column;
+  gap: 0.25rem;
+  padding: 0.5rem 0.1rem 0.55rem 0.55rem;
+  border-bottom: 1px solid var(--border);
+  border-left: 2px solid transparent;
+}
+.oc-spanel__static:last-child { border-bottom: none; }
+.oc-spanel__value { font-size: 0.85rem; font-variant-numeric: tabular-nums; }
+/* Context meter: reuse the chip meter language, stretched to the row width. */
+.oc-spanel__meter { display: flex; width: 100%; }
+.oc-spanel__meter .oc-meter__track { flex: 1 1 auto; }
+/* ACTIONS zone: separated from the settings (grammar §1.5 — actions ≠ settings). */
+.oc-spanel__actions {
+  border-top: 1px solid var(--border);
+  gap: 0.5rem;
+}
+.oc-spanel__actions .oc-spanel__cat { margin: 0; }
+.oc-spanel__action { display: flex; flex-direction: column; gap: 0.3rem; }
+.oc-spanel__action-note {
+  margin: 0;
+  font-size: 0.74rem;
+  color: var(--muted-foreground);
+}

@@ -448,7 +448,14 @@ export const dispatch = internalAction({
  * by Convex). The chip simply does not move if the patch did not land.
  */
 export const dispatchPatch = internalAction({
-  args: { chatId: v.id("chats"), userId: v.id("users") },
+  args: {
+    chatId: v.id("chats"),
+    userId: v.id("users"),
+    // No `clears` arg (P2-4): unsets are PERSISTED in sessionSettings.clears by
+    // chats.setSessionKnob, so this action reads ONE source of truth (the same
+    // intent the per-turn /send re-apply consumes) — an unset lost to a bridge
+    // outage is repaired on the next turn exactly like a set.
+  },
   handler: async (ctx, { chatId, userId }) => {
     const bridgeUrl = process.env.BRIDGE_URL;
     const sharedSecret = process.env.BRIDGE_SHARED_SECRET;
@@ -468,8 +475,15 @@ export const dispatchPatch = internalAction({
       return;
     }
     const settings = routing.sessionSettings;
-    if (!settings || (settings.thinkingLevel == null && settings.model == null)) {
-      return; // nothing to apply
+    const clearList = settings?.clears ?? [];
+    const hasOverride =
+      settings != null &&
+      (settings.thinkingLevel != null ||
+        settings.model != null ||
+        settings.fastMode != null ||
+        clearList.length > 0);
+    if (!hasOverride) {
+      return; // nothing to apply, nothing to clear
     }
 
     let ok = false;
@@ -486,8 +500,10 @@ export const dispatchPatch = internalAction({
           instanceName: routing.target.instanceName,
           agentId: routing.target.agentId,
           canonical: routing.target.canonical,
-          thinkingLevel: settings.thinkingLevel ?? null,
-          model: settings.model ?? null,
+          // The COMPLETE persisted intent (sets + clears) — the exact object the
+          // per-turn /send re-apply consumes; ONE bridge call both clears the
+          // removed knobs and re-asserts the rest. Single source of truth (P2-4).
+          sessionSettings: settings,
         }),
       });
       ok = response.ok;
@@ -511,8 +527,10 @@ export const dispatchPatch = internalAction({
         correlationId: `${chatId}:patch`,
         meta: JSON.stringify({
           patchStatus: ok ? "sent" : "failed",
-          thinkingLevel: settings.thinkingLevel,
-          model: settings.model,
+          thinkingLevel: settings?.thinkingLevel,
+          model: settings?.model,
+          fastMode: settings?.fastMode,
+          clears: clearList,
           instanceName: routing.target.instanceName,
           agentId: routing.target.agentId,
         }),

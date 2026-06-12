@@ -147,43 +147,112 @@ export const renameChat = mutation({
 // NOTE: `verboseLevel` is intentionally NOT exposed here — the bridge pins it to
 // "full" per connection to receive complete streaming frames; letting the user
 // lower it would silently degrade streaming. (Documented in docs/CHAT_UX_DESIGN.md.)
+//
+// UNSET (`null`) semantics — the per-line ↺ "back to inherited" (CONF amendment
+// A2, LIFTED by the 6.5 bench probe): the gateway's `sessions.patch
+// { key, <field>: null }` returns ok:true and REMOVES the stored override, so
+// the session falls back to the agent/admin default. Passing `null` here (a)
+// deletes the key from the `sessionSettings` intent (so per-turn re-apply stops
+// pushing it) and (b) records the field name in the intent's `clears` list, so
+// the unset SURVIVES like a set (red-team P2-4): the bridge patches the explicit
+// null immediately AND re-applies it before every turn — an unset lost to a
+// bridge outage is repaired on the next turn instead of leaving the gateway
+// override forever. Setting a field again removes it from `clears`.
 export const setSessionKnob = mutation({
   args: {
     chatId: v.id("chats"),
-    thinkingLevel: v.optional(v.string()),
-    model: v.optional(v.string()),
+    thinkingLevel: v.optional(v.union(v.string(), v.null())),
+    model: v.optional(v.union(v.string(), v.null())),
+    fastMode: v.optional(v.union(v.boolean(), v.null())),
   },
-  handler: async (ctx, { chatId, thinkingLevel, model }) => {
+  handler: async (ctx, { chatId, thinkingLevel, model, fastMode }) => {
     const { userId, actor } = await requireActive(ctx);
     const chat = await requireOwnedChat(ctx, userId, chatId);
 
     // Defensive bound: enum ids are short. The gateway is the real validator, but
     // we cap length so a malformed value can never bloat a patch payload.
-    if (thinkingLevel !== undefined && thinkingLevel.length > 64) {
+    if (typeof thinkingLevel === "string" && thinkingLevel.length > 64) {
       throw new Error("Invalid thinkingLevel");
     }
-    if (model !== undefined && model.length > 128) {
+    if (typeof model === "string" && model.length > 128) {
       throw new Error("Invalid model");
     }
 
     // Merge onto existing intent so changing one knob never drops the other.
-    const next: { thinkingLevel?: string; model?: string } = {
-      ...(chat.sessionSettings ?? {}),
-    };
-    if (thinkingLevel !== undefined) next.thinkingLevel = thinkingLevel;
-    if (model !== undefined) next.model = model;
+    // `null` = unset: remove the key from the intent AND persist the field name
+    // in the intent's `clears` (deduplicated) — one source of truth the bridge
+    // consumes both on the immediate /patch and on every per-turn re-apply
+    // (P2-4: unsets survive like sets). Setting a field removes it from clears.
+    const next: {
+      thinkingLevel?: string;
+      model?: string;
+      fastMode?: boolean;
+      clears?: string[];
+    } = { ...(chat.sessionSettings ?? {}) };
+    const clears = new Set(next.clears ?? []);
+    if (thinkingLevel !== undefined) {
+      if (thinkingLevel === null) {
+        delete next.thinkingLevel;
+        clears.add("thinkingLevel");
+      } else {
+        next.thinkingLevel = thinkingLevel;
+        clears.delete("thinkingLevel");
+      }
+    }
+    if (model !== undefined) {
+      if (model === null) {
+        delete next.model;
+        clears.add("model");
+      } else {
+        next.model = model;
+        clears.delete("model");
+      }
+    }
+    if (fastMode !== undefined) {
+      if (fastMode === null) {
+        delete next.fastMode;
+        clears.add("fastMode");
+      } else {
+        next.fastMode = fastMode;
+        clears.delete("fastMode");
+      }
+    }
+    if (clears.size > 0) next.clears = [...clears];
+    else delete next.clears;
     await ctx.db.patch(chatId, { sessionSettings: next });
 
     // Immediate apply: the bridge patches the gateway, re-describes, and reports
     // the CONFIRMED live meta back (chip stays honest). Cannot fetch from a
     // mutation, hence the scheduled internalAction. `userId` (== chat owner,
     // enforced above) routes the patch to the same instance/agent as sends.
+    // No separate `clears` arg: the action reads the PERSISTED intent.
     await ctx.scheduler.runAfter(0, internal.bridge.dispatchPatch, {
       chatId,
       userId,
     });
 
     await auditImpersonated(ctx, actor, "chat.session_knob", {
+      resource: "chat",
+      resourceId: chatId,
+    });
+  },
+});
+
+// Owner-initiated session realignment from the session panel (CONF-4b
+// "Réinitialiser la session"): schedules the SAME internal.bridge.dispatchReset
+// that messages.deleteMessage uses (without a regenerate outbox), so the
+// gateway flips systemSent=false and the next turn re-hydrates from the
+// current Convex transcript. Messages are NOT deleted.
+export const resetSession = mutation({
+  args: { chatId: v.id("chats") },
+  handler: async (ctx, { chatId }) => {
+    const { userId, actor } = await requireActive(ctx);
+    await requireOwnedChat(ctx, userId, chatId);
+    await ctx.scheduler.runAfter(0, internal.bridge.dispatchReset, {
+      chatId,
+      userId,
+    });
+    await auditImpersonated(ctx, actor, "chat.reset", {
       resource: "chat",
       resourceId: chatId,
     });

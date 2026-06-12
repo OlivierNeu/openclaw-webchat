@@ -34,4 +34,14 @@ describe("mergeOrder", () => {
     const reversed = [...TABS].reverse();
     expect(mergeOrder(reversed)).toEqual(reversed);
   });
+
+  test("the CONF-4c/4d tabs exist and surface for a stale saved order", () => {
+    // A user whose order was saved BEFORE the new tabs shipped still gets them,
+    // appended after the saved keys (the "new tabs appended" contract).
+    expect(TABS).toContain("agentFiles");
+    expect(TABS).toContain("chatDefaults");
+    const out = mergeOrder(["audit", "users"]);
+    expect(out).toContain("agentFiles");
+    expect(out).toContain("chatDefaults");
+  });
 });

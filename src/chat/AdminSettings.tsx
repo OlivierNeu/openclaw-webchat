@@ -79,10 +79,12 @@ export const TABS = [
   "kpi",
   "anomalies",
   "files",
+  "agentFiles",
   "preferences",
   "integrations",
   "theme",
   "uiprefs",
+  "chatDefaults",
   "audit",
   "feedbacks",
 ] as const;
@@ -100,7 +102,9 @@ export const PARAMLESS_TABS = [
   "uiprefs",
   "feedbacks",
   "files",
+  "agentFiles",
   "preferences",
+  "chatDefaults",
 ] as const;
 export type ParamlessTab = (typeof PARAMLESS_TABS)[number];
 
@@ -119,8 +123,11 @@ export const TAB_LABELS: Partial<Record<Tab, string>> = {
   uiprefs: "Préférences UI",
   bridge: "Bridge",
   files: "Fichiers", // FR fallback; the nav renders the i18n label (m.files_tab_label)
+  agentFiles: "Fichiers d'agent", // FR fallback; nav renders m.afiles_tab_label
   theme: "Apparence", // FR fallback; nav renders m.appearance_tab_label
   preferences: "Préférences", // FR fallback; nav renders m.settings_tab_preferences
+  // chatDefaults has NO ASCII-safe FR fallback; the nav renders
+  // m.cdefaults_tab_label and the tab is admin-only (never in the grant editor).
 };
 
 // --- Per-tab RBAC ----------------------------------------------------------
@@ -147,6 +154,10 @@ export const TAB_PERMISSION: Record<Tab, string> = {
   // base `chats.read` permission every approved user already holds (admins via
   // the wildcard) → visible to ALL users by default, NOT a grantable admin tab.
   files: "chats.read",
+  // Agent workspace files (CONF-4c). Grantable read permission; the server
+  // additionally restricts non-admins to the RULE files (A3) and writes to
+  // admin.manage — this gate only controls tab visibility.
+  agentFiles: "agents.files.read",
   // Personal preferences (language + UI toggles) — owner-scoped, gated on the
   // base `chats.read` every approved user holds → visible to ALL, not grantable.
   preferences: "chats.read",
@@ -158,6 +169,9 @@ export const TAB_PERMISSION: Record<Tab, string> = {
   // server independently gates each admin mutation on CHARTS_MANAGE / admin.
   theme: "chats.read",
   uiprefs: "admin.manage",
+  // Global chat defaults (CONF-4d) write the gateway's openclaw.json — strictly
+  // admin (the agentFiles actions re-check admin.manage server-side).
+  chatDefaults: "admin.manage",
   audit: "admin.manage",
   feedbacks: "admin.manage",
 };
@@ -171,6 +185,7 @@ export const GRANTABLE_TABS: readonly Tab[] = [
   "kpi",
   "anomalies",
   "bridge",
+  "agentFiles",
 ];
 
 // The tabs a holder of `perms` may see, in canonical TABS (nav) order.

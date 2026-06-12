@@ -425,6 +425,23 @@ export default defineSchema({
     .index("by_time", ["at"])
     .index("by_real", ["realUserId"]),
 
+  // Full before/after revision log for agent workspace-file writes (CONF-4c,
+  // amendment A4: audit with COMPLETE before/after content + rollback source).
+  // One row per successful `agentFiles.setAgentFile`; content is bounded by the
+  // 64k write cap, so full copies are cheap. Writes are admin-only, so this
+  // table stays small. NON-PHI by policy: these are agent RULE files — MEMORY/
+  // USER files are admin-only even in read (A3), and their writes land here too,
+  // visible only through admin-gated surfaces.
+  agentFileRevisions: defineTable({
+    instanceName: v.string(), // -> instances.name
+    agentId: v.string(), // -> agents.agentId (on instanceName)
+    name: v.string(), // workspace file name, e.g. "AGENTS.md"
+    before: v.string(), // full content as read by the bridge BEFORE the write
+    after: v.string(), // full content written
+    byUserId: v.id("users"), // the REAL operator (impersonation-aware audit)
+    at: v.number(),
+  }).index("by_agent_file", ["instanceName", "agentId", "name"]),
+
   // A user's project: a named grouping of chats in the sidebar. Per-user.
   projects: defineTable({
     userId: v.id("users"),
@@ -494,6 +511,12 @@ export default defineSchema({
       v.object({
         thinkingLevel: v.optional(v.string()), // reasoning level id
         model: v.optional(v.string()), // model id
+        fastMode: v.optional(v.boolean()), // CONF-4a "Vitesse" (bench: true/false/null patchable)
+        // Field names UNSET by the user (per-line ↺). Persisted IN the intent so
+        // an unset survives a bridge outage exactly like a set: the bridge
+        // re-applies `{<field>: null}` per turn (idempotent). A field is removed
+        // from `clears` when it is set again. (Red-team P2-4.)
+        clears: v.optional(v.array(v.string())),
       }),
     ),
   })

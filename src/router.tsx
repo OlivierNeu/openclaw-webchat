@@ -77,7 +77,9 @@ import { IntegrationsTab } from "./chat/admin/IntegrationsTab";
 import { FeedbacksTab } from "./chat/admin/FeedbacksTab";
 import { UiPrefsTab } from "./chat/admin/UiPrefsTab";
 import { FilesTab } from "./chat/admin/FilesTab";
+import { AgentFilesTab } from "./chat/admin/AgentFilesTab";
 import { PreferencesTab } from "./chat/admin/PreferencesTab";
+import { ChatDefaultsTab } from "./chat/admin/ChatDefaultsTab";
 import { AccessTab } from "./chat/admin/AccessTab";
 import { BridgeTab } from "./chat/admin/BridgeTab";
 import { SettingsNav } from "./chat/admin/SettingsNav";
@@ -550,8 +552,12 @@ function SettingsParamlessScreen() {
       return <UiPrefsTab />;
     case "files":
       return <FilesTab />;
+    case "agentFiles":
+      return <AgentFilesTab />;
     case "preferences":
       return <PreferencesTab />;
+    case "chatDefaults":
+      return <ChatDefaultsTab />;
     case "access":
       return <AccessTab />;
     case "roles":

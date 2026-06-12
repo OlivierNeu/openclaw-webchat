@@ -32,6 +32,10 @@ export const PERMISSIONS = {
   ANOMALIES_READ: "anomalies.read",
   ANOMALIES_REPORT: "anomalies.report",
   BRIDGE_READ: "bridge.read", // read bridge health (Settings → Bridge tab)
+  // Read agent RULE files (AGENTS/SOUL/IDENTITY/TOOLS .md) via the bridge.
+  // Amendment A3: covers ONLY the rules allowlist — memory/user/boot files stay
+  // admin-only even in read (agents are shared; memory holds others' data).
+  AGENT_FILES_READ: "agents.files.read",
   CHATS_READ: "chats.read", // read conversational data
   GROUPS_MANAGE: "groups.manage", // create/manage groups + group agents (admin-only)
   CHARTS_MANAGE: "charts.manage", // manage chart defaults + group availability (admin-only)
@@ -49,17 +53,37 @@ export type Permission = (typeof PERMISSIONS)[keyof typeof PERMISSIONS];
  * observer-readable — D2 metadata-only, non-PHI), so extending them to human users
  * is consistent with the existing sensitivity model, NOT a new exposure. The
  * grant mutation enforces this set SERVER-SIDE (UI hiding is not enforcement).
+ *
+ * agents.files.read (A3) gates the read-only Settings "agentFiles" tab AND is
+ * server-restricted in agentFiles.ts to the RULE files allowlist
+ * (AGENTS/SOUL/IDENTITY/TOOLS .md) — never memory/user/boot files.
  */
 export const GRANTABLE_USER_PERMISSIONS: readonly Permission[] = [
   PERMISSIONS.TRACES_READ,
   PERMISSIONS.KPI_READ,
   PERMISSIONS.ANOMALIES_READ,
   PERMISSIONS.BRIDGE_READ,
+  PERMISSIONS.AGENT_FILES_READ,
 ] as const;
+
+/**
+ * Grantable permissions that gate a NON-TAB surface. Kept OUT of
+ * GRANTABLE_USER_PERMISSIONS because that list is pinned 1:1 to the Settings
+ * GRANTABLE_TABS by the frontend lockstep test (src/chat/admin/tabAccess.test.ts)
+ * — a perm without a tab would break the nav/landing/grant-editor mirror. The
+ * SERVER grant gate (isGrantableUserPermission, used by admin.setUserPermissions)
+ * accepts the UNION, so these are just as grantable as the tab perms.
+ * Currently EMPTY: agents.files.read moved to the tab list when the Settings
+ * "agentFiles" tab shipped (CONF-4c) — the mechanism stays for future perms.
+ */
+export const GRANTABLE_NON_TAB_USER_PERMISSIONS: readonly Permission[] = [] as const;
 
 /** True if `perm` is one an admin may grant to a non-admin user (server gate). */
 export function isGrantableUserPermission(perm: string): perm is Permission {
-  return (GRANTABLE_USER_PERMISSIONS as readonly string[]).includes(perm);
+  return (
+    (GRANTABLE_USER_PERMISSIONS as readonly string[]).includes(perm) ||
+    (GRANTABLE_NON_TAB_USER_PERMISSIONS as readonly string[]).includes(perm)
+  );
 }
 
 /** Wildcard sentinel: a role carrying it grants every permission. */
