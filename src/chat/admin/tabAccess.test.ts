@@ -11,6 +11,7 @@ import {
   PERMISSIONS,
   GRANTABLE_USER_PERMISSIONS,
 } from "../../../convex/lib/rbac";
+import { firstTabOfGroup, visibleGroups } from "./settingsGroups";
 
 // The per-tab RBAC map is the UX mirror of the server's permission gates. These
 // tests pin the two together so the nav/landing/grant-editor can NEVER drift
@@ -80,6 +81,28 @@ describe("visibleTabs", () => {
       "theme",
     ]);
     expect(visibleTabs([])).toEqual([]);
+  });
+});
+
+describe("groups × RBAC (sidebar group landing)", () => {
+  test("clicking a group lands on its first allowed tab, in nav order", () => {
+    // Admin (all perms): the access group's first tab in TABS order is users.
+    const adminVisible = visibleTabs(Object.values(PERMISSIONS));
+    expect(firstTabOfGroup(adminVisible, "access")).toBe("users");
+    expect(firstTabOfGroup(adminVisible, "observability")).toBe("traces");
+    // A plain user (chats.read): personal lands on files (files precedes
+    // preferences and theme in TABS order).
+    const userVisible = visibleTabs(["chats.read"]);
+    expect(firstTabOfGroup(userVisible, "personal")).toBe("files");
+    // A group with no allowed tab has no landing (the sidebar hides it).
+    expect(firstTabOfGroup(userVisible, "observability")).toBeUndefined();
+  });
+
+  test("a non-admin only sees groups holding >=1 granted tab", () => {
+    expect(visibleGroups(["chats.read", "traces.read"])).toEqual([
+      "personal",
+      "observability",
+    ]);
   });
 });
 

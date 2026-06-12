@@ -82,7 +82,7 @@ import { PreferencesTab } from "./chat/admin/PreferencesTab";
 import { ChatDefaultsTab } from "./chat/admin/ChatDefaultsTab";
 import { AccessTab } from "./chat/admin/AccessTab";
 import { BridgeTab } from "./chat/admin/BridgeTab";
-import { SettingsNav } from "./chat/admin/SettingsNav";
+import { SettingsNav, SettingsTabBar } from "./chat/admin/SettingsNav";
 import { ThemeShowroom } from "./chat/ThemeShowroom";
 import {
   tracesSearchSchema,
@@ -484,12 +484,14 @@ function SettingsLayout() {
   const activeTab = tabFromPathname(pathname);
   const denied = activeTab !== undefined && !visible.includes(activeTab);
 
-  // The tab nav lives in the VERTICAL SettingsNav (left column, rendered by
-  // AuthenticatedChrome). This layout keeps only the content: either the active
-  // tab (via <Outlet/>) or the access-denied panel when the tab isn't allowed.
+  // The GROUP nav lives in the VERTICAL SettingsNav (left column, rendered by
+  // AuthenticatedChrome). This layout adds the active group's horizontal tab
+  // bar above the content: either the active tab (via <Outlet/>) or the
+  // access-denied panel when the tab isn't allowed.
   return (
     <ToastProvider>
       <div className="oc-admin">
+        <SettingsTabBar />
         <div className="oc-admin__body">
           {denied ? <SettingsAccessDenied /> : <Outlet />}
         </div>

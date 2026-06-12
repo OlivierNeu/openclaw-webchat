@@ -1,6 +1,6 @@
 import { describe, expect, test } from "vitest";
-import { mergeOrder } from "./SettingsNav";
-import { TABS } from "../AdminSettings";
+import { applyGroupReorder, mergeOrder } from "./SettingsNav";
+import { TABS, type Tab } from "../AdminSettings";
 
 // mergeOrder is the load-bearing merge for the per-user tab order: saved (valid,
 // de-duped) keys first, then any tab NOT yet saved (new tabs), unknown/stale keys
@@ -43,5 +43,31 @@ describe("mergeOrder", () => {
     const out = mergeOrder(["audit", "users"]);
     expect(out).toContain("agentFiles");
     expect(out).toContain("chatDefaults");
+  });
+});
+
+// applyGroupReorder splices a within-group drag back into the FULL per-user
+// order: the dragged group's tabs take the new arrangement IN the positions the
+// group already occupied; every other tab (other groups, hidden tabs) stays put.
+
+describe("applyGroupReorder", () => {
+  test("reorders only the group's positions; everything else keeps its slot", () => {
+    const full: Tab[] = ["users", "traces", "kpi", "groups", "anomalies"];
+    // Drag within the observability subset: traces/kpi/anomalies → kpi first.
+    const out = applyGroupReorder(full, ["kpi", "anomalies", "traces"]);
+    expect(out).toEqual(["users", "kpi", "anomalies", "groups", "traces"]);
+  });
+
+  test("an empty or single-tab reorder is the identity", () => {
+    const full = [...TABS];
+    expect(applyGroupReorder(full, [])).toEqual(full);
+    expect(applyGroupReorder(full, ["bridge"])).toEqual(full);
+  });
+
+  test("the result is still a permutation of the input order", () => {
+    const full = mergeOrder(null);
+    const out = applyGroupReorder(full, ["anomalies", "traces", "kpi"]);
+    expect(new Set(out)).toEqual(new Set(full));
+    expect(out).toHaveLength(full.length);
   });
 });

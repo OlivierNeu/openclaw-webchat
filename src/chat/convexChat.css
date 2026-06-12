@@ -1547,14 +1547,6 @@
 .oc-admin { display: flex; flex-direction: column; height: 100%; overflow: hidden; }
 .oc-admin__header { padding: 16px 20px; border-bottom: 1px solid var(--border); }
 .oc-admin__header h1 { font-size: 1.1rem; font-weight: 600; margin-bottom: 8px; }
-.oc-admin__tabs { display: flex; gap: 6px; }
-.oc-admin__tab {
-  padding: 4px 12px; border-radius: var(--radius-md); text-transform: capitalize;
-  background: transparent; cursor: pointer; color: var(--muted-foreground);
-}
-.oc-admin__tab.is-active { background: var(--accent); color: var(--accent-foreground); }
-/* Tabs with an explicit (multi-word) FR label opt out of the per-key capitalize. */
-.oc-admin__tab--labeled { text-transform: none; }
 .oc-admin__body { padding: 16px 20px; overflow: auto; }
 /* The health bar now sits at the top of the content (the old settings header is
    gone — the tab nav moved to the vertical SettingsNav in the left column). */
@@ -1597,28 +1589,55 @@
   flex-direction: column;
   gap: 2px;
 }
-/* In the vertical nav, each tab is a row: a hover-revealed drag grip on the left
-   (same treatment as the chat list) + the full-width label/link. The ROW owns the
-   hover/active background so it spans grip + label, and the grip only appears on
-   hover/focus to keep the nav clean. */
-.oc-settings-nav__item {
+/* The sidebar lists the 4 GROUPS (the tabs themselves moved to the horizontal
+   .oc-settings-tabs bar atop the right panel). Group buttons share the back/
+   title left gutter (1.5rem) so the whole text column stays aligned. */
+.oc-settings-nav__group {
+  display: block;
+  width: 100%;
+  text-align: left;
+  padding: 0.45rem 0.5rem 0.45rem 1.5rem;
+  border: 0;
+  border-radius: var(--radius-md);
+  background: transparent;
+  color: var(--foreground);
+  font: inherit;
+  font-size: 0.875rem;
+  cursor: pointer;
+}
+.oc-settings-nav__group:hover {
+  background: var(--accent);
+  color: var(--accent-foreground);
+}
+.oc-settings-nav__group.is-active {
+  background: var(--accent);
+  color: var(--accent-foreground);
+  font-weight: 600;
+}
+
+/* Horizontal tab bar (top of the Settings right panel): the active group's
+   allowed tabs, underline on the active one. Scrolls horizontally on narrow
+   viewports (no wrap). Each item keeps the hover-revealed drag grip — the #91
+   per-user order now reorders WITHIN the group. */
+.oc-settings-tabs {
+  display: flex;
+  align-items: stretch;
+  gap: 2px;
+  padding: 0 12px;
+  border-bottom: 1px solid var(--border);
+  overflow-x: auto;
+  flex-shrink: 0;
+}
+.oc-settings-tabs__item {
   display: flex;
   align-items: center;
-  gap: 0.25rem;
-  border-radius: var(--radius-md);
-  padding-right: 0.25rem;
+  flex-shrink: 0;
 }
-.oc-settings-nav__item:hover {
-  background: var(--accent);
-}
-.oc-settings-nav__item:has(.is-active) {
-  background: var(--accent);
-}
-.oc-settings-nav__grip {
+.oc-settings-tabs__grip {
   display: flex;
   align-items: center;
   justify-content: center;
-  width: 1.25rem;
+  width: 1rem;
   height: 1.75rem;
   flex-shrink: 0;
   border: 0;
@@ -1628,29 +1647,29 @@
   opacity: 0;
   touch-action: none;
 }
-.oc-settings-nav__item:hover .oc-settings-nav__grip,
-.oc-settings-nav__item:focus-within .oc-settings-nav__grip {
+.oc-settings-tabs__item:hover .oc-settings-tabs__grip,
+.oc-settings-tabs__item:focus-within .oc-settings-tabs__grip {
   opacity: 1;
 }
-.oc-settings-nav .oc-admin__tab {
-  flex: 1;
-  min-width: 0;
+.oc-settings-tabs__tab {
   display: flex;
   align-items: center;
   gap: 0.4rem;
-  padding: 0.45rem 0.5rem 0.45rem 0;
-  border-radius: var(--radius-md);
-  color: var(--foreground);
+  padding: 0.55rem 0.6rem;
+  border-bottom: 2px solid transparent;
+  color: var(--muted-foreground);
   text-decoration: none;
   font-size: 0.875rem;
 }
-.oc-settings-nav .oc-admin__tab.is-active {
-  color: var(--accent-foreground);
+.oc-settings-tabs__tab:hover {
+  color: var(--foreground);
+}
+.oc-settings-tabs__tab.is-active {
+  color: var(--foreground);
+  border-bottom-color: var(--primary);
   font-weight: 600;
 }
-.oc-settings-nav__label {
-  overflow: hidden;
-  text-overflow: ellipsis;
+.oc-settings-tabs__label {
   white-space: nowrap;
 }
 .oc-admin__hint { color: var(--muted-foreground); font-size: 0.9rem; margin-bottom: 12px; }

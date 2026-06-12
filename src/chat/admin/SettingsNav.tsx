@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
-import { Link } from "@tanstack/react-router";
+import { Link, useLocation, useNavigate } from "@tanstack/react-router";
 import { useMutation, useQuery } from "convex/react";
 import {
   DndContext,
@@ -10,13 +10,13 @@ import {
   useSensors,
   type DragEndEvent,
 } from "@dnd-kit/core";
-import { restrictToVerticalAxis } from "@dnd-kit/modifiers";
+import { restrictToHorizontalAxis } from "@dnd-kit/modifiers";
 import {
   SortableContext,
   arrayMove,
+  horizontalListSortingStrategy,
   sortableKeyboardCoordinates,
   useSortable,
-  verticalListSortingStrategy,
 } from "@dnd-kit/sortable";
 import { CSS } from "@dnd-kit/utilities";
 import { GripVertical } from "lucide-react";
@@ -25,10 +25,18 @@ import {
   PARAMLESS_TABS,
   TABS,
   TAB_LABELS,
+  pathForTab,
+  tabFromPathname,
   visibleTabs,
   type ParamlessTab,
   type Tab,
 } from "../AdminSettings";
+import {
+  SETTINGS_GROUPS,
+  firstTabOfGroup,
+  groupOfTab,
+  type SettingsGroup,
+} from "./settingsGroups";
 import { BridgeStatusBadge } from "./BridgeStatusBadge";
 import { m } from "@/paraglide/messages.js";
 
@@ -56,16 +64,14 @@ const TAB_I18N: Partial<Record<Tab, () => string>> = {
   feedbacks: () => m.settings_tab_feedbacks(),
 };
 
-// Vertical, DRAG-AND-DROP settings navigation (replaces the chat list in
-// Settings). Tab order is a per-user preference persisted to Convex
-// (me.setSettingsTabOrder); a grip handle reorders, the link itself still
-// navigates. The brand + a back link return to chat.
-
-// A tab is "labeled" (no CSS capitalize) when it renders a human label — either
-// the i18n override or the FR fallback (chatDefaults has only the i18n label).
-const TAB_CLASS = (t: Tab) =>
-  "oc-admin__tab" + (TAB_I18N[t] || TAB_LABELS[t] ? " oc-admin__tab--labeled" : "");
-const TAB_ACTIVE_CLASS = (t: Tab) => TAB_CLASS(t) + " is-active";
+// Two-level settings navigation (layer-cake, docs/CONF_RESEARCH.md):
+// - SettingsNav (left column) lists the 4 GROUPS; the active group derives
+//   from the current /settings/<tab> pathname (no new URL — deep links work).
+// - SettingsTabBar (top of the right panel) lists the active group's allowed
+//   tabs and carries the per-user drag-and-drop order (#91): a drag reorders
+//   tabs WITHIN their group and persists the spliced FULL order, so the saved
+//   me.settingsTabOrder shape is unchanged and hidden/other-group tabs keep
+//   their positions.
 
 type FilteredTabPath =
   | "/settings/users"
@@ -92,14 +98,25 @@ export function mergeOrder(saved: string[] | null | undefined): Tab[] {
   return out;
 }
 
-function TabLinkInner({ tab }: { tab: Tab }) {
+// Splice a reordered SUBSET back into the full order: every position held by a
+// member of `reordered` is refilled with the new arrangement in sequence; all
+// other tabs (other groups, hidden tabs) keep their exact positions. Pure →
+// unit-tested (settingsNav.test.ts).
+export function applyGroupReorder(
+  fullOrder: readonly Tab[],
+  reordered: readonly Tab[],
+): Tab[] {
+  const members = new Set(reordered);
+  const queue = [...reordered];
+  return fullOrder.map((t) => (members.has(t) ? (queue.shift() as Tab) : t));
+}
+
+function TabLink({ tab, active }: { tab: Tab; active: boolean }) {
   const label = TAB_I18N[tab]?.() ?? TAB_LABELS[tab] ?? tab;
-  const activeProps = { className: TAB_ACTIVE_CLASS(tab) };
-  // Path-only highlight (search params must not break the active state).
-  const activeOptions = { includeSearch: false };
+  const className = "oc-settings-tabs__tab" + (active ? " is-active" : "");
   const content = (
     <>
-      <span className="oc-settings-nav__label">{label}</span>
+      <span className="oc-settings-tabs__label">{label}</span>
       {tab === "bridge" ? <BridgeStatusBadge /> : null}
     </>
   );
@@ -108,9 +125,9 @@ function TabLinkInner({ tab }: { tab: Tab }) {
       <Link
         to="/settings/$tab"
         params={{ tab: tab as ParamlessTab }}
-        className={TAB_CLASS(tab)}
-        activeProps={activeProps}
-        activeOptions={activeOptions}
+        className={className}
+        role="tab"
+        aria-selected={active}
       >
         {content}
       </Link>
@@ -119,16 +136,16 @@ function TabLinkInner({ tab }: { tab: Tab }) {
   return (
     <Link
       to={`/settings/${tab}` as FilteredTabPath}
-      className={TAB_CLASS(tab)}
-      activeProps={activeProps}
-      activeOptions={activeOptions}
+      className={className}
+      role="tab"
+      aria-selected={active}
     >
       {content}
     </Link>
   );
 }
 
-function SortableTab({ tab }: { tab: Tab }) {
+function SortableTab({ tab, active }: { tab: Tab; active: boolean }) {
   const { attributes, listeners, setNodeRef, transform, transition, isDragging } =
     useSortable({ id: tab });
   const style: React.CSSProperties = {
@@ -137,24 +154,36 @@ function SortableTab({ tab }: { tab: Tab }) {
     opacity: isDragging ? 0.5 : 1,
   };
   return (
-    <div ref={setNodeRef} style={style} className="oc-settings-nav__item">
+    <div
+      ref={setNodeRef}
+      style={style}
+      className="oc-settings-tabs__item"
+      role="presentation"
+    >
       <button
         type="button"
-        className="oc-settings-nav__grip"
+        className="oc-settings-tabs__grip"
         aria-label={m.settingsnav_reorder()}
         {...attributes}
         {...listeners}
       >
         <GripVertical size={14} aria-hidden />
       </button>
-      <TabLinkInner tab={tab} />
+      <TabLink tab={tab} active={active} />
     </div>
   );
 }
 
-export function SettingsNav() {
+// Horizontal tab bar at the top of the Settings right panel: the ACTIVE
+// group's tabs this user may open, in their custom order. Mounted by the
+// settings-layout route (router.tsx) above the tab content.
+export function SettingsTabBar() {
   const me = useQuery(api.me.getMe);
   const saveOrder = useMutation(api.me.setSettingsTabOrder);
+  const pathname = useLocation({ select: (l) => l.pathname });
+  const activeTab = tabFromPathname(pathname);
+  const group = activeTab !== undefined ? groupOfTab(activeTab) : undefined;
+
   const serverOrder = useMemo(
     () => mergeOrder(me?.settingsTabOrder ?? null),
     [me?.settingsTabOrder],
@@ -164,41 +193,94 @@ export function SettingsNav() {
   const [order, setOrder] = useState<Tab[]>(serverOrder);
   useEffect(() => setOrder(serverOrder), [serverOrder]);
 
-  // Per-tab RBAC: only render the tabs this user may open (admins see all). The
-  // drag list (DnD + persistence) operates on this VISIBLE subset, so a
-  // non-admin never reorders into a tab they can't see.
+  // Per-tab RBAC: only the tabs this user may open (admins see all). The drag
+  // list operates on this VISIBLE in-group subset, so a non-admin never
+  // reorders into a tab they can't see.
   const visibleSet = useMemo(
     () => new Set(visibleTabs(me?.permissions ?? [])),
     [me?.permissions],
   );
-  const visibleOrder = useMemo(
-    () => order.filter((t) => visibleSet.has(t)),
-    [order, visibleSet],
+  const groupTabs = useMemo(
+    () =>
+      group === undefined
+        ? []
+        : order.filter((t) => visibleSet.has(t) && groupOfTab(t) === group),
+    [order, visibleSet, group],
   );
 
   // Pointer (distance constraint so a grip click doesn't start a spurious drag)
   // + KEYBOARD: the grip announces space/arrow reordering, so it must actually
-  // work for keyboard users (a11y) — and it makes reordering deterministically
-  // testable.
+  // work for keyboard users (a11y).
   const sensors = useSensors(
     useSensor(PointerSensor, { activationConstraint: { distance: 5 } }),
     useSensor(KeyboardSensor, { coordinateGetter: sortableKeyboardCoordinates }),
   );
 
+  if (group === undefined || groupTabs.length === 0) return null;
+  const groupDef = SETTINGS_GROUPS.find((g) => g.id === group);
+
   function onDragEnd(e: DragEndEvent) {
     const { active, over } = e;
     if (!over || active.id === over.id) return;
-    const from = visibleOrder.indexOf(active.id as Tab);
-    const to = visibleOrder.indexOf(over.id as Tab);
+    const from = groupTabs.indexOf(active.id as Tab);
+    const to = groupTabs.indexOf(over.id as Tab);
     if (from < 0 || to < 0) return;
-    const nextVisible = arrayMove(visibleOrder, from, to);
-    // Persist the full per-user order: reordered visible tabs first, then the
-    // hidden (not-permitted) tabs in their existing relative order. For an admin
-    // (all tabs visible) this is simply the full reorder.
-    const hidden = order.filter((t) => !visibleSet.has(t));
-    const next = [...nextVisible, ...hidden];
+    // Reorder within the group, then splice back into the FULL per-user order
+    // (other groups + hidden tabs keep their positions) and persist it.
+    const next = applyGroupReorder(order, arrayMove(groupTabs, from, to));
     setOrder(next); // optimistic
     void saveOrder({ order: next });
+  }
+
+  return (
+    <div
+      className="oc-settings-tabs"
+      role="tablist"
+      aria-label={groupDef?.label()}
+    >
+      <DndContext
+        sensors={sensors}
+        collisionDetection={closestCenter}
+        modifiers={[restrictToHorizontalAxis]}
+        onDragEnd={onDragEnd}
+      >
+        <SortableContext items={groupTabs} strategy={horizontalListSortingStrategy}>
+          {groupTabs.map((t) => (
+            <SortableTab key={t} tab={t} active={t === activeTab} />
+          ))}
+        </SortableContext>
+      </DndContext>
+    </div>
+  );
+}
+
+// Vertical settings navigation (left column — replaces the chat list while in
+// Settings): the 4 groups, each visible only when it contains >=1 allowed tab.
+// Clicking a group opens its first allowed tab (in the user's custom order).
+export function SettingsNav() {
+  const me = useQuery(api.me.getMe);
+  const navigate = useNavigate();
+  const pathname = useLocation({ select: (l) => l.pathname });
+  const activeTab = tabFromPathname(pathname);
+  const activeGroup = activeTab !== undefined ? groupOfTab(activeTab) : undefined;
+
+  const visibleSet = useMemo(
+    () => new Set(visibleTabs(me?.permissions ?? [])),
+    [me?.permissions],
+  );
+  const visibleOrder = useMemo(
+    () => mergeOrder(me?.settingsTabOrder ?? null).filter((t) => visibleSet.has(t)),
+    [me?.settingsTabOrder, visibleSet],
+  );
+  const groups = SETTINGS_GROUPS.filter((g) =>
+    g.tabs.some((t) => visibleSet.has(t)),
+  );
+
+  function openGroup(g: SettingsGroup) {
+    const first = firstTabOfGroup(visibleOrder, g.id);
+    // pathForTab returns a valid /settings/<tab> path; cast to satisfy the typed
+    // navigate `to` (runtime resolves the string against the route tree).
+    if (first) void navigate({ to: pathForTab(first) as "/settings/users" });
   }
 
   return (
@@ -207,23 +289,21 @@ export function SettingsNav() {
         {m.settingsnav_back()}
       </Link>
       <div className="oc-settings-nav__title">{m.settingsnav_title()}</div>
-      <DndContext
-        sensors={sensors}
-        collisionDetection={closestCenter}
-        modifiers={[restrictToVerticalAxis]}
-        onDragEnd={onDragEnd}
-      >
-        <SortableContext
-          items={visibleOrder}
-          strategy={verticalListSortingStrategy}
-        >
-          <div className="oc-settings-nav__list">
-            {visibleOrder.map((t) => (
-              <SortableTab key={t} tab={t} />
-            ))}
-          </div>
-        </SortableContext>
-      </DndContext>
+      <div className="oc-settings-nav__list">
+        {groups.map((g) => (
+          <button
+            key={g.id}
+            type="button"
+            className={
+              "oc-settings-nav__group" + (g.id === activeGroup ? " is-active" : "")
+            }
+            aria-current={g.id === activeGroup ? "true" : undefined}
+            onClick={() => openGroup(g)}
+          >
+            {g.label()}
+          </button>
+        ))}
+      </div>
     </nav>
   );
 }
