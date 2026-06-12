@@ -721,18 +721,36 @@
 .oc-notif__link:hover { text-decoration: underline; }
 
 /* ── User UI-preferences panel (interface-config module) */
+/* Single root so the panel always occupies ONE cell of the settings grid
+   (a fragment used to split filter/list across the 220px|1fr columns).
+   Width is capped to a reading measure (~65-75 chars, CONF_RESEARCH). */
+.oc-prefs-panel { min-width: 0; max-width: 42rem; }
 .oc-prefs { display: flex; flex-direction: column; }
 .oc-prefs__empty { padding: 1rem; color: var(--muted-foreground); }
+/* Layer-cake group headers: scannable section anchors (CONF grammar) with
+   asymmetric spacing — more air before a group than after its header. */
+.oc-prefs__cat {
+  margin: 1.4rem 0 0.2rem;
+  font-size: 0.72rem;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  color: var(--muted-foreground);
+}
+.oc-prefs__group:first-child .oc-prefs__cat { margin-top: 0.4rem; }
 .oc-prefs__row {
   display: flex;
   align-items: center;
   justify-content: space-between;
   gap: 1rem;
-  padding: 0.6rem 0.1rem;
+  padding: 0.6rem 0.1rem 0.6rem 0.6rem;
   border-bottom: 1px solid var(--border);
+  /* provenance gutter (VS Code pattern): transparent until overridden */
+  border-left: 2px solid transparent;
 }
 .oc-prefs__row:last-child { border-bottom: none; }
 .oc-prefs__row.is-locked { opacity: 0.6; }
+.oc-prefs__row.is-overridden { border-left-color: var(--primary); }
 .oc-prefs__info { display: flex; flex-direction: column; gap: 0.15rem; min-width: 0; }
 .oc-prefs__label { display: flex; align-items: center; gap: 0.5rem; font-size: 0.9rem; font-weight: 500; }
 .oc-prefs__help { font-size: 0.78rem; color: var(--muted-foreground); }

@@ -44,7 +44,11 @@ export function PreferencesPanel() {
   }
 
   return (
-    <>
+    // Single wrapper (NOT a fragment): the Settings sections are a
+    // `220px | 1fr` grid, and a fragment's children become separate grid
+    // cells — the list then lands in the 220px heading column (the crushed
+    // layout caught on 2026-06-11). One root keeps the panel in the 1fr cell.
+    <div className="oc-prefs-panel">
       <Input
         value={query}
         onChange={(e) => setQuery(e.target.value)}
@@ -69,7 +73,9 @@ export function PreferencesPanel() {
                 return (
                   <div
                     key={key}
-                    className={`oc-prefs__row${locked ? " is-locked" : ""}`}
+                    className={`oc-prefs__row${locked ? " is-locked" : ""}${
+                      overridden && !locked ? " is-overridden" : ""
+                    }`}
                   >
                     <div className="oc-prefs__info">
                       <span className="oc-prefs__label">
@@ -114,6 +120,6 @@ export function PreferencesPanel() {
           ))}
         </div>
       )}
-    </>
+    </div>
   );
 }
