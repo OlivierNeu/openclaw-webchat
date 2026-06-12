@@ -482,6 +482,14 @@
   color: var(--foreground);
   background: var(--muted);
 }
+/* In-flight state (e.g. delete awaiting its mutation): spinner + no pointer. */
+.oc-iconbtn:disabled {
+  cursor: default;
+  opacity: 0.7;
+}
+.oc-iconbtn__spin {
+  animation: oc-spin 1s linear infinite;
+}
 
 /* ── Report Feedback dialog (UI-9) — category + comment, then the server's
    browser-fidelity verdict. */

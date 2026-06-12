@@ -146,7 +146,13 @@ function RootShell() {
         <SignIn />
       </Unauthenticated>
       <Authenticated>
-        <RoleGate />
+        {/* App-wide toast surface: chat actions (message delete, …) report
+            failures through the same toasts Settings always had. ONE provider
+            for the whole authenticated tree — the settings layout no longer
+            mounts its own (a nested provider would shadow this one). */}
+        <ToastProvider>
+          <RoleGate />
+        </ToastProvider>
       </Authenticated>
     </>
   );
@@ -450,9 +456,9 @@ function AuthenticatedChrome({
 }
 
 // ===========================================================================
-// SETTINGS LAYOUT — admin guard + tab nav + ToastProvider, with the matched tab
-// route rendered via <Outlet/>. ToastProvider must wrap the Outlet so every
-// tab's useToast() resolves (it previously wrapped the whole AdminSettings).
+// SETTINGS LAYOUT — admin guard + tab nav, with the matched tab route rendered
+// via <Outlet/>. useToast() resolves through the APP-WIDE ToastProvider in
+// RootShell (one provider, one toast surface — chat actions use it too).
 // ===========================================================================
 
 // TabLink, the FilteredTabPath union, and the (now drag-and-drop, per-user
@@ -490,14 +496,12 @@ function SettingsLayout() {
   // bar above the content: either the active tab (via <Outlet/>) or the
   // access-denied panel when the tab isn't allowed.
   return (
-    <ToastProvider>
-      <div className="oc-admin">
-        <SettingsTabBar />
-        <div className="oc-admin__body">
-          {denied ? <SettingsAccessDenied /> : <Outlet />}
-        </div>
+    <div className="oc-admin">
+      <SettingsTabBar />
+      <div className="oc-admin__body">
+        {denied ? <SettingsAccessDenied /> : <Outlet />}
       </div>
-    </ToastProvider>
+    </div>
   );
 }
 

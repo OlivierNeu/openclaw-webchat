@@ -30,6 +30,19 @@ export interface UseConvexChatRuntimeArgs {
   chatId: ConvexId<"chats"> | null;
 }
 
+/**
+ * Imperative handle on the in-flight turn gate, for flows that start a run
+ * OUTSIDE the composer (delete-assistant -> regenerate). `begin()` arms the
+ * gate THIS FRAME — same thinking placeholder + composer lock as a send —
+ * and the existing reactive machinery clears it when the reply (or its error
+ * bubble) lands. `cancel()` releases it after a CLIENT-side failure, where no
+ * reply will ever arrive to clear it reactively.
+ */
+export interface TurnGate {
+  begin: () => void;
+  cancel: () => void;
+}
+
 export function useConvexChatRuntime({ chatId }: UseConvexChatRuntimeArgs) {
   const convex = useConvex();
   // OPTIMISTIC ECHO (perceived performance — Doherty ~400ms / Nielsen 0.1s
@@ -105,10 +118,12 @@ export function useConvexChatRuntime({ chatId }: UseConvexChatRuntimeArgs) {
 
   // PRIMARY clear (authoritative + reactive): the instant an assistant message
   // is the last one, the turn is answered — success OR failDispatch's terminal
-  // error bubble. No timer involved in the common path.
+  // error bubble. No timer involved in the common path. Depends on `list` (not
+  // just lastRole) so a truncation that leaves an assistant message last —
+  // lastRole unchanged, no transition — still releases the gate.
   useEffect(() => {
     if (lastRole === "assistant") setPendingSince(null);
-  }, [lastRole]);
+  }, [lastRole, list]);
 
   // SAFETY escape hatch ONLY: if the gateway accepts the send but never emits a
   // reply (post-accept silence), the primary clear never fires — without this the
@@ -188,5 +203,14 @@ export function useConvexChatRuntime({ chatId }: UseConvexChatRuntimeArgs) {
     };
   }, [list, isRunning, chatId, sendMessage, attachmentAdapter]);
 
-  return useExternalStoreRuntime(adapter);
+  // Stable identity: the gate is consumed through context by every message row.
+  const turnGate = useMemo<TurnGate>(
+    () => ({
+      begin: () => setPendingSince(Date.now()),
+      cancel: () => setPendingSince(null),
+    }),
+    [],
+  );
+
+  return { runtime: useExternalStoreRuntime(adapter), turnGate };
 }

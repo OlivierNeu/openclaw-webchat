@@ -251,6 +251,7 @@
   "chat_delete_assistant_btn_title": "Delete and regenerate the reply",
   "chat_delete_user_btn_title": "Delete this message and the following ones",
   "chat_delete_message_aria": "Delete the message",
+  "chat_delete_error": "Delete failed",
   "chat_source_label": "Source · exact raw text · {count} character",
   "chat_source_label_plural": "Source · exact raw text · {count} characters",
   "chat_copy_source": "Copy the exact source",

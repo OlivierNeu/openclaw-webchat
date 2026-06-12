@@ -38,6 +38,7 @@ import {
   Search,
   CircleAlert,
   Bot,
+  LoaderCircle,
 } from "lucide-react";
 import {
   DropdownMenu,
@@ -52,9 +53,11 @@ import {
   PopoverTrigger,
 } from "@/components/ui/popover";
 import { useConfirm } from "@/components/ConfirmDialog";
+import { useToast } from "@/components/ui/toast";
 import { m } from "@/paraglide/messages.js";
-import { useConvexChatRuntime } from "./useConvexChatRuntime";
+import { useConvexChatRuntime, type TurnGate } from "./useConvexChatRuntime";
 import { uiPrefOptimisticUpdate } from "./uiPrefOptimistic";
+import { deleteMessageOptimisticUpdate } from "./deleteMessageOptimistic";
 import { RunStatus } from "./RunStatus";
 import { ToolActivity } from "./ToolActivity";
 import { MediaPart } from "./MediaPart";
@@ -104,8 +107,13 @@ function useUiPrefs(): UiEffective {
   return useContext(UiPrefsContext);
 }
 
+// Imperative turn-gate handle (see useConvexChatRuntime.TurnGate): lets the
+// delete-assistant flow arm the SAME thinking placeholder + composer lock a
+// send uses, from inside any message row.
+const TurnGateContext = createContext<TurnGate | null>(null);
+
 export function ConvexChat({ chatId }: ConvexChatProps) {
-  const runtime = useConvexChatRuntime({ chatId });
+  const { runtime, turnGate } = useConvexChatRuntime({ chatId });
   // Resolved UI preferences (reactive): the single source for which interface
   // elements render. The composer "Outils" quick toggle writes through the same
   // single path (setUiPref), so it stays consistent with the Préférences panel.
@@ -134,6 +142,7 @@ export function ConvexChat({ chatId }: ConvexChatProps) {
 
   return (
     <AssistantRuntimeProvider runtime={runtime}>
+      <TurnGateContext.Provider value={turnGate}>
       <UiPrefsContext.Provider value={ui}>
         <div className="oc-chat">
           {chatId ? (
@@ -153,6 +162,7 @@ export function ConvexChat({ chatId }: ConvexChatProps) {
           )}
         </div>
       </UiPrefsContext.Provider>
+      </TurnGateContext.Provider>
     </AssistantRuntimeProvider>
   );
 }
@@ -697,11 +707,22 @@ function DeleteMessageButton({ kind }: { kind: "user" | "assistant" }) {
   const messageId = useMessage(
     (m) => (m.metadata?.custom as { messageId?: string } | undefined)?.messageId,
   );
-  const del = useMutation(api.messages.deleteMessage);
+  // OPTIMISTIC truncation (perceived performance, same science as the send
+  // echo): the deleted turn — and everything after it — vanishes on the NEXT
+  // FRAME; Convex swaps in the server truth on commit and rolls back on error.
+  const del = useMutation(api.messages.deleteMessage).withOptimisticUpdate(
+    deleteMessageOptimisticUpdate,
+  );
   // Styled, promise-based confirm (radix AlertDialog) — replaces window.confirm.
   // BOTH roles confirm (the action is destructive either way), with copy that
   // matches the actual behavior: user = cascade, assistant = delete + regenerate.
   const confirm = useConfirm();
+  const toast = useToast();
+  const turnGate = useContext(TurnGateContext);
+  // In-flight latch: blocks a double-fire and feeds the button's spinner state
+  // (visible system status — the optimistic paths make the window tiny, but the
+  // affordance must exist for the slow/failure cases).
+  const [busy, setBusy] = useState(false);
   if (!messageId) return null;
 
   async function onDelete(): Promise<void> {
@@ -723,7 +744,24 @@ function DeleteMessageButton({ kind }: { kind: "user" | "assistant" }) {
           },
     );
     if (!ok) return;
-    await del({ messageId: messageId as Id<"messages"> });
+    setBusy(true);
+    // Assistant delete = regenerate: arm the in-flight gate THIS FRAME so the
+    // thinking placeholder + composer lock engage instantly, exactly like a
+    // send. The reactive machinery clears it when the regenerated reply (or its
+    // failDispatch error bubble) lands.
+    if (kind === "assistant") turnGate?.begin();
+    try {
+      await del({ messageId: messageId as Id<"messages"> });
+    } catch (err) {
+      // Convex already rolled the optimistic truncation back (the messages
+      // visibly snap back). Release the gate — no reply will arrive to clear it
+      // — and SAY WHY (e.g. the "wait for the reply to settle" guard). The old
+      // `void` fire-and-forget swallowed this entirely.
+      if (kind === "assistant") turnGate?.cancel();
+      toast.error(m.chat_delete_error(), err);
+    } finally {
+      setBusy(false);
+    }
   }
 
   return (
@@ -736,9 +774,15 @@ function DeleteMessageButton({ kind }: { kind: "user" | "assistant" }) {
           : m.chat_delete_user_btn_title()
       }
       aria-label={m.chat_delete_message_aria()}
+      aria-busy={busy}
+      disabled={busy}
       onClick={() => void onDelete()}
     >
-      <Trash2 size={15} aria-hidden />
+      {busy ? (
+        <LoaderCircle size={15} className="oc-iconbtn__spin" aria-hidden />
+      ) : (
+        <Trash2 size={15} aria-hidden />
+      )}
     </button>
   );
 }
