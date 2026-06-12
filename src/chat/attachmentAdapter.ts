@@ -77,8 +77,14 @@ export function createConvexAttachmentAdapter(
   convex: ConvexReactClient,
 ): AttachmentAdapter {
   return {
-    // Accept everything the bridge/OpenClaw can ingest; tighten per deployment.
-    accept: "image/*,audio/*,video/*,text/*,application/pdf",
+    // "*" is assistant-ui's "no restriction" sentinel: the composer then omits
+    // the <input accept> attribute entirely, so the OS picker greys out NOTHING
+    // (docx/xlsx/zip/… all selectable). Safe end-to-end: sendMessage validates
+    // mimeType as a plain string, the bridge passes bytes through verbatim and
+    // the gateway offloads ANY inbound file to media/inbound for the agent's
+    // tools — only images additionally feed vision. Size stays the only gate
+    // (MAX_BYTES below; the gateway re-checks on its side).
+    accept: "*",
 
     async add({ file }: { file: File }): Promise<PendingAttachment> {
       if (file.size > MAX_BYTES) {
