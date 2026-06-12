@@ -75,6 +75,21 @@ fichiers DYNAMIQUE (`agents.files.list`).
 popover (reasoningLevel attend 4b/probe) ; `/session-usage` seulement si
 sessionMeta (`totalTokens`/`estimatedCostUsd` déjà au schéma) ne suffit pas.
 
+## ✅ Résultats des probes banc 6.5 (2026-06-11, `local-openclaw/probe-conf4.mjs`)
+
+| Question | Verdict |
+|---|---|
+| Forme de `sessions.patch` | Champs **À PLAT** `{key, thinkingLevel: "low"}` — la doc embarquée (`{key, patch:{}}`) est FAUSSE ; le gateway répond `unexpected property 'patch'`. (Le bridge faisait déjà juste.) |
+| **A2 — unset** | **LEVÉE ✅** : `{key, thinkingLevel: null}` → `ok:true` et l'entry retournée n'a PLUS le champ (override retiré du store). Schéma validé `string\|null` (« must be null; must match a schema in anyOf »). Idem `fastMode: null`. → le `↺` par ligne est implémentable proprement : patch null + retrait de la clé de `sessionSettings`. |
+| A5 — « default » comme valeur | Rejeté par le gateway (« use off\|minimal\|low\|medium\|high\|xhigh ») → confirme : pas de pseudo-valeur « défaut » dans le contrôle. |
+| **A1 — provenance lisible** | `sessions.describe` expose l'override stocké (`thinkingLevel` présent = override session ; absent = hérité) + `thinkingLevels`/`thinkingOptions`. `sessions.patch` retourne l'entry complète (écho immédiat). `sessions.get` = transcript (messages), pas la config. → provenance binaire SANS reconstruire la cascade ; describe disponible comme vérité gateway. |
+| A12 — fastMode | ✅ `true`/`false`/`null` patchables → « Vitesse » implémentable en 4a. |
+| CONF-4c — `agents.files.*` | ✅ `list` → `{name, path, missing, size, updatedAtMs}` (gauges directes) ; `get` → `{file: {content, …}}` ; `set` round-trip **vérifié** ET **restreint par le gateway à l'allowlist des fichiers bootstrap** (`unsupported file "PROBE-TEST.md"`) — défense native contre l'écriture arbitraire. |
+| `models.list` | ✅ riche : `{id, name, provider, contextWindow, reasoning, input: [text, image]}` par vue. |
+| A12 — `sessions.usage` | ✅ répond (totals/aggregates/byModel/daily) mais `usage: null` par session tant que le cache est « refreshing » → v1 reste sur sessionMeta (déjà peuplé par tour) ; l'endpoint attendra un besoin réel. |
+| A8 — reasoningLevel | NON probé (nécessite des tours LLM instrumentés) → à faire en ouverture de 4b, comme prévu. |
+| CONF-4d — `config.schema` | Répond, `hint` présents dans le payload ; structure exacte à creuser SI 4d se fait (déjà dégonflé par A7). |
+
 ## 0. Concept directeur : « trois horizons, une seule grammaire »
 
 Trois horizons de configuration, chacun à SA place dans l'espace visuel,
