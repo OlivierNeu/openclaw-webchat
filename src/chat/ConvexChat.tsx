@@ -56,7 +56,7 @@ import { m } from "@/paraglide/messages.js";
 import { useConvexChatRuntime } from "./useConvexChatRuntime";
 import { uiPrefOptimisticUpdate } from "./uiPrefOptimistic";
 import { RunStatus } from "./RunStatus";
-import { ToolCard } from "./ToolCard";
+import { ToolActivity } from "./ToolActivity";
 import { MediaPart } from "./MediaPart";
 import { MarkdownText } from "./MarkdownText";
 import { FeedbackButton } from "./FeedbackDialog";
@@ -109,6 +109,8 @@ export function ConvexChat({ chatId }: ConvexChatProps) {
   // Resolved UI preferences (reactive): the single source for which interface
   // elements render. The composer "Outils" quick toggle writes through the same
   // single path (setUiPref), so it stays consistent with the Préférences panel.
+  // `showTools` semantics: whether the ToolActivity DETAIL starts expanded —
+  // the summary line is always visible (no more invisible tool-heavy turns).
   const me = useQuery(api.me.getMe);
   const ui = (me?.ui?.effective as UiEffective | undefined) ?? DEFAULT_UI;
   const showTools = ui.showTools;
@@ -133,7 +135,7 @@ export function ConvexChat({ chatId }: ConvexChatProps) {
   return (
     <AssistantRuntimeProvider runtime={runtime}>
       <UiPrefsContext.Provider value={ui}>
-        <div className={`oc-chat${showTools ? "" : " oc-hide-tools"}`}>
+        <div className="oc-chat">
           {chatId ? (
             notFound ? (
               <ChatNotFound />
@@ -664,17 +666,18 @@ function IconCheck() {
 }
 
 // Component overrides for MessagePrimitive.Parts (assistant-ui 0.14):
-//   - tool calls -> ToolCard (via tools.Fallback)
 //   - file parts (media + attachments) -> MediaPart
-// Typed loosely at this seam: our ToolCard/MediaPart accept the structural
-// props assistant-ui passes; the exact exported component types shifted in 0.14.
+// Tool calls no longer flow through content (convertMessage diverts them to
+// metadata.custom.toolParts, rendered by ToolActivity above the body), so no
+// tools.Fallback mapping is needed. Typed loosely at this seam: our MediaPart
+// accepts the structural props assistant-ui passes; the exact exported
+// component types shifted in 0.14.
 //
 // Assistant turns ALSO override Text -> MarkdownText (GFM rendering). User and
 // system turns intentionally do NOT: a user's literal input must not be
 // reinterpreted as markdown (typing `*foo*` must stay `*foo*`), so they keep the
 // default plain-text renderer.
 const plainComponents = {
-  tools: { Fallback: ToolCard as never },
   File: MediaPart as never,
 };
 const assistantComponents = {
@@ -862,6 +865,11 @@ function AssistantMessage() {
       <div className="oc-msg__col">
         <div className="oc-msg__name">OpenClaw</div>
         <div className="oc-msg__body">
+          {/* Grouped tool activity (summary + collapsible ToolCards), BEFORE the
+              body so the streamed text always lands below it, in view of the
+              bottom-following auto-scroll. Initial detail state follows the
+              showTools pref; the summary line renders regardless. */}
+          <ToolActivity defaultExpanded={ui.showTools} />
           {showSource ? (
             <MessageSource />
           ) : (

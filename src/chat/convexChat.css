@@ -1241,11 +1241,58 @@
 }
 
 /* Tool card */
-/* Tool-cards visibility (per-user chat pref). When hidden, cards leave layout;
-   the RunStatus "processing" indicator still shows, so the user always knows
-   OpenClaw is working even with tools hidden. */
-.oc-hide-tools .oc-tool {
-  display: none;
+/* Grouped tool activity (ToolActivity.tsx): a discreet, always-visible summary
+   line at the top of an assistant message + a collapsible detail holding the
+   ToolCards. The showTools pref only decides whether the detail STARTS
+   expanded (the old `.oc-hide-tools` display:none rule is gone — hiding the
+   cards entirely left zero feedback during long tool-heavy turns). Muted by
+   default, foreground on hover; charte tokens only (light + dark). */
+.oc-toolact {
+  margin: 0.15rem 0 0.5rem;
+}
+.oc-toolact__summary {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.45rem;
+  padding: 0.25rem 0.55rem;
+  border: 1px solid transparent;
+  border-radius: var(--radius-md);
+  background: transparent;
+  color: var(--muted-foreground);
+  font-size: 0.78rem;
+  cursor: pointer;
+}
+.oc-toolact__summary:hover {
+  color: var(--foreground);
+  background: color-mix(in srgb, var(--muted-foreground) 8%, transparent);
+}
+.oc-toolact__summary:focus-visible {
+  outline: 2px solid var(--ring, var(--primary));
+  outline-offset: 2px;
+}
+.oc-toolact__icon {
+  flex: 0 0 auto;
+}
+.oc-toolact__state {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.3rem;
+  font-size: 0.72rem;
+}
+.oc-toolact__spin {
+  animation: oc-spin 1s linear infinite;
+}
+/* Sober animated chevron: points right when collapsed, down when open. */
+.oc-toolact__chevron {
+  flex: 0 0 auto;
+  color: var(--muted-foreground);
+  transition: transform 150ms ease;
+}
+.oc-toolact.is-open .oc-toolact__chevron {
+  transform: rotate(90deg);
+}
+.oc-toolact__detail {
+  margin-top: 0.25rem;
 }
 /* The in-chat show/hide toggle, in the composer row. */
 .oc-composer__toolstoggle {
@@ -2911,7 +2958,8 @@
   }
   .oc-dots > span,
   .oc-run-status__pulse,
-  .oc-tool__status--spin {
+  .oc-tool__status--spin,
+  .oc-toolact__spin {
     animation: none;
   }
 }

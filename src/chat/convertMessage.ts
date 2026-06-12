@@ -7,16 +7,23 @@ import {
   isReasoningPart,
   isToolPart,
 } from "./convexTypes";
+import type { ToolActivityPart } from "./toolActivityView";
 
 // Maps a Convex `messages` document (joined with its ordered `messageParts`)
 // into the assistant-ui `ThreadMessageLike` shape consumed by
 // useExternalStoreRuntime's `convertMessage`.
 //
-// Content parts produced:
-//   - { type: "text", text }                         (assistant/user/system body)
-//   - { type: "tool-call", toolCallId, toolName, args, result }
-//   - { type: "file", mimeType, data: <url> }        (media + file parts)
+// Content parts produced (CHRONOLOGICAL: reasoning precedes the text — it
+// happens first — and media/file attachments follow it; the old text-first
+// order made the late-arriving final text insert ABOVE the stacked tool cards,
+// out of view of the bottom-following auto-scroll):
 //   - { type: "reasoning", text }                    (reasoning parts)
+//   - { type: "text", text }                         (assistant/user/system body)
+//   - { type: "file", mimeType, data: <url> }        (media + file parts)
+//
+// TOOL parts intentionally do NOT become content: they are extracted into
+// `metadata.custom.toolParts` and rendered by the grouped ToolActivity block
+// at the top of the assistant message (summary line + collapsible ToolCards).
 //
 // Streaming works WITHOUT any HTTP transport: the Convex bridge worker patches
 // the message doc (text/status) and appends messageParts as OpenClaw frames
@@ -37,23 +44,24 @@ function toolCallId(message: ConvexMessageView, order: number): string {
   return `${message._id}:${run}:${order}`;
 }
 
-function toolPartToContent(
+function toolPartToActivity(
   message: ConvexMessageView,
   order: number,
   part: Extract<ConvexMessagePartView, { kind: "tool" }>,
-): ContentPart {
+): ToolActivityPart {
   return {
-    type: "tool-call",
     toolCallId: toolCallId(message, order),
     toolName: part.name,
-    // assistant-ui expects `args` (parsed input) and `result` (parsed output).
+    // Same structural fields ToolCard consumed when assistant-ui routed
+    // tool-call content parts to it: `args` (parsed input), `result` (output).
     args: (part.input ?? {}) as Record<string, unknown>,
     result: part.output,
-    // `argsText` lets assistant-ui render partial/streaming tool args; we pass
-    // the JSON form when available so a tool card can show inputs while running.
+    // `argsText` keeps the JSON form available so a tool card can show inputs
+    // while the tool is still running.
     argsText:
       part.input === undefined ? undefined : safeStringify(part.input),
-  } as ContentPart;
+    phase: typeof part.phase === "string" ? part.phase : undefined,
+  };
 }
 
 function filePartToContent(
@@ -86,31 +94,38 @@ export function convertConvexMessage(
   message: ConvexMessageView,
 ): ThreadMessageLike {
   const content: ContentPart[] = [];
+  const toolParts: ToolActivityPart[] = [];
 
-  // 1) Primary text body. `message.text` is the live-streamed/normalized text
-  //    (message.delta appends, message.snapshot replaces, message.final fixes).
-  //    Always include it (even empty) so an in-flight assistant bubble renders
-  //    immediately and grows as the doc is patched.
-  if (message.text && message.text.length > 0) {
-    content.push({ type: "text", text: message.text });
-  }
-
-  // 2) Ordered parts (listByChat already returns them flat + sorted by order):
-  //    reasoning, tool calls, media/file attachments.
+  // 1) Parts that PRECEDE the text chronologically (listByChat returns parts
+  //    flat + sorted by order): reasoning goes into content; tool calls are
+  //    diverted to metadata.custom.toolParts (rendered by ToolActivity, never
+  //    interleaved with the body — fixes the text-inserted-above-cards bug).
   message.parts.forEach((p, index) => {
     if (isReasoningPart(p)) {
       content.push({ type: "reasoning", text: p.text } as ContentPart);
     } else if (isToolPart(p)) {
-      content.push(toolPartToContent(message, index, p));
-    } else if (isMediaPart(p) || isFilePart(p)) {
+      toolParts.push(toolPartToActivity(message, index, p));
+    }
+  });
+
+  // 2) Primary text body. `message.text` is the live-streamed/normalized text
+  //    (message.delta appends, message.snapshot replaces, message.final fixes).
+  if (message.text && message.text.length > 0) {
+    content.push({ type: "text", text: message.text });
+  }
+
+  // 3) Media/file attachments stay AFTER the text.
+  message.parts.forEach((p) => {
+    if (isMediaPart(p) || isFilePart(p)) {
       const fileContent = filePartToContent(p);
       if (fileContent) content.push(fileContent);
     }
   });
 
   // assistant-ui requires at least one content part to render a bubble; if a
-  // message somehow has neither text nor parts yet, emit an empty text part so
-  // the streaming placeholder still appears.
+  // message somehow has neither text nor renderable parts yet (e.g. a turn
+  // that so far only produced tool calls), emit an empty text part so the
+  // streaming placeholder still appears.
   if (content.length === 0) {
     content.push({ type: "text", text: "" });
   }
@@ -133,6 +148,12 @@ export function convertConvexMessage(
         status: message.status,
         runId: message.runId ?? null,
         error: message.error ?? null,
+        // Tool invocations for this turn, in part order. Re-emitted on every
+        // conversion (useExternalStoreRuntime reconverts whenever the reactive
+        // listByChat result changes), so the ToolActivity summary counter and
+        // the expanded ToolCards stream live as the bridge appends/patches
+        // tool parts.
+        toolParts,
         // The EXACT stored text — the verbatim string for the "Source" view (no
         // markdown, no autocorrect, no transformation). For the user turn this is
         // what was typed/sent; for the assistant turn it is the gateway's final
