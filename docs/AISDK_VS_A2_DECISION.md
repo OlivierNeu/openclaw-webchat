@@ -324,6 +324,6 @@ the forkability argument would stop inverting. Until then, A2 stands.
 
 ---
 
-*Cross-references: `docs/PROJECT_STATE.md` §5.2 (A2 confirmed),
+*Cross-references: `PROJECT_STATE.md` §5.2 (openclaw-notes, private; A2 confirmed),
 `docs/BRIDGE_ARCHITECTURE.md` (streaming scope), `src/chat/useConvexChatRuntime.ts`
 (the shipped A2 implementation whose inline comment already states this rationale).*

@@ -60,6 +60,18 @@ crons.interval(
   {},
 );
 
+// Bridge compat (versions & capabilities): every 5 minutes, GET the bridge's
+// unauthenticated /capabilities and upsert the singleton snapshot. Deliberately
+// SLOWER than the 1-min /health poll (separate cron, not a 1-in-N counter — an
+// internalAction is stateless across runs): the compat manifest only changes on
+// a bridge/gateway upgrade, and a failed poll preserves last-good (see compat.ts).
+crons.interval(
+  "poll bridge compat",
+  { minutes: 5 },
+  internal.compat.pollBridgeCompat,
+  {},
+);
+
 // Agent discovery (multi-agent redesign): every 2 minutes, ask the bridge
 // `/agents` for each instance and cache the result RESILIENTLY (a failed poll
 // never empties the cache nor flips per-agent presence — red-team B2). This is

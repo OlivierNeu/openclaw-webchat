@@ -181,9 +181,9 @@ Sent after authentication, user routing and OpenClaw connection succeed.
   "type": "bridge.ready",
   "user": {"email": "user@example.com"},
   "target": {
-    "instanceName": "olivier",
-    "agentId": "olivier",
-    "sessionKey": "agent:olivier:webchat:chat:..."
+    "instanceName": "alice",
+    "agentId": "alice",
+    "sessionKey": "agent:alice:webchat:chat:..."
   }
 }
 ```

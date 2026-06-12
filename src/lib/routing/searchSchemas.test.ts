@@ -210,7 +210,7 @@ describe("serviceAccountsSearchSchema", () => {
 
 describe("usersSearchSchema", () => {
   it("round-trips q + role", () => {
-    const value = usersSearchSchema.parse({ q: "olivier", role: "admin" });
+    const value = usersSearchSchema.parse({ q: "alice", role: "admin" });
     roundTrips(usersSearchSchema, value);
   });
 });

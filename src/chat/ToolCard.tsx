@@ -89,7 +89,7 @@ export function ToolCard({
   const StatusIcon =
     phase === "running" ? LoaderCircle : phase === "error" ? CircleAlert : CircleDot;
 
-  // Two-level collapse (Olivier): the WHOLE tool is a <details> collapsed by
+  // Two-level collapse (by design): the WHOLE tool is a <details> collapsed by
   // default — only the name/status header shows. Expanding it reveals the IO,
   // where OUTPUT is open by default and INPUT stays folded (the result is what
   // you usually want to read first).

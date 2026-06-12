@@ -1127,7 +1127,7 @@ export function ThemeShowroom() {
             <CardDescription>Non-secret metadata only.</CardDescription>
           </CardHeader>
           <CardContent className="text-sm text-muted-foreground">
-            ws://192.168.1.49:18789
+            ws://gateway.example.org:18789
           </CardContent>
           <CardFooter className="gap-2">
             <Button size="sm">Save</Button>

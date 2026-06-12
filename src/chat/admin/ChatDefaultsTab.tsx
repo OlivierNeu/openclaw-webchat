@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { useAction } from "convex/react";
+import { useAction, useQuery } from "convex/react";
+import { AlertTriangle } from "lucide-react";
 import { api } from "../convexApi";
 import { m } from "@/paraglide/messages.js";
 import { Button } from "@/components/ui/button";
@@ -21,6 +22,8 @@ import {
   parseChatDefaults,
   type ChatDefaultsView,
 } from "./chatDefaultsView";
+import { snapshotTabGate } from "../capabilities";
+import { unsupportedInstanceLabel } from "./compatView";
 import "./confTabs.css";
 
 // Settings > chat defaults tab (CONF-4d, deflated per amendment A7): a HARD-CODED
@@ -49,6 +52,14 @@ export function ChatDefaultsTab() {
   const [confirmOpen, setConfirmOpen] = useState(false);
   const [saving, setSaving] = useState(false);
 
+  // Capability gate (VCOMPAT-C): the tab is admin-only, so reading the full
+  // compat snapshot (bridge.read via the admin wildcard) is always allowed.
+  // The write targets the bridge's DEFAULT-instance resolution, hence the
+  // snapshot-level gate (see snapshotTabGate).
+  const snapshot = useQuery(api.compat.getBridgeCompat, {});
+  const gate = snapshotTabGate(snapshot, "configDefaults");
+  const gateBlocked = gate === "loading" ? null : gate.blocked;
+
   const load = useCallback(async () => {
     setState({ status: "loading" });
     try {
@@ -60,8 +71,10 @@ export function ChatDefaultsTab() {
     }
   }, [getDefaults]);
   useEffect(() => {
+    // No bridge round-trip while the compat verdict is pending or negative.
+    if (gateBlocked !== false) return;
     void load();
-  }, [load]);
+  }, [load, gateBlocked]);
 
   const current = state.status === "done" ? state.current : null;
   const thinkingChanged =
@@ -112,7 +125,16 @@ export function ChatDefaultsTab() {
     <div className="oc-cdefaults">
       <p className="oc-admin__hint">{m.cdefaults_desc()}</p>
 
-      {state.status === "loading" ? (
+      {gate === "loading" ? (
+        <p className="oc-admin__hint">{m.common_loading()}</p>
+      ) : gate.blocked ? (
+        // Whole-tab gate: disabled-and-EXPLAINED — the admin must understand
+        // why the global-defaults form is unavailable on this deployment.
+        <p className="oc-compat__blocked" role="status">
+          <AlertTriangle size={14} aria-hidden />{" "}
+          {unsupportedInstanceLabel(gate.gatewayVersion)}
+        </p>
+      ) : state.status === "loading" ? (
         <p className="oc-admin__hint">{m.common_loading()}</p>
       ) : state.status === "error" ? (
         <p className="oc-cdefaults__error" role="alert">

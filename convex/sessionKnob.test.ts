@@ -237,7 +237,7 @@ describe("bridge.dispatchPatch — persisted-intent forwarding", () => {
       await ctx.db.insert("userAgents", {
         userId,
         instanceName: "main",
-        agentId: "olivier",
+        agentId: "alice",
         isDefault: true,
         source: "manual",
         createdAt: Date.now(),
@@ -245,7 +245,7 @@ describe("bridge.dispatchPatch — persisted-intent forwarding", () => {
       const chatId = await ctx.db.insert("chats", {
         userId,
         instanceName: "main",
-        agentId: "olivier",
+        agentId: "alice",
         archived: false,
         updatedAt: Date.now(),
         ...(sessionSettings ? { sessionSettings } : {}),

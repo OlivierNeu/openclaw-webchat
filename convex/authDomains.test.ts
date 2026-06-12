@@ -17,17 +17,16 @@ import {
 
 const modules = import.meta.glob("./**/*.ts");
 
-describe("emailDomainAllowed (default lacneu.com / ataraxis-coaching.com)", () => {
-  test("allows the operator domains, case-insensitively", () => {
-    expect(emailDomainAllowed("alice@lacneu.com")).toBe(true);
-    expect(emailDomainAllowed("bob@ataraxis-coaching.com")).toBe(true);
-    expect(emailDomainAllowed("Alice@Lacneu.COM")).toBe(true);
+describe("emailDomainAllowed (default example.com)", () => {
+  test("allows the default domain, case-insensitively", () => {
+    expect(emailDomainAllowed("alice@example.com")).toBe(true);
+    expect(emailDomainAllowed("Alice@Example.COM")).toBe(true);
   });
   test("rejects look-alike + substring attacks (exact post-@ match only)", () => {
-    expect(emailDomainAllowed("x@evil-lacneu.com")).toBe(false);
-    expect(emailDomainAllowed("x@lacneu.com.evil.com")).toBe(false);
-    expect(emailDomainAllowed("x@notlacneu.com")).toBe(false);
-    expect(emailDomainAllowed("lacneu.com@gmail.com")).toBe(false);
+    expect(emailDomainAllowed("x@evil-example.com")).toBe(false);
+    expect(emailDomainAllowed("x@example.com.evil.com")).toBe(false);
+    expect(emailDomainAllowed("x@notexample.com")).toBe(false);
+    expect(emailDomainAllowed("example.com@gmail.com")).toBe(false);
   });
   test("rejects empty / malformed / missing", () => {
     expect(emailDomainAllowed(undefined)).toBe(false);
@@ -39,10 +38,10 @@ describe("emailDomainAllowed (default lacneu.com / ataraxis-coaching.com)", () =
   test("env override (set + restore)", () => {
     const prev = process.env.AUTH_ALLOWED_EMAIL_DOMAINS;
     try {
-      process.env.AUTH_ALLOWED_EMAIL_DOMAINS = " Example.com , foo.io ";
-      expect(emailDomainAllowed("a@example.com")).toBe(true); // trimmed + lc
+      process.env.AUTH_ALLOWED_EMAIL_DOMAINS = " Bar.dev , foo.io ";
+      expect(emailDomainAllowed("a@bar.dev")).toBe(true); // trimmed + lc
       expect(emailDomainAllowed("a@foo.io")).toBe(true);
-      expect(emailDomainAllowed("a@lacneu.com")).toBe(false); // default no longer applies
+      expect(emailDomainAllowed("a@example.com")).toBe(false); // default no longer applies
     } finally {
       if (prev === undefined) delete process.env.AUTH_ALLOWED_EMAIL_DOMAINS;
       else process.env.AUTH_ALLOWED_EMAIL_DOMAINS = prev;
@@ -93,11 +92,11 @@ async function profileOf(t: ReturnType<typeof convexTest>, userId: string) {
 describe("ensureProfile email-domain gate (authoritative, defense-in-depth)", () => {
   test("allowed-domain OAuth identity → profile provisioned", async () => {
     const t = convexTest(schema, modules);
-    const { userId, as } = await authedNoProfile(t, "alice@lacneu.com");
+    const { userId, as } = await authedNoProfile(t, "alice@example.com");
     await as.mutation(api.me.bootstrap, {});
     const p = await profileOf(t, userId);
     expect(p).not.toBeNull();
-    expect(p!.email).toBe("alice@lacneu.com");
+    expect(p!.email).toBe("alice@example.com");
   });
 
   test("DISALLOWED-domain OAuth identity → rejected, NO profile/role created", async () => {

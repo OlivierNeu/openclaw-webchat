@@ -433,7 +433,7 @@
 /* assistant-ui DISABLES (does not unmount) this pill when the viewport is at the
    bottom — so hide the disabled state. It is already position:absolute (out of
    flow), so showing/hiding it never shifts the transcript. Net effect: the pill
-   appears ONLY when the user has scrolled up (Olivier's request). */
+   appears ONLY when the user has scrolled up (by design). */
 .oc-scrolldown:disabled {
   opacity: 0;
   visibility: hidden;
@@ -442,7 +442,7 @@
 
 /* ── Per-message action bar (copy / regenerate), hover-revealed ──────────────
    Positioned ABSOLUTELY into the column's reserved padding-bottom so toggling it
-   on hover never reflows the transcript (Olivier's "décalage au survol" fix). */
+   on hover never reflows the transcript (the hover-shift fix). */
 .oc-msg__actions {
   position: absolute;
   bottom: 0;
@@ -1487,7 +1487,7 @@
   color: var(--foreground);
 }
 
-/* ── Unified composer card (Olivier's reference) ──────────────────────────────
+/* ── Unified composer card (design reference) ──────────────────────────────
    ONE rounded surface centered on the readable column: the input sits on top, a
    single action bar below it (+ / Outils on the left, circular Send on the
    right). The CARD owns the border + focus ring (:focus-within) so focusing the
@@ -2776,6 +2776,66 @@
 .oc-bridge-target__error {
   margin-top: 0.4rem;
   font-size: 0.83rem;
+}
+
+/* --- Bridge compatibility (VCOMPAT-C) -------------------------------------
+   Settings > Bridge "Compatibilite" section + the unsupported-tab banner.
+   `.oc-compat` is a self-contained namespace (GC-P5 lesson: container classes
+   must be unique — grep before scoping). */
+.oc-compat {
+  display: flex;
+  flex-direction: column;
+  gap: 0.6rem;
+}
+.oc-compat__meta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 1rem;
+  font-size: 0.85rem;
+  color: var(--muted-foreground);
+}
+.oc-compat__support {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.5rem;
+  font-size: 0.85rem;
+}
+.oc-compat__label {
+  font-weight: 600;
+}
+.oc-compat__targets {
+  display: flex;
+  flex-direction: column;
+  gap: 0.4rem;
+}
+.oc-compat__target {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+  padding: 0.5rem 0.9rem;
+  border: 1px solid var(--border);
+  border-radius: var(--radius, 0.5rem);
+  font-size: 0.85rem;
+}
+.oc-compat__provider {
+  color: var(--muted-foreground);
+}
+/* Whole-tab "unsupported by this instance" banner (AgentFiles / ChatDefaults). */
+.oc-compat__blocked {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  padding: 0.7rem 0.9rem;
+  border: 1px solid color-mix(in srgb, var(--destructive) 35%, transparent);
+  border-radius: var(--radius, 0.5rem);
+  color: var(--muted-foreground);
+  font-size: 0.9rem;
+}
+.oc-compat__blocked svg {
+  flex-shrink: 0;
+  color: var(--destructive);
 }
 
 /* --- Integrations tab (D-3) ------------------------------------------------ */

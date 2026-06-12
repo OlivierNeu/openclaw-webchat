@@ -1,6 +1,6 @@
 ## Deliverable
 
-Authored **`/Users/olivierneu/java/workspace_idea/openclaw-webchat/docs/FEATURES_IMPLEMENTATION_PLAN.md`** — a coordinated, cross-layer, phased plan that is the *feature-indexed view* of the build (it cross-references, never renumbers, the structural phases P1–P7 in `BRIDGE_IMPLEMENTATION_PLAN.md`).
+Authored **`docs/FEATURES_IMPLEMENTATION_PLAN.md`** — a coordinated, cross-layer, phased plan that is the *feature-indexed view* of the build (it cross-references, never renumbers, the structural phases P1–P7 in `BRIDGE_IMPLEMENTATION_PLAN.md`).
 
 ## Structure (per the "parallel agents between layers" model)
 Each capability has: **THE SEAM** (the fixed cross-layer contract — pinned first so backend/bridge/frontend build simultaneously) → **per-layer deltas** (with file:line) → **dependency order + bridge-plan phase** → **acceptance gate** (offline `tsc`/tests + the live `F-id` it turns GREEN).
@@ -15,7 +15,7 @@ Capabilities: C-MULTIPLEX (Phase A, P2 → F1/F8), C-HARNESS (A′, parallel), C
 - **G-MEDIA-OUT** (path-leak): confirmed `bridge_ingest.ts:208,218` fetches `OPENCLAW_MEDIA_BASE_URL+path`. → invert: bridge reads bytes via `artifacts.download`, `addMedia` takes `{storageId,...}`.
 
 ## The one finding that moved a feature across a phase boundary
-The CHALLENGE's "F-MULTIUSER unbuildable — no `instanceName→token` map" is the multi-**instance** case the harness **forbids**. Verified against `OPENCLAW_CONNECTION_MODEL.md` §Q4: Model A multiplexes all sessions over one operator socket gated by scope, not user, so **F9 (two users, same olivier instance) needs no second token** — the single-identity `config.ts` (verified: one `OPENCLAW_TOKEN`/`OPENCLAW_DEVICE_IDENTITY` from env) is correct. **F9 rides P2 + a `dev.testSendAs` selector, NOT P5.** P5 is reserved for the case the harness does not exercise.
+The CHALLENGE's "F-MULTIUSER unbuildable — no `instanceName→token` map" is the multi-**instance** case the harness **forbids**. Verified against `OPENCLAW_CONNECTION_MODEL.md` §Q4: Model A multiplexes all sessions over one operator socket gated by scope, not user, so **F9 (two users, same single instance) needs no second token** — the single-identity `config.ts` (verified: one `OPENCLAW_TOKEN`/`OPENCLAW_DEVICE_IDENTITY` from env) is correct. **F9 rides P2 + a `dev.testSendAs` selector, NOT P5.** P5 is reserved for the case the harness does not exercise.
 
 ## Advisor-driven correction applied before finishing
 The advisor caught a cross-capability contradiction: placing `runState` on `messages` would reintroduce the `listByChat` invalidation that C-STREAM exists to kill. Fixed — `runState` now lives on the `streamingText` sibling row (rides the existing `liveByChat` subscription, zero added invalidation), `dev.oracleByChat` reads it from there, and the `setRunState` IngestOp mirror is named for symmetry with `addMedia`.

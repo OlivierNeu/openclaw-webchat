@@ -32,7 +32,7 @@ import {
 } from "./lib/authDomains";
 
 // Sign-in is restricted to accounts whose email is in an allowed domain
-// (lib/authDomains; default lacneu.com / ataraxis-coaching.com, override via
+// (lib/authDomains; default example.com placeholder, override via
 // AUTH_ALLOWED_EMAIL_DOMAINS). Providers are ENV-DRIVEN so a deployment chooses
 // Google (SaaS) and/or Microsoft (corporate) by which creds it sets — no code
 // change. Each provider profile() is the first gate (rejects in the OAuth flow);

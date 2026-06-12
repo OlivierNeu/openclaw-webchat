@@ -533,7 +533,7 @@ until the grammar is confirmed from a primary source. When confirmed, only
 The new-chat instance picker runs as a **non-admin browser query**. It MUST return
 **only `{ name, displayName }`** for the user's `allowedInstances`. `gatewayUrl` and
 `publicUrl` are **admin-read-only** and MUST NOT be returned to non-admin users:
-the Image #22 example URL is an internal IP (`192.168.1.49:18789`), and `publicUrl`,
+the Image #22 example URL is an internal IP (`10.0.0.10:18789`), and `publicUrl`,
 while non-secret, is gateway/topology metadata that should not be broadcast to every
 user. This mirrors how `routing.ts` is careful to emit **names only**. Concretely:
 the picker query selects from `instances` filtered to `allowedInstances` and
@@ -564,7 +564,7 @@ OpenClaw's handshake uses); a per-provider secret shape lets Hermes (API-key) pl
   "groups": {
     "<instanceName>": {                       // == Convex instances.name (join key)
       "provider": "openclaw",                  // selects the secret shape
-      "url": "192.168.1.49:18789",             // gateway URL the bridge connects to
+      "url": "10.0.0.10:18789",             // gateway URL the bridge connects to
       "token": "<secret bearer token>",        // SECRET — connect auth.token
       "device_identity": "{\"id\":...,\"publicKey\":...,\"privateKey\":\"-----BEGIN PRIVATE KEY-----...\"}", // SECRET (OpenClaw only)
       "verbose": false,                        // operational flag
@@ -788,4 +788,4 @@ single switch.
 
 ---
 
-*Document written to `/Users/olivierneu/java/workspace_idea/openclaw-webchat/docs/BRIDGE_ARCHITECTURE.md` (787 lines). All cited source line references verified against ground truth (`normalizer.ts:361`, `openclaw-client.ts:129`, `convex-writer.ts:119`, `session-keys.ts`, `routing.ts`, `schema.ts`, `bridge_ingest.ts`, `config.ts`). All six red-team fixes incorporated; the streaming decoupling (§4) is resolved, not deferred.*
+*Document written to `docs/BRIDGE_ARCHITECTURE.md` (787 lines). All cited source line references verified against ground truth (`normalizer.ts:361`, `openclaw-client.ts:129`, `convex-writer.ts:119`, `session-keys.ts`, `routing.ts`, `schema.ts`, `bridge_ingest.ts`, `config.ts`). All six red-team fixes incorporated; the streaming decoupling (§4) is resolved, not deferred.*

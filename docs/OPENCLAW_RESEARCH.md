@@ -83,7 +83,7 @@ complete here:
 3. **The dedup key** = `(runId, seq, state, deltaText, content-fingerprint)` — fixture/normalizer
    only (S1 `normalizer.ts` ~L405; S2 `duplicate-final`, `duplicate-empty-final`).
 4. **The webchat sessionKey grammar** `agent:<agentId>:webchat:chat:<canonical>:<chatId>`
-   (S4; fixture `agent:main:webchat:chat:olivier:own-chat`) — only the *subagent* form is
+   (S4; fixture `agent:main:webchat:chat:alice:own-chat`) — only the *subagent* form is
    doc-confirmed; the `webchat:chat:<user>:<chat>` segment is **NOT FOUND** in any fetched doc.
 5. **Frame envelope divergence:** the doc wraps events as
    `{type:"event", event, payload, seq?, stateVersion?}`; the captured fixtures are **bare
@@ -297,7 +297,7 @@ from durable Convex persistence/reactivity** — without losing reconnect/durabi
    abstraction boundary.
 
 **Sources for §4:** in-repo `convex-writer.ts`, `run-manager.ts`, `bridge/src/normalizer.ts`,
-`docs/CONVEX_MIGRATION.md` (current persistence chain), Image-#23 callout (task brief). No
+`CONVEX_MIGRATION.md` (openclaw-notes, private; current persistence chain), Image-#23 callout (task brief). No
 external streaming-library claim is made; the per-token-coalescing correction and the
 display=persistence coupling are read directly from code.
 

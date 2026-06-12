@@ -42,6 +42,8 @@ import {
   isConflictError,
   totalSize,
 } from "./agentFilesView";
+import { instanceTabGate } from "../capabilities";
+import { unsupportedInstanceLabel } from "./compatView";
 import "./confTabs.css";
 
 // Settings › Fichiers d'agent (CONF-4c). Read (+ admin write) of an agent's
@@ -72,8 +74,15 @@ const keyOf = (o: { instanceName: string; agentId: string }) =>
   `${o.instanceName}::${o.agentId}`;
 
 export function AgentFilesTab() {
-  const me = useQuery(api.me.getMe) as { role?: string } | undefined;
+  const me = useQuery(api.me.getMe) as
+    | { role?: string; permissions?: string[] }
+    | undefined;
   const isAdmin = me?.role === "admin";
+  // Capability gate (VCOMPAT-C). api.compat.forInstance requires bridge.read;
+  // a non-admin granted agents.files.read but NOT bridge.read cannot read the
+  // snapshot — for them the tab stays UNGATED (the server still fails closed
+  // on an unsupported gateway) rather than subscribing to a query that throws.
+  const canReadCompat = (me?.permissions ?? []).includes("bridge.read");
 
   // Admin path: instance picker + the instance's DISCOVERED agents.
   const instances = useQuery(
@@ -147,6 +156,21 @@ export function AgentFilesTab() {
   // unrelated query updates, which would re-trigger the bridge round-trip.
   const selInstance = selected?.instanceName ?? null;
   const selAgent = selected?.agentId ?? null;
+  // Compat verdict for the SELECTED instance (skip while nothing is selected
+  // or when the user cannot read the snapshot → gate null = ungated).
+  const compatRes = useQuery(
+    api.compat.forInstance,
+    canReadCompat && selInstance !== null
+      ? { instanceName: selInstance }
+      : "skip",
+  );
+  const gate =
+    canReadCompat && selInstance !== null
+      ? instanceTabGate(compatRes, "agentFiles")
+      : null;
+  // null = verdict unknown (compat loading), true/false = blocked/allowed.
+  const gateBlocked =
+    gate === null ? false : gate === "loading" ? null : gate.blocked;
   const loadFiles = useCallback(async () => {
     if (selInstance === null || selAgent === null) return;
     setListing({ status: "loading" });
@@ -161,8 +185,10 @@ export function AgentFilesTab() {
     }
   }, [listFiles, selInstance, selAgent]);
   useEffect(() => {
+    // No bridge round-trip while the compat verdict is pending or negative.
+    if (gateBlocked !== false) return;
     void loadFiles();
-  }, [loadFiles]);
+  }, [loadFiles, gateBlocked]);
 
   // The file open in the editor dialog (null = closed).
   const [editing, setEditing] = useState<FileRow | null>(null);
@@ -217,8 +243,16 @@ export function AgentFilesTab() {
         )}
       </div>
 
-      {selected === null ? null : listing.status === "loading" ||
-        listing.status === "idle" ? (
+      {selected === null ? null : gate === "loading" ? (
+        <p className="oc-admin__hint">{m.common_loading()}</p>
+      ) : gate !== null && gate.blocked ? (
+        // Whole-tab gate: disabled-and-EXPLAINED (unlike the hidden popover
+        // knobs) — the user must understand why the surface is unavailable.
+        <p className="oc-compat__blocked" role="status">
+          <AlertTriangle size={14} aria-hidden />{" "}
+          {unsupportedInstanceLabel(gate.gatewayVersion)}
+        </p>
+      ) : listing.status === "loading" || listing.status === "idle" ? (
         <p className="oc-admin__hint">{m.common_loading()}</p>
       ) : listing.status === "error" ? (
         <p className="oc-afiles__error" role="alert">

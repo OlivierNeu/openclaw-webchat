@@ -141,8 +141,8 @@ describe("costLine — every presence combination", () => {
 
 describe("agentLine", () => {
   test("joins the present parts with a separator", () => {
-    expect(agentLine(["Olivier", "codex", "gpt-5.5"])).toBe(
-      "Olivier · codex · gpt-5.5",
+    expect(agentLine(["Alice", "codex", "gpt-5.5"])).toBe(
+      "Alice · codex · gpt-5.5",
     );
   });
   test("skips missing/empty parts", () => {

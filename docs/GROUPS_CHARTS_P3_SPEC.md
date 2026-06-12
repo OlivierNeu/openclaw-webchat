@@ -52,7 +52,7 @@ TRY the single-source import first.
 
 ```ts
 export const BUILTIN_CHARTS: ReadonlyArray<{ key: string; name: string; tokens: ChartTokens }> = [
-  // 2–3 GENERIC demo palettes (NOT Ataraxis — that is a later, separate task).
+  // 2–3 GENERIC demo palettes (NOT a client-specific brand chart — that is a later, separate task).
   // e.g. "ocean" (cool blue/teal), "forest" (green), "dusk" (violet/amber).
   // Each defines light + dark color sets (oklch), optionally radius/fontSans.
 ];

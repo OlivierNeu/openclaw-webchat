@@ -16,7 +16,7 @@
    `--primary`, `--background`, `--foreground`, `--muted`, `--border`, `--ring`, `--radius`,
    `--shadow-*`, `--font-sans`, `--font-mono`, espacements). Périmètre = **couleurs (light+dark)
    + rayons + ombres + espacements + typographie** (familles de polices **allowlistées**, pas d'upload).
-   « Charte actuelle » = valeurs courantes ; Ataraxis (à venir) = une 2ᵉ map de valeurs.
+   « Charte actuelle » = valeurs courantes ; une charte client custom (à venir) = une 2ᵉ map de valeurs.
 4. **Import = preset JSON de tokens**, validé **par type** côté serveur (couleur / longueur / ombre /
    police-allowlistée) sur un **vocabulaire fermé**. `url()`, `@import`, `@font-face`, `image-set`,
    `expression`, clés inconnues → **REJET**. Appliqué via `setProperty` + `@property`, **jamais**
@@ -103,5 +103,5 @@ Toute nouvelle chaîne UI : i18n FR + EN.
 
 ## Hors scope
 
-- Implémentation de la charte **Ataraxis** elle-même (map de valeurs dans le vocabulaire P3, plus tard).
+- Implémentation d'une charte client spécifique (map de valeurs dans le vocabulaire P3, plus tard).
 - Imposition de charte par groupe, RBAC intra-groupe, soft-delete.

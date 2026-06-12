@@ -5,7 +5,7 @@ Scope: the **Convex backend** changes only. The browser transport stays Convex
 exact `convex/*` files/functions to add or change, the schema deltas (all
 optional on existing tables), and the invariants each change preserves.
 
-Anchors (do not duplicate): `docs/PROJECT_STATE.md` (A2 confirmed; the three
+Anchors (do not duplicate): `PROJECT_STATE.md` (openclaw-notes, private; A2 confirmed; the three
 amplifiers to kill), `docs/BRIDGE_ARCHITECTURE.md` §4 (the streaming seam + the
 outbound-media fix), `docs/AISDK_VS_A2_DECISION.md` (keep A2 + assistant-ui).
 

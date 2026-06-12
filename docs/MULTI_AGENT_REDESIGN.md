@@ -4,7 +4,7 @@
 > M:N user↔instance↔agent redesign with bridge-driven agent discovery and
 > OpenClaw+Hermes multiplexing. Companion docs: `BRIDGE_ARCHITECTURE.md`,
 > `BRIDGE_PROTOCOL.md` (partly stale — see `OPENCLAW_RESEARCH.md` §5),
-> `OPENCLAW_RESEARCH.md` (provider ground truth), `PROJECT_STATE.md`.
+> `OPENCLAW_RESEARCH.md` (provider ground truth), `PROJECT_STATE.md` (openclaw-notes, private).
 >
 > PRIMARY-SOURCE RULE: fixtures/live captures win over public docs. Every
 > provider shape is normalized in the bridge; the app sees a stable contract.
@@ -53,10 +53,10 @@ Captured against the running **local OpenClaw 2026.6.1** gateway (CLI
 
 ```json
 [
-  { "id": "olivier", "identityName": "Olivier", "identitySource": "config",
+  { "id": "alice", "identityName": "Alice", "identitySource": "config",
     "workspace": "…", "agentDir": "…", "model": "openai/gpt-5.5",
     "bindings": 0, "isDefault": true },
-  { "id": "pissey", "identityName": "Pissey", "identityEmoji": "⚔️",
+  { "id": "bob", "identityName": "Bob", "identityEmoji": "⚔️",
     "model": "openai/gpt-5.5", "bindings": 0, "isDefault": false }
 ]
 ```
@@ -128,7 +128,7 @@ instanceDiscovery (NEW — per-instance poll OUTCOME; the truth dispatch keys on
 
 agents (NEW — resilient cache of bridge-discovered agents; last-good, never emptied)
   instanceName    string   (-> instances.name)
-  agentId         string   (provider-defined, e.g. "olivier")
+  agentId         string   (provider-defined, e.g. "alice")
   displayName?    string   (identityName)
   emoji?          string
   model?          string
@@ -418,7 +418,7 @@ already sent these (Phase 1); only the bridge ignored them.
 - `session.ts`: `acquire(SessionRouting)` builds the sessionKey from the body
   agent+canonical; keyed by chatId with RE-KEY on change (close stale → no leak).
 - Gates: tsc + build + 88 bridge tests (15 new) + advisor (4 points applied) +
-  **live e2e**: picker→chat bound to `pissey`→send → `routed agent=pissey
+  **live e2e**: picker→chat bound to `bob`→send → `routed agent=bob
   canonical=<user>` + /health connected; gateway accepted the send + created a run
   (old bug failed earlier); M2 forged `family`→409; missing routing→400. (Agent
   RUN blocked only by a local codex-harness `ENOENT`, unrelated to routing.)

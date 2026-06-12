@@ -106,7 +106,7 @@ Backend deployment:
 ```bash
 cd openclaw-webchat
 export OPENCLAW_MEDIA_LINK_SECRET="<stable secret>"
-export OPENCLAW_MEDIA_OUTBOUND_HOST_DIR="/volume3/openclaw/media/outbound"
+export OPENCLAW_MEDIA_OUTBOUND_HOST_DIR="/volume1/openclaw/media/outbound"
 export OPENCLAW_WEBCHAT_PUBLIC_BASE_URL="https://openclaw-webchat-api.example.com"
 docker compose build
 docker compose up -d
@@ -242,7 +242,7 @@ volumes: { media-outbound: {} }   # ONE volume shared by all OpenClaw instances
 
 Validate on the NAS: ask the agent (via the webchat) to produce a file → it must
 render as a downloadable attachment whose bytes match. Re-run per OpenClaw
-version (the dev/regression bench is the **olivier** instance; **jerome** is
+version (the dev/regression bench is the **alice** instance; **bob** is
 protected).
 
 ### Local dev — two options
@@ -251,7 +251,7 @@ files locally you need the gateway's `media/outbound` reachable as a local dir:
 
 - **(a) Co-located local OpenClaw** (matches NAS): run OpenClaw + bridge in a
   local compose sharing the `media-outbound` volume (cleanest, faithful).
-- **(b) Mount the remote gateway dir** when using the remote olivier gateway from
+- **(b) Mount the remote gateway dir** when using the remote alice gateway from
   the Mac bench:
   ```bash
   sshfs <user>@<gateway-host>:/home/node/.openclaw/media/outbound /tmp/oc-media

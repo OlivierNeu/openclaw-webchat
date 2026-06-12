@@ -1,10 +1,18 @@
 import { useQuery } from "convex/react";
+import type { FunctionReturnType } from "convex/server";
 import { useNavigate } from "@tanstack/react-router";
 import { CheckCircle2, AlertTriangle, WifiOff, RefreshCw } from "lucide-react";
 import { api } from "../convexApi";
 import { Badge } from "@/components/ui/badge";
 import { dispatchErrorInfo } from "@/lib/dispatchErrorInfo";
 import { m } from "@/paraglide/messages.js";
+import {
+  hasProvider,
+  providerSupport,
+  targetBadgeLabel,
+  targetBadgeState,
+  versionLabel,
+} from "./compatView";
 
 // "Bridge" settings tab — the place to see EVERYTHING about the bridge's health:
 // reachability, per-connection state, the curated root cause + fix hint of any
@@ -37,6 +45,118 @@ export function BridgeTab() {
           }
         />
       )}
+      <CompatSection />
+    </div>
+  );
+}
+
+// "Compatibilite" section (VCOMPAT-C): the bridge's version manifest as polled
+// into the bridgeCompat singleton — bridge/protocol versions, the OpenClaw
+// support window with its validated versions, and a per-connection verdict
+// badge. A failed poll preserves the last-good snapshot, hence the "stale"
+// hint when reachable is false.
+function CompatSection() {
+  const compat = useQuery(api.compat.getBridgeCompat, {});
+  return (
+    <>
+      <h3 className="oc-bridge__section">{m.compat_section()}</h3>
+      {compat === undefined ? (
+        <p className="oc-admin__hint">{m.bridge_loading()}</p>
+      ) : compat === null ? (
+        <p className="oc-admin__hint">{m.compat_no_data()}</p>
+      ) : (
+        <CompatDetail data={compat} />
+      )}
+    </>
+  );
+}
+
+function CompatDetail({
+  data,
+}: {
+  data: NonNullable<FunctionReturnType<typeof api.compat.getBridgeCompat>>;
+}) {
+  const support = providerSupport(data.compat, "openclaw");
+  return (
+    <div className="oc-compat">
+      <div className="oc-compat__meta">
+        <span>
+          {m.compat_bridge_version_label()}{" "}
+          <code className="oc-traces__mono">{versionLabel(data.bridgeVersion)}</code>
+        </span>
+        <span>
+          {m.compat_protocol_label()}{" "}
+          <code className="oc-traces__mono">
+            {data.protocolVersion !== null
+              ? String(data.protocolVersion)
+              : m.compat_unknown()}
+          </code>
+        </span>
+        <span>
+          {m.bridge_checked_at({
+            time: new Date(data.fetchedAt).toLocaleString("fr-FR"),
+          })}
+        </span>
+      </div>
+      {!data.reachable ? (
+        <p className="oc-admin__hint">{m.compat_stale()}</p>
+      ) : null}
+      {data.compat === null ? (
+        // Legacy bridge: no manifest shipped — name the policy in force.
+        <p className="oc-admin__hint">{m.compat_legacy_manifest()}</p>
+      ) : (
+        <div className="oc-compat__support">
+          <span className="oc-compat__label">{m.compat_openclaw_support()}</span>
+          {support.range !== null ? (
+            <span>
+              {m.compat_supported_range({
+                min: support.range.min,
+                max: support.range.maxValidated,
+              })}
+            </span>
+          ) : (
+            <span>{m.compat_unknown()}</span>
+          )}
+          {support.validatedVersions.map((v) => (
+            <Badge key={v} variant="secondary">
+              {v}
+            </Badge>
+          ))}
+        </div>
+      )}
+      {data.targets.length === 0 ? (
+        <p className="oc-admin__hint">{m.compat_no_targets()}</p>
+      ) : (
+        <div className="oc-compat__targets">
+          {data.targets.map((t) => {
+            const state = targetBadgeState(t, data.compat);
+            return (
+              <div key={t.instanceName} className="oc-compat__target">
+                <code className="oc-traces__mono">{t.instanceName}</code>
+                <span className="oc-compat__provider">{t.provider}</span>
+                <code className="oc-traces__mono">
+                  {versionLabel(t.gatewayVersion)}
+                </code>
+                <Badge
+                  variant={
+                    state === "supported"
+                      ? "secondary"
+                      : state === "beyond"
+                        ? "destructive"
+                        : "outline"
+                  }
+                >
+                  {targetBadgeLabel(state)}
+                </Badge>
+              </div>
+            );
+          })}
+        </div>
+      )}
+      {hasProvider(data.compat, "hermes") ? (
+        // Rendered ONLY when the manifest announces the provider — no dead UI.
+        <p className="oc-admin__hint">{m.compat_hermes_coming()}</p>
+      ) : null}
     </div>
   );
 }

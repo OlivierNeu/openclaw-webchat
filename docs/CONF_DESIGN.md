@@ -2,7 +2,7 @@
 
 > Fondé sur `CONF_RESEARCH.md` (25 claims vérifiés + autopsie Control UI +
 > règles widgets) et `CONF_CAPABILITIES.md` (surface RPC 6.5 réelle). Principe
-> Olivier : épuré au travail, capable en profondeur, **aucune capacité
+> directeur : épuré au travail, capable en profondeur, **aucune capacité
 > OpenClaw perdue *ou explicitement déléguée au Control UI/CLI* (liste §7)**.
 > Chaque choix cite sa prescription.
 > **Statut : GO-avec-corrections (red-team 2026-06-11). Les amendements
@@ -113,7 +113,7 @@ en mélangeant les trois horizons dans un popover de composer.
    ligne ; description d'une ligne max, grise, dessous.
 2. **Provenance — pattern VS Code étendu à notre cascade** :
    - barre verticale accent sur le bord gauche = **modifié à ce niveau** ;
-   - badge texte discret quand hérité : `héritée · agent Olivier` ou
+   - badge texte discret quand hérité : `héritée · agent Alice` ou
      `défaut admin` (on généralise notre badge « héritée » existant) ;
    - action `↺` par ligne = revenir à l'héritage (efface l'override, ne remet
      PAS une valeur codée en dur).
@@ -169,7 +169,7 @@ Zone droite = emplacement naturel du secondaire (biais 80/20, CONF_RESEARCH
 ╔═ Réglages de session ════════════════╗
 ║ GÉNÉRATION                           ║
 ║ ▌Modèle        [GPT-5.5 ▾]      ↺    ║   ▌= override session (barre accent)
-║  Réflexion     ○─○─○─●─○─○  High     ║   héritée · agent Olivier
+║  Réflexion     ○─○─○─●─○─○  High     ║   héritée · agent Alice
 ║  Vitesse       [Défaut|Rapide|Std]   ║   héritée · défaut admin
 ║  Raisonnement  [Off|On|Stream]       ║   visibilité du raisonnement
 ║                                      ║
@@ -179,7 +179,7 @@ Zone droite = emplacement naturel du secondaire (biais 80/20, CONF_RESEARCH
 ║  Coût          ~0,00 $ · 26k jetons  ║   (sessions.usage)
 ║                                      ║
 ║ AGENT                                ║
-║  Olivier · codex · gpt-5.5           ║
+║  Alice · codex · gpt-5.5           ║
 ║  Fichiers de l'agent →               ║   (lien Settings, si permission)
 ║                                      ║
 ║ VOIX                          bientôt║
@@ -207,7 +207,7 @@ Reprend l'excellente idée du Control UI (workspace files visibles) en la
 complétant : ÉDITION, garde-fous et audit.
 
 ```
-Settings ▸ Agents ▸ Olivier
+Settings ▸ Agents ▸ Alice
 ┌──────────────────────────────────────────────┐
 │ FICHIERS DE L'AGENT                          │
 │  AGENTS.md     9,2 ko ▓▓▓▓▓░ 46 %   Éditer   │  gauge = bootstrapMaxChars
@@ -229,7 +229,7 @@ Settings ▸ Agents ▸ Olivier
   à 86 % — l'utilisateur ne le voit jamais aujourd'hui).
 - RBAC : nouvelle permission `agents.files.manage` (read peut être plus
   large : `agents.files.read` pour « l'utilisateur averti qui vérifie les
-  règles » — la motivation d'Olivier). Write = admin par défaut, grantable.
+  règles » — la motivation d'origine). Write = admin par défaut, grantable.
 
 ## 4. Horizon « global » — Settings ▸ Défauts de chat (admin)
 

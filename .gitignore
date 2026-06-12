@@ -30,6 +30,10 @@ openclaw-frame-captures/
 *.ndjson
 *.log
 
+# Ephemeral local artifacts (live-test screenshots, scratch outputs). Durable
+# evidence belongs in openclaw-notes/docs/webchat/, never in this public repo.
+.local/
+
 # OS / editors
 .DS_Store
 .idea/

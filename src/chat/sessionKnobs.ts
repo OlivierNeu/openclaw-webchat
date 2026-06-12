@@ -153,7 +153,7 @@ export function costLine(
   return null;
 }
 
-/** "Olivier · codex · gpt-5.5" — skips missing parts; null when all missing. */
+/** "Alice · codex · gpt-5.5" — skips missing parts; null when all missing. */
 export function agentLine(
   parts: Array<string | null | undefined>,
 ): string | null {

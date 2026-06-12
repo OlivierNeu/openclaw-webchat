@@ -50,7 +50,7 @@ async function grantAgent(
   t: ReturnType<typeof convexTest>,
   userId: Id<"users">,
   instanceName = "main",
-  agentId = "olivier",
+  agentId = "alice",
 ) {
   await t.run(async (ctx) => {
     await ctx.db.insert("userAgents", {
@@ -162,7 +162,7 @@ describe("agentFiles.listAgentFiles", () => {
     await expect(
       as.action(api.agentFiles.listAgentFiles, {
         instanceName: "main",
-        agentId: "olivier",
+        agentId: "alice",
       }),
     ).rejects.toThrow(/missing permission agents\.files\.read/);
   });
@@ -170,7 +170,7 @@ describe("agentFiles.listAgentFiles", () => {
   test("a granted non-admin CANNOT target an agent outside their effective set (P2-1)", async () => {
     const t = convexTest(schema, modules);
     const { as, userId } = await seedUser(t, "user", ["agents.files.read"]);
-    await grantAgent(t, userId, "main", "olivier");
+    await grantAgent(t, userId, "main", "alice");
     // No bridge stub on purpose: the scope gate must reject BEFORE any fetch.
     await expect(
       as.action(api.agentFiles.listAgentFiles, {
@@ -181,7 +181,7 @@ describe("agentFiles.listAgentFiles", () => {
     await expect(
       as.action(api.agentFiles.getAgentFile, {
         instanceName: "other-instance",
-        agentId: "olivier", // right agent id, WRONG instance
+        agentId: "alice", // right agent id, WRONG instance
         name: "AGENTS.md",
       }),
     ).rejects.toThrow(/agent not accessible/);
@@ -198,7 +198,7 @@ describe("agentFiles.listAgentFiles", () => {
     try {
       const res = await as.action(api.agentFiles.listAgentFiles, {
         instanceName: "main",
-        agentId: "olivier",
+        agentId: "alice",
       });
       expect(res.files.map((f) => f.name)).toEqual([
         "AGENTS.md",
@@ -209,7 +209,7 @@ describe("agentFiles.listAgentFiles", () => {
       expect(bridge.calls[0]!.body).toMatchObject({
         op: "list",
         instanceName: "main",
-        agentId: "olivier",
+        agentId: "alice",
       });
     } finally {
       bridge.restore();
@@ -226,7 +226,7 @@ describe("agentFiles.listAgentFiles", () => {
     try {
       const res = await as.action(api.agentFiles.listAgentFiles, {
         instanceName: "main",
-        agentId: "olivier",
+        agentId: "alice",
       });
       expect(res.files.length).toBe(FULL_LISTING.length);
     } finally {
@@ -244,7 +244,7 @@ describe("agentFiles.getAgentFile", () => {
     await expect(
       as.action(api.agentFiles.getAgentFile, {
         instanceName: "main",
-        agentId: "olivier",
+        agentId: "alice",
         name: "MEMORY.md",
       }),
     ).rejects.toThrow(/not readable/);
@@ -261,7 +261,7 @@ describe("agentFiles.getAgentFile", () => {
     try {
       const res = await as.action(api.agentFiles.getAgentFile, {
         instanceName: "main",
-        agentId: "olivier",
+        agentId: "alice",
         name: "AGENTS.md",
       });
       expect(res).toEqual({
@@ -285,7 +285,7 @@ describe("agentFiles.getAgentFile", () => {
     try {
       const res = await as.action(api.agentFiles.getAgentFile, {
         instanceName: "main",
-        agentId: "olivier",
+        agentId: "alice",
         name: "HEARTBEAT.md",
       });
       expect(res).toEqual({
@@ -307,7 +307,7 @@ describe("agentFiles.setAgentFile (admin-only, CAS, revision)", () => {
     await expect(
       as.action(api.agentFiles.setAgentFile, {
         instanceName: "main",
-        agentId: "olivier",
+        agentId: "alice",
         name: "AGENTS.md",
         content: "# hacked",
         baseUpdatedAtMs: 1,
@@ -321,7 +321,7 @@ describe("agentFiles.setAgentFile (admin-only, CAS, revision)", () => {
     await expect(
       as.action(api.agentFiles.setAgentFile, {
         instanceName: "main",
-        agentId: "olivier",
+        agentId: "alice",
         name: "AGENTS.md",
         content: "x".repeat(MAX_AGENT_FILE_CHARS + 1),
         baseUpdatedAtMs: 1,
@@ -339,7 +339,7 @@ describe("agentFiles.setAgentFile (admin-only, CAS, revision)", () => {
     try {
       await as.action(api.agentFiles.setAgentFile, {
         instanceName: "main",
-        agentId: "olivier",
+        agentId: "alice",
         name: "AGENTS.md",
         content: "# New rules",
         baseUpdatedAtMs: 42,
@@ -356,7 +356,7 @@ describe("agentFiles.setAgentFile (admin-only, CAS, revision)", () => {
       expect(revisions.length).toBe(1);
       expect(revisions[0]).toMatchObject({
         instanceName: "main",
-        agentId: "olivier",
+        agentId: "alice",
         name: "AGENTS.md",
         before: "# Old rules",
         after: "# New rules",
@@ -375,7 +375,7 @@ describe("agentFiles.setAgentFile (admin-only, CAS, revision)", () => {
       await expect(
         as.action(api.agentFiles.setAgentFile, {
           instanceName: "main",
-          agentId: "olivier",
+          agentId: "alice",
           name: "AGENTS.md",
           content: "# New rules",
           baseUpdatedAtMs: 42,
@@ -412,7 +412,7 @@ describe("agentFiles.compactSession", () => {
       await ctx.db.insert("userAgents", {
         userId,
         instanceName: "main",
-        agentId: "olivier",
+        agentId: "alice",
         isDefault: true,
         source: "manual",
         createdAt: Date.now(),
@@ -420,7 +420,7 @@ describe("agentFiles.compactSession", () => {
     });
     const chatId = (await as.mutation(api.chats.createChat, {
       instanceName: "main",
-      agentId: "olivier",
+      agentId: "alice",
     })) as Id<"chats">;
     const bridge = stubBridge(() => ({ status: 200, json: { ok: true } }));
     try {
@@ -430,7 +430,7 @@ describe("agentFiles.compactSession", () => {
       expect(call!.body).toMatchObject({
         chatId,
         instanceName: "main",
-        agentId: "olivier",
+        agentId: "alice",
         canonical: "alice",
       });
     } finally {

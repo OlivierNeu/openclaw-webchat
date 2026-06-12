@@ -50,7 +50,7 @@ describe("discovery cache resilience (B2)", () => {
     const t = convexTest(schema, modules);
     await t.mutation(internal.agents.applyDiscovery, {
       instanceName: "prod",
-      agents: [A("olivier", true), A("pissey")],
+      agents: [A("alice", true), A("bob")],
     });
     let rows = await t.run((ctx) =>
       ctx.db
@@ -61,10 +61,10 @@ describe("discovery cache resilience (B2)", () => {
     expect(rows.length).toBe(2);
     expect(rows.every((r) => r.presentInLastOk)).toBe(true);
 
-    // pissey deleted on the gateway -> omitted from the next SUCCESSFUL poll.
+    // bob deleted on the gateway -> omitted from the next SUCCESSFUL poll.
     await t.mutation(internal.agents.applyDiscovery, {
       instanceName: "prod",
-      agents: [A("olivier", true)],
+      agents: [A("alice", true)],
     });
     rows = await t.run((ctx) =>
       ctx.db
@@ -73,15 +73,15 @@ describe("discovery cache resilience (B2)", () => {
         .collect(),
     );
     expect(rows.length).toBe(2); // never removed
-    expect(rows.find((r) => r.agentId === "pissey")!.presentInLastOk).toBe(false);
-    expect(rows.find((r) => r.agentId === "olivier")!.presentInLastOk).toBe(true);
+    expect(rows.find((r) => r.agentId === "bob")!.presentInLastOk).toBe(false);
+    expect(rows.find((r) => r.agentId === "alice")!.presentInLastOk).toBe(true);
   });
 
   test("a FAILED poll preserves last-good rows + lastOkAt, flips lastPollOk", async () => {
     const t = convexTest(schema, modules);
     await t.mutation(internal.agents.applyDiscovery, {
       instanceName: "prod",
-      agents: [A("olivier", true)],
+      agents: [A("alice", true)],
     });
     await t.mutation(internal.agents.recordDiscoveryFailure, {
       instanceName: "prod",
@@ -110,7 +110,7 @@ describe("discovery cache resilience (B2)", () => {
     const t = convexTest(schema, modules);
     await t.mutation(internal.agents.applyDiscovery, {
       instanceName: "prod",
-      agents: [A("olivier", true), A("pissey")],
+      agents: [A("alice", true), A("bob")],
     });
     const rowsOf = () =>
       t.run((ctx) =>
@@ -145,7 +145,7 @@ describe("discovery cache resilience (B2)", () => {
     const t = convexTest(schema, modules);
     await t.mutation(internal.agents.applyDiscovery, {
       instanceName: "prod",
-      agents: [A("olivier", true, "Olivier")],
+      agents: [A("alice", true, "Alice")],
     });
     // Stamp a sentinel so a later write is detectable (lastSeenAt is unread).
     await t.run(async (ctx) => {
@@ -155,15 +155,15 @@ describe("discovery cache resilience (B2)", () => {
     // IDENTICAL poll → SKIP → lastSeenAt stays 1.
     await t.mutation(internal.agents.applyDiscovery, {
       instanceName: "prod",
-      agents: [A("olivier", true, "Olivier")],
+      agents: [A("alice", true, "Alice")],
     });
     let row = (await t.run((ctx) => ctx.db.query("agents").collect()))[0];
     expect(row.lastSeenAt).toBe(1);
-    expect(row.displayName).toBe("Olivier");
+    expect(row.displayName).toBe("Alice");
     // A CHANGED poll (new displayName) → WRITES → lastSeenAt moves off the sentinel.
     await t.mutation(internal.agents.applyDiscovery, {
       instanceName: "prod",
-      agents: [A("olivier", true, "Renamed")],
+      agents: [A("alice", true, "Renamed")],
     });
     row = (await t.run((ctx) => ctx.db.query("agents").collect()))[0];
     expect(row.lastSeenAt).not.toBe(1);
@@ -174,9 +174,9 @@ describe("discovery cache resilience (B2)", () => {
     const t = convexTest(schema, modules);
     await t.mutation(internal.agents.applyDiscovery, {
       instanceName: "prod",
-      agents: [A("olivier", true)],
+      agents: [A("alice", true)],
     });
-    // Genuine empty gateway → olivier flips deleted.
+    // Genuine empty gateway → alice flips deleted.
     await t.mutation(internal.agents.applyDiscovery, {
       instanceName: "prod",
       agents: [],
@@ -187,7 +187,7 @@ describe("discovery cache resilience (B2)", () => {
     // It REAPPEARS on a later poll → must flip back to present (a write happens).
     await t.mutation(internal.agents.applyDiscovery, {
       instanceName: "prod",
-      agents: [A("olivier", true)],
+      agents: [A("alice", true)],
     });
     row = (await t.run((ctx) => ctx.db.query("agents").collect()))[0];
     expect(row.presentInLastOk).toBe(true);
@@ -197,7 +197,7 @@ describe("discovery cache resilience (B2)", () => {
     const t = convexTest(schema, modules);
     await t.mutation(internal.agents.applyDiscovery, {
       instanceName: "prod",
-      agents: [A("olivier", true)],
+      agents: [A("alice", true)],
     });
     const discOf = () =>
       t.run((ctx) =>
@@ -214,7 +214,7 @@ describe("discovery cache resilience (B2)", () => {
     });
     await t.mutation(internal.agents.applyDiscovery, {
       instanceName: "prod",
-      agents: [A("olivier", true)],
+      agents: [A("alice", true)],
     });
     expect((await discOf())!.lastPollAt).toBe(1); // no-op: not rewritten
 
@@ -228,7 +228,7 @@ describe("discovery cache resilience (B2)", () => {
     // Recovery (success after a failure) is a state change → writes lastPollOk=true.
     await t.mutation(internal.agents.applyDiscovery, {
       instanceName: "prod",
-      agents: [A("olivier", true)],
+      agents: [A("alice", true)],
     });
     const d = await discOf();
     expect(d!.lastPollOk).toBe(true);
@@ -242,7 +242,7 @@ describe("assignAgent — discovered-only whitelist + first-is-default", () => {
     const { as, profileId } = await seedAdminAndTarget(t);
     await t.mutation(internal.agents.applyDiscovery, {
       instanceName: "prod",
-      agents: [A("olivier", true)],
+      agents: [A("alice", true)],
     });
     await expect(
       as.mutation(api.agents.assignAgent, {
@@ -258,12 +258,12 @@ describe("assignAgent — discovered-only whitelist + first-is-default", () => {
     const { as, profileId, userId } = await seedAdminAndTarget(t);
     await t.mutation(internal.agents.applyDiscovery, {
       instanceName: "prod",
-      agents: [A("olivier", true), A("pissey")],
+      agents: [A("alice", true), A("bob")],
     });
     await as.mutation(api.agents.assignAgent, {
       profileId,
       instanceName: "prod",
-      agentId: "olivier",
+      agentId: "alice",
     });
     let ua = await uaOf(t, userId);
     expect(ua.length).toBe(1);
@@ -272,7 +272,7 @@ describe("assignAgent — discovered-only whitelist + first-is-default", () => {
     await as.mutation(api.agents.assignAgent, {
       profileId,
       instanceName: "prod",
-      agentId: "pissey",
+      agentId: "bob",
     });
     ua = await uaOf(t, userId);
     expect(ua.length).toBe(2);
@@ -282,7 +282,7 @@ describe("assignAgent — discovered-only whitelist + first-is-default", () => {
     await as.mutation(api.agents.assignAgent, {
       profileId,
       instanceName: "prod",
-      agentId: "olivier",
+      agentId: "alice",
     });
     ua = await uaOf(t, userId);
     expect(ua.length).toBe(2);
@@ -295,9 +295,9 @@ describe("setDefaultAgent / removeAgent — exactly-one-default (H2/H3)", () => 
     const { as, profileId, userId } = await seedAdminAndTarget(t);
     await t.mutation(internal.agents.applyDiscovery, {
       instanceName: "prod",
-      agents: [A("olivier", true), A("pissey")],
+      agents: [A("alice", true), A("bob")],
     });
-    for (const agentId of ["olivier", "pissey"]) {
+    for (const agentId of ["alice", "bob"]) {
       await as.mutation(api.agents.assignAgent, {
         profileId,
         instanceName: "prod",
@@ -312,25 +312,25 @@ describe("setDefaultAgent / removeAgent — exactly-one-default (H2/H3)", () => 
     await as.mutation(api.agents.setDefaultAgent, {
       profileId,
       instanceName: "prod",
-      agentId: "pissey",
+      agentId: "bob",
     });
     const ua = await uaOf(t, userId);
     expect(ua.filter((r) => r.isDefault).length).toBe(1);
-    expect(ua.find((r) => r.agentId === "pissey")!.isDefault).toBe(true);
-    expect(ua.find((r) => r.agentId === "olivier")!.isDefault).toBe(false);
+    expect(ua.find((r) => r.agentId === "bob")!.isDefault).toBe(true);
+    expect(ua.find((r) => r.agentId === "alice")!.isDefault).toBe(false);
   });
 
   test("removing the default re-elects another (never agents-but-no-default)", async () => {
     const { t, as, profileId, userId } = await setup();
-    // olivier is the default (first). Remove it.
+    // alice is the default (first). Remove it.
     await as.mutation(api.agents.removeAgent, {
       profileId,
       instanceName: "prod",
-      agentId: "olivier",
+      agentId: "alice",
     });
     const ua = await uaOf(t, userId);
     expect(ua.length).toBe(1);
-    expect(ua[0].agentId).toBe("pissey");
+    expect(ua[0].agentId).toBe("bob");
     expect(ua[0].isDefault).toBe(true); // re-elected
   });
 
@@ -339,11 +339,11 @@ describe("setDefaultAgent / removeAgent — exactly-one-default (H2/H3)", () => 
     await as.mutation(api.agents.removeAgent, {
       profileId,
       instanceName: "prod",
-      agentId: "pissey",
+      agentId: "bob",
     });
     const ua = await uaOf(t, userId);
     expect(ua.length).toBe(1);
-    expect(ua[0].agentId).toBe("olivier");
+    expect(ua[0].agentId).toBe("alice");
     expect(ua[0].isDefault).toBe(true);
   });
 });
@@ -359,14 +359,14 @@ describe("enrichUserAgents state priority (Codex P2 — deleted wins over stale)
       await ctx.db.insert("userAgents", {
         userId: uid,
         instanceName: "prod",
-        agentId: "pissey",
+        agentId: "bob",
         isDefault: true,
         source: "manual",
         createdAt: 1,
       });
       await ctx.db.insert("agents", {
         instanceName: "prod",
-        agentId: "pissey",
+        agentId: "bob",
         source: "discovered",
         presentInLastOk: opts.present,
         firstSeenAt: 1,
@@ -386,7 +386,7 @@ describe("enrichUserAgents state priority (Codex P2 — deleted wins over stale)
   }
   const stateOf = async (as: Awaited<ReturnType<typeof seedUserWithAgent>>) => {
     const agents = await as.query(api.agents.listMyAgents, {});
-    return agents.find((a) => a.agentId === "pissey")!.state;
+    return agents.find((a) => a.agentId === "bob")!.state;
   };
 
   test("known-deleted stays 'deleted' even when the LATEST poll FAILED (blip must not re-offer it)", async () => {
@@ -423,7 +423,7 @@ describe("deleteInstance cascade (Codex P2 — no orphan grants)", () => {
     const { as, profileId, userId } = await seedAdminAndTarget(t);
     await t.mutation(internal.agents.applyDiscovery, {
       instanceName: "prod",
-      agents: [A("olivier", true)],
+      agents: [A("alice", true)],
     });
     await t.mutation(internal.agents.applyDiscovery, {
       instanceName: "other",
@@ -438,7 +438,7 @@ describe("deleteInstance cascade (Codex P2 — no orphan grants)", () => {
     await as.mutation(api.agents.assignAgent, {
       profileId,
       instanceName: "prod",
-      agentId: "olivier",
+      agentId: "alice",
     }); // default (first)
     await as.mutation(api.agents.assignAgent, {
       profileId,
@@ -459,7 +459,7 @@ describe("deleteInstance cascade (Codex P2 — no orphan grants)", () => {
     const ua = await uaOf(t, userId);
     expect(ua.length).toBe(1); // prod grant gone
     expect(ua[0].instanceName).toBe("other");
-    expect(ua[0].isDefault).toBe(true); // re-elected (prod/olivier was the default)
+    expect(ua[0].isDefault).toBe(true); // re-elected (prod/alice was the default)
     expect((await agentsOf(t, "other")).length).toBe(1); // other untouched
   });
 
@@ -468,7 +468,7 @@ describe("deleteInstance cascade (Codex P2 — no orphan grants)", () => {
     const { as, profileId, userId } = await seedAdminAndTarget(t);
     await t.mutation(internal.agents.applyDiscovery, {
       instanceName: "prod",
-      agents: [A("olivier", true)],
+      agents: [A("alice", true)],
     });
     const dupId = await t.run((ctx) =>
       ctx.db.insert("instances", { name: "prod", gatewayUrl: "ws://a", kind: "openclaw" }),
@@ -479,7 +479,7 @@ describe("deleteInstance cascade (Codex P2 — no orphan grants)", () => {
     await as.mutation(api.agents.assignAgent, {
       profileId,
       instanceName: "prod",
-      agentId: "olivier",
+      agentId: "alice",
     });
     await as.mutation(api.admin.deleteInstance, { instanceId: dupId });
     expect((await uaOf(t, userId)).length).toBe(1); // grant kept
@@ -554,19 +554,19 @@ describe("getChatAgent — the multi-agent header chip (UX-A)", () => {
 
   test("multi-agent, BOUND chat: chip names the bound (non-default) agent", async () => {
     const t = convexTest(schema, modules);
-    const { as, mkChat } = await seedUserWithAgents(t, ["main", "pissey"]);
-    const chatId = await mkChat({ agentId: "pissey" }); // bound to the non-default
+    const { as, mkChat } = await seedUserWithAgents(t, ["main", "bob"]);
+    const chatId = await mkChat({ agentId: "bob" }); // bound to the non-default
     const res = await as.query(api.agents.getChatAgent, { chatId });
     expect(res?.multiAgent).toBe(true);
-    expect(res?.agent?.agentId).toBe("pissey");
-    expect(res?.agent?.displayName).toBe("PISSEY");
+    expect(res?.agent?.agentId).toBe("bob");
+    expect(res?.agent?.displayName).toBe("BOB");
     expect(res?.agent?.inheritedDefault).toBe(false);
     expect(res?.agent?.state).toBe("ok");
   });
 
   test("multi-agent, UNBOUND chat: chip shows the DEFAULT (what the next turn binds to)", async () => {
     const t = convexTest(schema, modules);
-    const { as, mkChat } = await seedUserWithAgents(t, ["main", "pissey"]);
+    const { as, mkChat } = await seedUserWithAgents(t, ["main", "bob"]);
     const chatId = await mkChat(); // legacy/unbound
     const res = await as.query(api.agents.getChatAgent, { chatId });
     expect(res?.multiAgent).toBe(true);
@@ -576,7 +576,7 @@ describe("getChatAgent — the multi-agent header chip (UX-A)", () => {
 
   test("a malformed/foreign chatId returns null (no throw for malformed)", async () => {
     const t = convexTest(schema, modules);
-    const { as } = await seedUserWithAgents(t, ["main", "pissey"]);
+    const { as } = await seedUserWithAgents(t, ["main", "bob"]);
     expect(await as.query(api.agents.getChatAgent, { chatId: "not-an-id" })).toBeNull();
   });
 
@@ -607,10 +607,10 @@ describe("getChatAgent — the multi-agent header chip (UX-A)", () => {
       });
       await ctx.db.insert("agents", {
         instanceName: "prod",
-        agentId: "pissey",
+        agentId: "bob",
         source: "discovered",
         presentInLastOk: false, // deleted on the gateway
-        displayName: "PISSEY",
+        displayName: "BOB",
         firstSeenAt: 1,
         lastSeenAt: 1,
       });
@@ -625,12 +625,12 @@ describe("getChatAgent — the multi-agent header chip (UX-A)", () => {
       await ctx.db.insert("userAgents", {
         userId: uid,
         instanceName: "prod",
-        agentId: "pissey",
+        agentId: "bob",
         isDefault: false,
         source: "manual" as const,
         createdAt: 1,
       });
-      // Chat BOUND to the now-deleted pissey.
+      // Chat BOUND to the now-deleted bob.
       return uid;
     });
     const chatId = await t.run((ctx) =>
@@ -638,13 +638,13 @@ describe("getChatAgent — the multi-agent header chip (UX-A)", () => {
         userId,
         updatedAt: 1,
         instanceName: "prod",
-        agentId: "pissey",
+        agentId: "bob",
       }),
     );
     const as = t.withIdentity({ subject: `${userId}|session` });
     const res = await as.query(api.agents.getChatAgent, { chatId });
     expect(res?.multiAgent).toBe(true);
-    expect(res?.agent?.agentId).toBe("main"); // NOT the dead "pissey"
+    expect(res?.agent?.agentId).toBe("main"); // NOT the dead "bob"
     expect(res?.agent?.inheritedDefault).toBe(true);
   });
 
@@ -665,15 +665,15 @@ describe("getChatAgent — the multi-agent header chip (UX-A)", () => {
         presentInLastOk: false, displayName: "MAIN", firstSeenAt: 1, lastSeenAt: 1, // default, DELETED
       });
       await ctx.db.insert("agents", {
-        instanceName: "prod", agentId: "pissey", source: "discovered",
-        presentInLastOk: true, displayName: "PISSEY", firstSeenAt: 1, lastSeenAt: 1, // present
+        instanceName: "prod", agentId: "bob", source: "discovered",
+        presentInLastOk: true, displayName: "BOB", firstSeenAt: 1, lastSeenAt: 1, // present
       });
       await ctx.db.insert("userAgents", {
         userId: uid, instanceName: "prod", agentId: "main",
         isDefault: true, source: "manual" as const, createdAt: 0,
       });
       await ctx.db.insert("userAgents", {
-        userId: uid, instanceName: "prod", agentId: "pissey",
+        userId: uid, instanceName: "prod", agentId: "bob",
         isDefault: false, source: "manual" as const, createdAt: 1,
       });
       return uid;
@@ -683,7 +683,7 @@ describe("getChatAgent — the multi-agent header chip (UX-A)", () => {
       .withIdentity({ subject: `${userId}|session` })
       .query(api.agents.getChatAgent, { chatId });
     expect(res?.multiAgent).toBe(true);
-    expect(res?.agent?.agentId).toBe("pissey"); // NOT the dead default "main"
+    expect(res?.agent?.agentId).toBe("bob"); // NOT the dead default "main"
     expect(res?.agent?.state).toBe("ok");
   });
 });

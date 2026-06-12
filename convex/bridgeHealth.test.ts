@@ -16,11 +16,11 @@ const modules = import.meta.glob("./**/*.ts");
 describe("normalizeTarget (defensive parse of the bridge /health body)", () => {
   test("a full target flattens lastError {code,at} -> code/at", () => {
     const t = normalizeTarget({
-      key: "olivier",
-      instanceName: "olivier",
-      canonical: "olivier",
+      key: "alice",
+      instanceName: "alice",
+      canonical: "alice",
       agentId: "main",
-      gatewayHost: "192.168.1.49:18789",
+      gatewayHost: "10.0.0.10:18789",
       state: "error",
       lastOkAt: null,
       lastError: { code: "AGENT_NOT_FOUND", at: 123 },
@@ -29,7 +29,7 @@ describe("normalizeTarget (defensive parse of the bridge /health body)", () => {
       errorCount: 2,
     });
     expect(t).toMatchObject({
-      key: "olivier",
+      key: "alice",
       agentId: "main",
       state: "error",
       lastErrorCode: "AGENT_NOT_FOUND",

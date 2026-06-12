@@ -1,7 +1,7 @@
 /// <reference types="vite/client" />
 //
 // Codex P2 regression: the dev-only live-harness `testSend` enforces the
-// "never touch jerome/family" barrier by gating the instance the send will
+// "never touch protected tenants" barrier by gating the instance the send will
 // ACTUALLY reach — i.e. the target resolved by `resolveTargetForChat`
 // (chat binding first, else the user's DEFAULT userAgents row) — NOT an
 // arbitrary `.first()` assignment. A user can legitimately hold an allowlisted
@@ -31,7 +31,7 @@ async function seedAdmin(t: ReturnType<typeof convexTest>) {
     await ctx.db.insert("profiles", {
       userId: uid,
       role: "admin",
-      canonical: "olivier",
+      canonical: "alice",
     });
     return uid;
   });
@@ -59,9 +59,9 @@ describe("dev.testSend — gates the RESOLVED target (Codex P2)", () => {
     const t = convexTest(schema, modules);
     const uid = await seedAdmin(t);
     // .first() (by_user, insertion order) → the allowlisted "admin" row…
-    await seedUA(t, uid, "admin", "olivier", false);
+    await seedUA(t, uid, "admin", "alice", false);
     // …but the DEFAULT (what dispatch actually uses) is the protected instance.
-    await seedUA(t, uid, "family", "jerome", true);
+    await seedUA(t, uid, "family", "bob", true);
     await expect(
       t.mutation(api.dev.testSend, { text: "hello" }),
     ).rejects.toThrow(/family|restricted|never touch/i);
@@ -70,14 +70,14 @@ describe("dev.testSend — gates the RESOLVED target (Codex P2)", () => {
   test("refuses when the CHAT is bound to a non-allowlisted instance, even though .first() is allowlisted", async () => {
     const t = convexTest(schema, modules);
     const uid = await seedAdmin(t);
-    await seedUA(t, uid, "admin", "olivier", true); // allowlisted default + .first()
-    await seedUA(t, uid, "family", "jerome", false); // also assigned (legit)
+    await seedUA(t, uid, "admin", "alice", true); // allowlisted default + .first()
+    await seedUA(t, uid, "family", "bob", false); // also assigned (legit)
     const chatId = await t.run((ctx) =>
       ctx.db.insert("chats", {
         userId: uid as never,
         updatedAt: 1,
         instanceName: "family", // chat binding → dispatch targets THIS
-        agentId: "jerome",
+        agentId: "bob",
       }),
     );
     await expect(
@@ -88,7 +88,7 @@ describe("dev.testSend — gates the RESOLVED target (Codex P2)", () => {
   test("allows a fresh send when the resolved default is the allowlisted instance", async () => {
     const t = convexTest(schema, modules);
     const uid = await seedAdmin(t);
-    await seedUA(t, uid, "admin", "olivier", true);
+    await seedUA(t, uid, "admin", "alice", true);
     const r = await t.mutation(api.dev.testSend, { text: "hello" });
     expect(r.ok).toBe(true);
   });
@@ -114,7 +114,7 @@ describe("dev.testSend — gates the RESOLVED target (Codex P2)", () => {
       });
       return uid;
     });
-    await seedUA(t, routedUid, "admin", "olivier", true); // only this user is routed
+    await seedUA(t, routedUid, "admin", "alice", true); // only this user is routed
     const r = await t.mutation(api.dev.testSend, { text: "hi" });
     // Resolves via the routed user (instance "admin"), not no_agent on the admin.
     expect(r).toMatchObject({ ok: true });
@@ -125,7 +125,7 @@ describe("dev.routeUser — re-run promotes an existing assignment to default (C
   test("a re-run for an existing NON-default (instance,agent) makes it the default", async () => {
     const t = convexTest(schema, modules);
     await seedAdmin(t); // routeUser targets this admin profile
-    const base = { instanceName: "admin", gatewayUrl: "ws://x", canonical: "olivier" };
+    const base = { instanceName: "admin", gatewayUrl: "ws://x", canonical: "alice" };
     await t.mutation(api.dev.routeUser, { ...base, agentId: "a1" }); // a1 default
     await t.mutation(api.dev.routeUser, { ...base, agentId: "a2" }); // a2 default, a1 not
     await t.mutation(api.dev.routeUser, { ...base, agentId: "a1" }); // re-run a1
@@ -139,7 +139,7 @@ describe("dev.routeUser — re-run promotes an existing assignment to default (C
 describe("dev user switcher (listUsersDev / setMyRole)", () => {
   test("lists profiles + marks the caller; setMyRole flips the caller's role", async () => {
     const t = convexTest(schema, modules);
-    const meId = await seedAdmin(t); // role admin, canonical "olivier"
+    const meId = await seedAdmin(t); // role admin, canonical "alice"
     await t.run(async (ctx) => {
       const uid = await ctx.db.insert("users", {});
       await ctx.db.insert("profiles", { userId: uid, role: "user", canonical: "alice" });
@@ -161,8 +161,8 @@ describe("dev.enqueueAttachmentTurn — gates the RESOLVED target (Codex P2)", (
   test("refuses when the user DEFAULT is a non-allowlisted instance, even though .first() is allowlisted", async () => {
     const t = convexTest(schema, modules);
     const uid = await seedAdmin(t);
-    await seedUA(t, uid, "admin", "olivier", false); // .first() → allowlisted
-    await seedUA(t, uid, "family", "jerome", true); // DEFAULT → protected instance
+    await seedUA(t, uid, "admin", "alice", false); // .first() → allowlisted
+    await seedUA(t, uid, "family", "bob", true); // DEFAULT → protected instance
     const storageId = await t.run((ctx) => ctx.storage.store(new Blob(["x"])));
     await expect(
       t.mutation(internal.dev.enqueueAttachmentTurn, {

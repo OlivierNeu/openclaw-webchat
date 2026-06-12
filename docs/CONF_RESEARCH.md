@@ -106,7 +106,7 @@ Seuils NN/g (les seuls chiffrés) + Speero (n=708) + Baymard (tests e-commerce) 
 valeur affichée ; VAD/délais ms → input+stepper.
 
 ## Annexe — État de l'art de première main : autopsie du Control UI 6.5
-> Analyse heuristique (captures du 2026-06-11, instance olivier) jugée contre
+> Analyse heuristique (captures du 2026-06-11, instance de dev) jugée contre
 > les prescriptions vérifiées ci-dessus. Comble le trou n°1. C'est la
 > « référence négative » du design CONF-3 — chaque défaut est une opportunité.
 

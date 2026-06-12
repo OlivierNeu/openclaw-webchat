@@ -87,7 +87,7 @@ export type BuiltinChart = {
 };
 
 // ===========================================================================
-// Builtin charts — 2-3 GENERIC demo palettes (NOT Ataraxis; that is a later,
+// Builtin charts — 2-3 GENERIC demo palettes (NOT a client-brand chart; that is a later,
 // separate task). Each defines a light + dark color set in oklch, plus radius
 // and a font, so the picker is real and the live effect is unmistakable in BOTH
 // modes. A subset of COLOR_TOKENS is enough — unset tokens inherit index.css.

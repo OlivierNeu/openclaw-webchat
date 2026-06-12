@@ -41,22 +41,22 @@ describe("groupByInstance", () => {
 
 describe("filterAgents", () => {
   const agents = [
-    mk("prod", "olivier", false, { displayName: "Olivier", model: "gpt-5.5" }),
-    mk("prod", "pissey", false, { displayName: "Pissey" }),
+    mk("prod", "alice", false, { displayName: "Alice", model: "gpt-5.5" }),
+    mk("prod", "bob", false, { displayName: "Bob" }),
     mk("staging", "main"),
   ];
   test("empty query returns all", () => {
     expect(filterAgents(agents, "")).toHaveLength(3);
   });
   test("matches displayName / id / instance / model, case-insensitive", () => {
-    expect(filterAgents(agents, "OLIV").map((a) => a.agentId)).toEqual([
-      "olivier",
+    expect(filterAgents(agents, "ALIC").map((a) => a.agentId)).toEqual([
+      "alice",
     ]);
     expect(filterAgents(agents, "staging").map((a) => a.agentId)).toEqual([
       "main",
     ]);
     expect(filterAgents(agents, "gpt").map((a) => a.agentId)).toEqual([
-      "olivier",
+      "alice",
     ]);
   });
   test("no match returns empty", () => {

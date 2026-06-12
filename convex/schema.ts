@@ -66,6 +66,19 @@ export const bridgeHealthTarget = v.object({
   errorCount: v.number(),
 });
 
+// One capability target from the bridge /capabilities snapshot, deduped to ONE
+// row per instance (lib/compat.dedupeTargetsByInstance). Non-secret: instance/
+// provider names, gateway version string, capability booleans. Shared by the
+// `bridgeCompat` table and the poller's upsert args (one source of truth, same
+// idiom as bridgeHealthTarget).
+export const bridgeCompatTarget = v.object({
+  instanceName: v.string(),
+  provider: v.string(), // "openclaw" | "hermes" | future — free string (fwd-compat)
+  gatewayVersion: v.union(v.string(), v.null()),
+  capabilities: v.record(v.string(), v.boolean()), // capability -> enabled
+  versionBeyondValidated: v.boolean(), // gateway newer than the validated max
+});
+
 export default defineSchema({
   // @convex-dev/auth's own tables (authAccounts, authSessions, authRefreshTokens,
   // authVerificationCodes, ... AND its own `users` table). Spreading this is
@@ -215,7 +228,7 @@ export default defineSchema({
   // impossible for discovery-capable instances.
   agents: defineTable({
     instanceName: v.string(), // -> instances.name
-    agentId: v.string(), // provider-defined id (e.g. "olivier")
+    agentId: v.string(), // provider-defined id (e.g. "alice")
     displayName: v.optional(v.string()), // identityName
     emoji: v.optional(v.string()),
     model: v.optional(v.string()),
@@ -1056,5 +1069,27 @@ export default defineSchema({
     checkedAt: v.number(), // last poll time (staleness = now - checkedAt)
     lastError: v.optional(v.string()), // poll-level reason code when unreachable
     targets: v.array(bridgeHealthTarget),
+  }).index("by_key", ["key"]),
+
+  // Bridge version & compatibility snapshot (singleton, key "singleton").
+  // Written by the compat poller (compat.pollBridgeCompat) that GETs the
+  // bridge's unauthenticated /capabilities. A SEPARATE table from
+  // `bridgeHealth` on purpose: the health singleton is fully rewritten every
+  // minute (explicit-set upsert clears stale fields), while compat is
+  // slow-moving metadata polled at its own cadence and PRESERVED last-good
+  // across failed polls (serve last-good, like agent discovery). NON-SECRET:
+  // versions, provider names, capability booleans — never tokens/paths.
+  bridgeCompat: defineTable({
+    key: v.string(), // "singleton"
+    reachable: v.boolean(), // could Convex reach the bridge /capabilities this poll?
+    lastError: v.optional(v.string()), // poll-level reason code when unreachable
+    bridgeVersion: v.union(v.string(), v.null()), // bridge package.json version
+    protocolVersion: v.union(v.number(), v.null()), // bridge contract version (2)
+    // CompatManifest stored VERBATIM (forward-compatible), bounded at write time
+    // by lib/compat.boundCompatManifest (plain JSON object, size-capped). null =
+    // LEGACY bridge without the additive fields — the frontend's legacy policy.
+    compat: v.any(),
+    targets: v.array(bridgeCompatTarget), // one per instance (deduped)
+    fetchedAt: v.number(), // last poll time (success OR failure)
   }).index("by_key", ["key"]),
 });

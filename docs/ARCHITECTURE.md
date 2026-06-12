@@ -220,7 +220,7 @@ frontend consomme un contrat stable AI SDK UI.
 - Ne pas reprendre une clé de session simple si elle ne permet pas notre routing
   multi-instance, multi-utilisateur, multi-agent et versionné.
 - Ne pas supposer qu'un seul format de frame OpenClaw sera stable entre les
-  versions ou entre les instances olivier/jerome.
+  versions ou entre les instances alice/bob.
 - Ne pas répliquer la persistence conversationnelle d'OpenClaw dans notre bridge.
 
 #### Traduction en Exigences Pour Notre Bridge
@@ -334,7 +334,7 @@ tests supplémentaires, pas à imposer un contrat frontend.
 ┌──────────────────────────────────────────────────────────────────────┐
 │ OpenClaw Gateway Instances                                           │
 │                                                                      │
-│  Instance olivier        Instance jerome         Future instances     │
+│  Instance alice        Instance bob         Future instances     │
 │  Version A               Version B               Version N            │
 │  Adapter A               Adapter B               Adapter N            │
 └──────────────────────────────────────────────────────────────────────┘
@@ -521,7 +521,7 @@ Il faut donc wrapper OpenClaw au niveau agent, pas au niveau modèle texte.
 ### 9.1 Motivation
 
 Les bumps OpenClaw changent régulièrement la forme ou la sémantique des frames.
-L'expérience OWUI a montré des différences entre instances olivier et jerome
+L'expérience OWUI a montré des différences entre instances alice et bob
 malgré un pipe identique. Le système cible doit permettre:
 
 - un adapter différent par instance;
@@ -602,14 +602,14 @@ Le registry choisit l'adapter selon la configuration d'instance:
 ```json
 {
   "instances": {
-    "olivier": {
-      "baseUrl": "wss://openclaw-olivier.example/gateway",
+    "alice": {
+      "baseUrl": "wss://openclaw-alice.example/gateway",
       "version": "2026.5.19",
       "adapter": "openclaw_2026_5_19",
       "capabilitiesProbe": true
     },
-    "jerome": {
-      "baseUrl": "wss://openclaw-jerome.example/gateway",
+    "bob": {
+      "baseUrl": "wss://openclaw-bob.example/gateway",
       "version": "2026.5.20",
       "adapter": "openclaw_2026_5_20",
       "capabilitiesProbe": true
@@ -640,8 +640,8 @@ Actuellement chaque utilisateur est généralement lié à son propre agent Open
 Exemple conceptuel:
 
 ```text
-olivier@example.com -> instance olivier -> agent olivier
-jerome@example.com  -> instance jerome  -> agent jerome
+alice@example.com -> instance alice -> agent alice
+bob@example.com  -> instance bob  -> agent bob
 ```
 
 ### 10.2 Modèle Cible
@@ -673,22 +673,22 @@ Configuration conceptuelle:
 ```json
 {
   "users": {
-    "olivier@example.com": {
-      "defaultInstance": "olivier",
-      "defaultAgentId": "olivier",
-      "canonicalUserKey": "olivier",
+    "alice@example.com": {
+      "defaultInstance": "alice",
+      "defaultAgentId": "alice",
+      "canonicalUserKey": "alice",
       "routingMode": "dedicated_user_agent",
-      "allowedInstances": ["olivier"],
-      "allowedAgents": ["olivier"],
+      "allowedInstances": ["alice"],
+      "allowedAgents": ["alice"],
       "roles": ["admin", "agent-owner"]
     }
   },
   "projects": {
     "lightrag": {
       "routingMode": "shared_project_agent",
-      "instance": "olivier",
+      "instance": "alice",
       "agentId": "lightrag",
-      "members": ["olivier@example.com", "denis@example.com"]
+      "members": ["alice@example.com", "carol@example.com"]
     }
   }
 }
@@ -872,7 +872,7 @@ Le bridge doit définir un schéma stable. Exemple conceptuel:
 {
   "type": "assistant_message_delta",
   "frontendChatId": "c4796b44-dc2b-4d58-b961-7890fdfbd43e",
-  "openclawSessionKey": "agent:olivier:webchat:chat:olivier:c479...",
+  "openclawSessionKey": "agent:alice:webchat:chat:alice:c479...",
   "runId": "run_...",
   "sequence": 42,
   "text": "Bonjour",
@@ -1366,7 +1366,7 @@ passer par un replay de fixtures avant activation pour un utilisateur réel.
 10. Browser close/reconnect pendant run long.
 11. Prompt envoyé pendant run actif.
 12. Réponse OpenClaw visible dans Control UI mais non reçue par OWUI.
-13. Différence olivier/jerome de format de réponse.
+13. Différence alice/bob de format de réponse.
 14. Image generation qui envoie le résultat après fin apparente du tour.
 15. Session OpenClaw recréée ou canonicalisée différemment.
 
@@ -1532,7 +1532,7 @@ Livrables:
 - session resolve;
 - history fetch;
 - media proxy;
-- replay des fixtures olivier/jerome connues.
+- replay des fixtures alice/bob connues.
 
 Critère de sortie:
 
@@ -1545,7 +1545,7 @@ Livrables:
 - configuration instances;
 - mapping users;
 - adapter registry;
-- tests olivier/jerome;
+- tests alice/bob;
 - capabilities probe.
 
 Critère de sortie:
@@ -1708,7 +1708,7 @@ Le projet peut être considéré prêt pour usage canary si:
 7. Un fichier généré est cliquable sans exposer de path local.
 8. Une compaction ne coupe pas le stream prématurément.
 9. Un run de suivi est affiché dans la même conversation.
-10. Une différence de format olivier/jerome est absorbée par adapter.
+10. Une différence de format alice/bob est absorbée par adapter.
 11. Les traces Opik/Langfuse contiennent les IDs de corrélation.
 12. Les fixtures critiques passent en CI locale.
 13. Un bump OpenClaw peut être validé sur fixtures avant activation.

@@ -2,7 +2,7 @@
 
 > Source : documentation officielle embarquée dans l'image 2026.6.5
 > (`/app/docs`, 672 fichiers, extraite et ratissée le 2026-06-11). Chaque fait
-> cite son fichier. Principe directeur (Olivier) : **ne perdre aucune capacité
+> cite son fichier. Principe directeur (produit) : **ne perdre aucune capacité
 > d'OpenClaw**. Fondation design : `CONF_RESEARCH.md`.
 
 ## 1. La découverte clé : `sessions.patch` est bien plus riche que notre UI-3
@@ -27,7 +27,7 @@ override → défaut per-agent → défaut global → provider. → Notre badge
 « héritée » est exactement le bon modèle ; à généraliser à chaque champ
 (pattern VS Code barre-de-provenance, cf. CONF_RESEARCH).
 
-## 2. Workspace files : RPC officiels (la feature que veut Olivier)
+## 2. Workspace files : RPC officiels (la feature cible)
 
 `agents.files.list(agentId)` / `agents.files.get` / `agents.files.set`
 (« bootstrap files », scope admin pour set) — source `gateway/protocol.md` §agents.

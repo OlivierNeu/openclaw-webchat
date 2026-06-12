@@ -10,7 +10,7 @@ Companion docs (anchors, do not duplicate):
 - `docs/BRIDGE_IMPLEMENTATION_PLAN.md` — P0/P1/P2 decisions; SessionMultiplexer status.
 - `docs/OPENCLAW_CONNECTION_MODEL.md` — Model A; bridge = trusted demux; per-user isolation.
 - `docs/OPENCLAW_RESEARCH.md` — v2026.5.19 RPC + frame shapes (artifacts/attachments/compaction).
-- `docs/PROJECT_STATE.md` — current live ground truth (server.version, frame families, T4 resolved).
+- `PROJECT_STATE.md` (openclaw-notes, private) — current live ground truth (server.version, frame families, T4 resolved).
 
 PRIMARY-SOURCE RULE (inherited): the harness asserts on captured frames + Convex
 state (ground truth). Where the version-tagged docs are silent, the captured
@@ -26,12 +26,12 @@ and already proved F1 green live (2026-06-04). It adds NO new transport.
 | Primitive | Location | Role in the harness |
 | --- | --- | --- |
 | `dev.testSend({text, chatId?})` | `convex/dev.ts:356` | THE stimulus trigger. Mirrors `send.sendMessage` (optimistic user msg → `outbox` → `internal.bridge.dispatch`). Returns `{ ok, chatId, messageId, outboxId }`. Dev-gated (`OPENCLAW_ENABLE_ANON_AUTH=1`). |
-| `dev.routeUser({instanceName, gatewayUrl, agentId, canonical, email?})` | `convex/dev.ts:284` | One-time wiring per run: sets the profile override so `bridge.dispatch` resolves a non-null target (→ `olivier` instance). Idempotent upsert. |
+| `dev.routeUser({instanceName, gatewayUrl, agentId, canonical, email?})` | `convex/dev.ts:284` | One-time wiring per run: sets the profile override so `bridge.dispatch` resolves a non-null target (→ `alice` instance). Idempotent upsert. |
 | `dev.reset()` | `convex/dev.ts:414` | Wipe app tables between runs for a clean oracle (NOT auth tables). |
 | `dev.searchProbe({term})` | `convex/dev.ts:244` | Confirms the persisted text reached the search index (an extra oracle for "did it land in `messages.text`"). |
 | `bridge.dispatch` → `POST /send` | `convex/bridge.ts`, `bridge/src/server.ts:116` | The dispatch path the trigger fans into. Body `{chatId, openclawChatId, text, clientMessageId, attachments}`. |
 | Version oracle | `bridge/src/providers/openclaw/openclaw-client.ts:253-265` | hello-ok `frame.payload.server.version` (= `"2026.5.19"`), logged under `BRIDGE_DEBUG=1` as `connect hello-ok`. |
-| Raw frame capture | `openclaw-client.ts:325` `dbg("frame <-", clip(frame))` | Every inbound non-ack frame → stdout when `BRIDGE_DEBUG=1`. Reqs log method+sessionKey ONLY (no PHI); inbound frames are raw (dev-only, olivier instance). |
+| Raw frame capture | `openclaw-client.ts:325` `dbg("frame <-", clip(frame))` | Every inbound non-ack frame → stdout when `BRIDGE_DEBUG=1`. Reqs log method+sessionKey ONLY (no PHI); inbound frames are raw (dev-only, alice instance). |
 | Isolation boundary | `bridge/src/providers/openclaw/multiplex.ts` | Routes each frame by `payload.sessionKey` to exactly one Normalizer. THE per-user isolation layer the parallel/multi-user scenarios stress. |
 | sessionKey grammar | `bridge/src/providers/openclaw/session-keys.ts` | `agent:<agentId>:webchat:chat:<canonical>:<chatId>` — CONFIRMED accepted live (T4 resolved). |
 | Normalized event vocabulary | `bridge/src/core/events.ts` | `message.delta` / `message.snapshot` / `message.final` / `run.status` / `tool.status` / `media`. The harness asserts on the Convex projection of these, not the events directly. |
@@ -51,9 +51,9 @@ gateway and Convex, spaced out, with long timeouts.
 
 ```
 bridge/live/
-  README.md                  # how to run; safety rails (olivier-only); env needed
+  README.md                  # how to run; safety rails (alice-only); env needed
   runner.ts                  # the orchestrator (CLI entry): npm run live  [-- --feature F1 --version 2026.5.19]
-  config.ts                  # loads LIVE_* env; asserts instance === olivier (hard refusal otherwise)
+  config.ts                  # loads LIVE_* env; asserts instance === alice (hard refusal otherwise)
   oracle/
     convex-poll.ts           # poll Convex for the expected final state (uses runOneoffQuery / dev queries)
     assertions.ts            # reusable matchers (finalStatus, hasMessagePart, deltaMonotonic, noCrossTalk…)
@@ -164,9 +164,9 @@ legend marks it distinctly (not a regression — a not-yet-built feature).
 ```
 1. loadLiveConfig()
    - read LIVE_* env (Convex URL + dev key, bridge base URL, the instance name).
-   - HARD REFUSAL: if instanceName !== "olivier" (or gatewayUrl !== olivier's),
-     throw before any send. (Spec invariant: live tests hit ONLY the olivier dev
-     instance, NEVER jerome.)
+   - HARD REFUSAL: if instanceName !== "alice" (or gatewayUrl !== alice's),
+     throw before any send. (Spec invariant: live tests hit ONLY the alice dev
+     instance, NEVER bob.)
 
 2. ensureBridgeUp()
    - The runner OWNS a freshly-spawned bridge per run (BRIDGE_DEBUG=1, stdout
@@ -181,8 +181,8 @@ legend marks it distinctly (not a regression — a not-yet-built feature).
      there — flagged in §11.) The gateway connect is LAZY (on first send).
 
 3. ensureRouted()
-   - dev.routeUser({ instanceName:"admin", gatewayUrl:<olivier>, agentId:"olivier",
-     canonical:"olivier" }) so dispatch resolves a target. (admin == olivier's group.)
+   - dev.routeUser({ instanceName:"admin", gatewayUrl:<alice>, agentId:"alice",
+     canonical:"alice" }) so dispatch resolves a target. (admin == alice's group.)
    - For F9: routeUser a SECOND profile (email-scoped) → second owner.
 
 4. readVersionOracle()
@@ -265,7 +265,7 @@ fixtures still green.**
 Two layers — because the suite spans live behavior AND a frozen protocol surface:
 
 **Layer A — live oracle (this version):** every registry feature must reach its
-`Oracle` against the live olivier gateway at the CURRENT server.version. New
+`Oracle` against the live alice gateway at the CURRENT server.version. New
 divergences (a frame family/field not seen before) are CAPTURED into the
 version's fixture dir and surfaced; they do NOT silently pass — a NEW field that
 breaks the normalizer fails the feature until the normalizer is extended.
@@ -310,21 +310,21 @@ No new bridge instrumentation. `openclaw-client.ts` already logs:
 bridge, or tails its log file), filters lines beginning `[oc] frame <-`, and
 parses the JSON. `clip()` truncates at 1200 chars; for fixtures we want FULL
 frames, so the ONE optional bridge tweak is a `BRIDGE_DEBUG_FULL=1` that skips
-`clip` for `frame <-` (kept dev-only, olivier-only). Without it, the harness
+`clip` for `frame <-` (kept dev-only, alice-only). Without it, the harness
 still works on the clipped frames for small replies; large media frames need the
 full mode.
 
 Each captured frame is tagged with the active feature's window and written as
 one JSON object per line (`frames.jsonl`). PHI note: these are dev-only logs on
-the olivier instance — the documented BRIDGE_DEBUG exception to the
-never-log-content rule. Fixtures live in the repo for the olivier dev instance
-ONLY; the README warns never to capture against jerome.
+the alice instance — the documented BRIDGE_DEBUG exception to the
+never-log-content rule. Fixtures live in the repo for the alice dev instance
+ONLY; the README warns never to capture against bob.
 
 `diagnosis.json` (per feature, per run): parsed summary —
 ```json
 { "version": "2026.5.19", "feature": "F1",
   "frameFamilies": ["chat","agent","health"],
-  "runIds": ["webchat-3f2a…"], "sessionKeys": ["agent:olivier:webchat:chat:olivier:<id>"],
+  "runIds": ["webchat-3f2a…"], "sessionKeys": ["agent:alice:webchat:chat:alice:<id>"],
   "lifecyclePhases": ["start","end"], "livenessStates": ["working"],
   "firstDeltaMs": 412, "finalMs": 2870,
   "divergences": [] }
@@ -365,7 +365,7 @@ on where each reply LANDED, which is stable.
 
 **F8 — one user, parallel conversations:**
 1. Create two chats A and B for the same routed user (distinct `chatId` →
-   distinct `sessionKey`: `…:chat:olivier:A` vs `…:chat:olivier:B`).
+   distinct `sessionKey`: `…:chat:alice:A` vs `…:chat:alice:B`).
 2. Fire `testSend({chatId:A, text:"<marker-A>"})` and
    `testSend({chatId:B, text:"<marker-B>"})` close together (small or zero
    `preDelayMs`) to FORCE concurrent in-flight turns on ONE operator socket —
@@ -460,9 +460,9 @@ no `git push` (spec invariant + global rule). The README states this explicitly.
 cd bridge && npm run build && BRIDGE_DEBUG=1 BRIDGE_DEBUG_FULL=1 \
   node --env-file=.env dist/index.js          # listens :8787
 
-# 1. wire routing once (olivier instance ONLY)
+# 1. wire routing once (alice instance ONLY)
 CONVEX_AGENT_MODE=anonymous npx convex run dev:routeUser \
-  '{"instanceName":"admin","gatewayUrl":"wss://gateway.lacneu.com","agentId":"olivier","canonical":"olivier"}'
+  '{"instanceName":"admin","gatewayUrl":"wss://gateway.example.org","agentId":"alice","canonical":"alice"}'
 
 # 2. full live matrix (all features, current version, + Layer-B replay of priors)
 cd bridge && npm run live

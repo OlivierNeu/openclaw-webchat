@@ -221,8 +221,8 @@ export const listChats = query({
   },
 });
 
-// Delete a message (owner-scoped) with the TRUNCATE-FORWARD semantics Olivier
-// asked for, PLUS the gateway realignment the trust requirement demands:
+// Delete a message (owner-scoped) with the TRUNCATE-FORWARD semantics the product
+// requires, PLUS the gateway realignment the trust requirement demands:
 //   - User message deleted      -> delete it + ALL following turns (rewind).
 //   - Assistant message deleted -> delete it + ALL following, then RE-RUN the
 //     now-last user message (regenerate). For the LAST assistant turn (the common

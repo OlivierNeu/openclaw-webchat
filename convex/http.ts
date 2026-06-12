@@ -556,6 +556,62 @@ http.route({
   }),
 });
 
+// Bridge version & compatibility summary (key-authed): "what does the bridge
+// support, what are my instances running". Mirrors /api/v1/traces EXACTLY:
+// authenticate -> require bridge.read -> record an `api.call` trace -> return.
+// 401 on a bad/disabled/expired key, 403 when the role lacks bridge.read.
+http.route({
+  path: "/api/v1/compat",
+  method: "GET",
+  handler: httpAction(async (ctx, request) => {
+    const startedAt = Date.now();
+
+    const authResult = await authenticateApiKey(ctx, request);
+    if (!authResult.ok) {
+      return apiJson({ ok: false, error: authResult.error }, authResult.status);
+    }
+    const { principal } = authResult;
+
+    if (!principalHasPermission(principal, PERMISSIONS.BRIDGE_READ)) {
+      // Attribute the denied attempt (no PHI) before returning 403.
+      await ctx.runMutation(internal.observability.recordEvent, {
+        kind: "api.call",
+        direction: "inbound",
+        principalType: "service",
+        principalId: principal.id,
+        roleKey: principal.roleKey,
+        route: "/api/v1/compat",
+        method: "GET",
+        status: 403,
+        latencyMs: Date.now() - startedAt,
+      });
+      return apiJson(
+        { ok: false, error: "missing permission: bridge.read" },
+        403,
+      );
+    }
+
+    // The internal query is called only AFTER the permission check (httpActions
+    // cannot run the check themselves). Pure summary of the singleton snapshot.
+    const summary = await ctx.runQuery(internal.compat.compatInternal, {});
+
+    // Record the successful call (metadata only -> redacted by the writer).
+    await ctx.runMutation(internal.observability.recordEvent, {
+      kind: "api.call",
+      direction: "inbound",
+      principalType: "service",
+      principalId: principal.id,
+      roleKey: principal.roleKey,
+      route: "/api/v1/compat",
+      method: "GET",
+      status: 200,
+      latencyMs: Date.now() - startedAt,
+    });
+
+    return apiJson({ ok: true, ...summary });
+  }),
+});
+
 // Heartbeat summary (key-authed) so an OpenClaw heartbeat learns whether
 // anomalies appeared -> can self-repair. Mirrors /api/v1/traces:
 // authenticate -> require anomalies.read -> record an `api.call` trace -> return.

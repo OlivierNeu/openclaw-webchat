@@ -150,14 +150,14 @@ describe("groups CRUD + cascade", () => {
     const adminId = await seedAdmin(t);
     const memberId = await seedUser(t, "member");
     const as = t.withIdentity({ subject: `${adminId}|session` });
-    await seedLiveAgent(t, "prod", "olivier");
+    await seedLiveAgent(t, "prod", "alice");
 
     const groupId = await as.mutation(api.groups.createGroup, { name: "G" });
     await as.mutation(api.groups.addMember, { groupId, userId: memberId });
     await as.mutation(api.groups.assignAgentToGroup, {
       groupId,
       instanceName: "prod",
-      agentId: "olivier",
+      agentId: "alice",
     });
     expect((await rowsOf(t, "groupMembers")).length).toBe(1);
     expect((await rowsOf(t, "groupAgents")).length).toBe(1);
@@ -231,16 +231,16 @@ describe("members + group agents", () => {
     ).rejects.toThrow(/not assignable/);
 
     // (c) a discovered + present agent → accepted; second call dedups.
-    await seedLiveAgent(t, "prod", "olivier");
+    await seedLiveAgent(t, "prod", "alice");
     await as.mutation(api.groups.assignAgentToGroup, {
       groupId,
       instanceName: "prod",
-      agentId: "olivier",
+      agentId: "alice",
     });
     await as.mutation(api.groups.assignAgentToGroup, {
       groupId,
       instanceName: "prod",
-      agentId: "olivier",
+      agentId: "alice",
     });
     expect((await rowsOf(t, "groupAgents")).length).toBe(1);
   });
@@ -641,12 +641,12 @@ describe("agents union via groups", () => {
     // still serves the binding with no rebind.
     const t = convexTest(schema, modules);
     const userId = await seedUser(t, "alice");
-    await seedLiveAgent(t, "prod", "olivier");
+    await seedLiveAgent(t, "prod", "alice");
     await t.run((ctx) =>
       ctx.db.insert("userAgents", {
         userId,
         instanceName: "prod",
-        agentId: "olivier",
+        agentId: "alice",
         isDefault: true,
         source: "manual" as const,
         createdAt: 1,
@@ -657,14 +657,14 @@ describe("agents union via groups", () => {
         userId,
         updatedAt: 1,
         instanceName: "prod",
-        agentId: "olivier",
+        agentId: "alice",
       }),
     );
     const r = await t.query(internal.bridge.getChatRouting, {
       chatId,
       userId: userId as never,
     });
-    expect(r?.target?.agentId).toBe("olivier");
+    expect(r?.target?.agentId).toBe("alice");
     expect(r?.target?.source).toBe("chat-binding");
     expect(r?.rebind).toBeNull();
   });
@@ -766,7 +766,7 @@ describe("deleteInstance purges groupAgents", () => {
       await ctx.db.insert("groupAgents", {
         groupId,
         instanceName: "prod",
-        agentId: "olivier",
+        agentId: "alice",
         createdAt: 1,
       });
       // Survivor control: a row on a DIFFERENT instance that must remain.

@@ -18,6 +18,8 @@ import {
   type SessionSettingsView,
   type SpeedOption,
 } from "./sessionKnobs";
+import { knobRowVisibility } from "./capabilities";
+import { useInstanceCapabilities } from "./useInstanceCapabilities";
 
 // Shared session-knob rows (design amendment A11): the SAME components render
 // a knob in the composer "Advanced" popover AND in the session panel Sheet: one
@@ -70,7 +72,10 @@ export function useSessionKnobs(chatId: ConvexId<"chats">) {
   return { apply, pending, error };
 }
 
-/** One labelled setting row: provenance gutter + badge/↺ + inline states. */
+/** One labelled setting row: provenance gutter + badge/↺ + inline states.
+ *  `resettable` (default true) gates the ↺ affordance on the gateway's
+ *  knobUnset capability: an overridden row on a gateway without unset support
+ *  keeps its provenance gutter but offers no reset it cannot honor. */
 export function KnobRow({
   label,
   overridden,
@@ -80,6 +85,7 @@ export function KnobRow({
   onRetry,
   help,
   children,
+  resettable = true,
 }: {
   label: string;
   overridden: boolean;
@@ -89,6 +95,7 @@ export function KnobRow({
   onRetry: () => void;
   help?: string;
   children: ReactNode;
+  resettable?: boolean;
 }) {
   return (
     <div className={`oc-spanel__row${overridden ? " is-overridden" : ""}`}>
@@ -101,15 +108,17 @@ export function KnobRow({
             aria-label={m.conf_applying()}
           />
         ) : overridden ? (
-          <button
-            type="button"
-            className="oc-spanel__reset"
-            title={m.conf_reset_to_inherited()}
-            aria-label={m.conf_reset_to_inherited()}
-            onClick={onReset}
-          >
-            <RotateCcw size={12} aria-hidden />
-          </button>
+          resettable ? (
+            <button
+              type="button"
+              className="oc-spanel__reset"
+              title={m.conf_reset_to_inherited()}
+              aria-label={m.conf_reset_to_inherited()}
+              onClick={onReset}
+            >
+              <RotateCcw size={12} aria-hidden />
+            </button>
+          ) : null
         ) : (
           <span className="oc-spanel__badge">{m.conf_badge_inherited()}</span>
         )}
@@ -203,6 +212,12 @@ function KnobSelect({
  * implementation mounted by BOTH the "Advanced" popover and the session panel.
  * Current values come from sessionMeta (gateway truth) for model/thinking and
  * from the intent for speed (no fastMode echo in sessionMeta).
+ *
+ * Capability-gated (VCOMPAT-C): each row renders only when the chat's
+ * instance supports its knob (knobRowVisibility). Popover knobs are HIDDEN
+ * (not disabled) when unsupported — the popover stays lean. While the compat
+ * query loads, only the LEGACY set (model/thinking) shows, so a control can
+ * appear when the snapshot lands but never flashes and disappears.
  */
 export function SessionKnobsGroup({
   chatId,
@@ -214,6 +229,7 @@ export function SessionKnobsGroup({
   settings: SessionSettingsView;
 }) {
   const { apply, pending, error } = useSessionKnobs(chatId);
+  const { can } = useInstanceCapabilities(chatId);
   const busy = pending !== null;
   const retry = useCallback(() => {
     if (error) void apply(error.field, error.value);
@@ -222,10 +238,14 @@ export function SessionKnobsGroup({
   const levels = sm.thinkingLevels ?? [];
   const models = sm.availableModels ?? [];
   const speedValue = speedSelection(settings);
+  const vis = knobRowVisibility(can, {
+    hasModels: models.length > 0,
+    hasLevels: levels.length > 0,
+  });
 
   return (
     <>
-      {models.length > 0 ? (
+      {vis.model ? (
         <KnobRow
           label={m.chat_model()}
           overridden={isOverridden(settings, "model")}
@@ -233,6 +253,7 @@ export function SessionKnobsGroup({
           pending={pending === "model"}
           error={error?.field === "model"}
           onRetry={retry}
+          resettable={vis.reset}
         >
           {models.length <= 4 ? (
             <KnobSegmented
@@ -252,7 +273,7 @@ export function SessionKnobsGroup({
           )}
         </KnobRow>
       ) : null}
-      {levels.length > 0 ? (
+      {vis.thinking ? (
         <KnobRow
           label={m.conf_thinking_label()}
           overridden={isOverridden(settings, "thinkingLevel")}
@@ -260,6 +281,7 @@ export function SessionKnobsGroup({
           pending={pending === "thinkingLevel"}
           error={error?.field === "thinkingLevel"}
           onRetry={retry}
+          resettable={vis.reset}
         >
           <KnobSegmented
             options={levels.map((l) => ({
@@ -273,26 +295,29 @@ export function SessionKnobsGroup({
           />
         </KnobRow>
       ) : null}
-      <KnobRow
-        label={m.conf_speed_label()}
-        overridden={isOverridden(settings, "fastMode")}
-        onReset={() => void apply("fastMode", null)}
-        pending={pending === "fastMode"}
-        error={error?.field === "fastMode"}
-        onRetry={retry}
-      >
-        <KnobSegmented
-          options={SPEED_OPTIONS.map((o) => ({
-            id: o,
-            label: speedOptionLabel(o),
-          }))}
-          value={speedValue}
-          onChange={(id) =>
-            void apply("fastMode", speedKnobValue(id as SpeedOption))
-          }
-          disabled={busy}
-        />
-      </KnobRow>
+      {vis.speed ? (
+        <KnobRow
+          label={m.conf_speed_label()}
+          overridden={isOverridden(settings, "fastMode")}
+          onReset={() => void apply("fastMode", null)}
+          pending={pending === "fastMode"}
+          error={error?.field === "fastMode"}
+          onRetry={retry}
+          resettable={vis.reset}
+        >
+          <KnobSegmented
+            options={SPEED_OPTIONS.map((o) => ({
+              id: o,
+              label: speedOptionLabel(o),
+            }))}
+            value={speedValue}
+            onChange={(id) =>
+              void apply("fastMode", speedKnobValue(id as SpeedOption))
+            }
+            disabled={busy}
+          />
+        </KnobRow>
+      ) : null}
     </>
   );
 }

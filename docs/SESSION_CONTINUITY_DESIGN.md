@@ -326,7 +326,7 @@ it connects over **wss**, already a trusted transport.)
    the send still goes through WITHOUT re-hydration (non-fatal), never a 5xx to the user.
 
 **Record** the run (version, pass/fail per case, any nonce that leaked) in
-`docs/OPENCLAW_VERSION_STABILITY.md`. Only after cases 1–3 pass on the NAS is
+`OPENCLAW_VERSION_STABILITY.md` (openclaw-notes, private). Only after cases 1–3 pass on the NAS is
 session-continuity "trustable" end-to-end; until then the local status is
 "mechanism + decision proven, outcome pending NAS."
 

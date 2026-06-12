@@ -3,11 +3,12 @@
 // provider's profile() in auth.ts is the first line that rejects at the OAuth
 // flow. Pure helpers (no ctx) so both can share them.
 //
-// FAIL-CLOSED: when AUTH_ALLOWED_EMAIL_DOMAINS is unset, the built-in operator
-// domains apply — a missing/empty env never opens sign-in to everyone. To change
-// the allowlist on a deployment:  npx convex env set AUTH_ALLOWED_EMAIL_DOMAINS "a.com,b.com"
+// FAIL-CLOSED: when AUTH_ALLOWED_EMAIL_DOMAINS is unset, the built-in placeholder
+// domain applies — a missing/empty env never opens sign-in to everyone. Every
+// deployment MUST set its own allowlist:
+//   npx convex env set AUTH_ALLOWED_EMAIL_DOMAINS "a.com,b.com"
 
-const DEFAULT_ALLOWED = "lacneu.com,ataraxis-coaching.com";
+const DEFAULT_ALLOWED = "example.com";
 
 /** Resolved, normalized allowlist (lowercased, trimmed, non-empty). */
 export function allowedEmailDomains(): string[] {
@@ -19,7 +20,7 @@ export function allowedEmailDomains(): string[] {
 
 /**
  * Is this email in an allowed domain? EXACT match on the segment after the LAST
- * `@` (so `evil-lacneu.com` and `lacneu.com.evil.com` are rejected — never use
+ * `@` (so `evil-example.com` and `example.com.evil.com` are rejected — never use
  * endsWith). Empty/missing email → false.
  */
 export function emailDomainAllowed(email: string | undefined | null): boolean {

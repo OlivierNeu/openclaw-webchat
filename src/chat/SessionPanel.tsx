@@ -16,6 +16,7 @@ import { api } from "./convexApi";
 import type { Id } from "./convexApi";
 import type { ConvexId } from "./convexTypes";
 import { SessionKnobsGroup } from "./KnobRow";
+import { useInstanceCapabilities } from "./useInstanceCapabilities";
 import {
   agentLine,
   contextLine,
@@ -101,6 +102,10 @@ export function SessionPanel({
   );
   const sm = (meta?.sessionMeta ?? null) as SessionMetaView | null;
   const settings = (meta?.sessionSettings ?? null) as SessionSettingsView;
+  // Capability gate (VCOMPAT-C): "Compacter" is HIDDEN when the chat's
+  // instance lacks sessionCompact (legacy policy while loading/closed — the
+  // action can appear once the snapshot lands, never flash and vanish).
+  const { can } = useInstanceCapabilities(open ? chatId : null);
 
   const confirm = useConfirm();
   const compactAction = useAction(api.agentFiles.compactSession);
@@ -232,12 +237,14 @@ export function SessionPanel({
         </div>
         <SheetFooter className="oc-spanel__actions">
           <h3 className="oc-spanel__cat">{m.spanel_section_actions()}</h3>
-          <ActionRow
-            label={m.spanel_compact()}
-            state={compactState}
-            onClick={() => void onCompact()}
-            onRetry={() => void runCompact()}
-          />
+          {can("sessionCompact") ? (
+            <ActionRow
+              label={m.spanel_compact()}
+              state={compactState}
+              onClick={() => void onCompact()}
+              onRetry={() => void runCompact()}
+            />
+          ) : null}
           <ActionRow
             label={m.spanel_reset()}
             state={resetState}

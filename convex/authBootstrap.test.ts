@@ -29,7 +29,7 @@ describe("bootstrap resolves the email from the users row (JWT has no email clai
     prevAnon = process.env.OPENCLAW_ENABLE_ANON_AUTH;
     prevDomains = process.env.AUTH_ALLOWED_EMAIL_DOMAINS;
     delete process.env.OPENCLAW_ENABLE_ANON_AUTH; // anon OFF = production posture
-    process.env.AUTH_ALLOWED_EMAIL_DOMAINS = "lacneu.com,ataraxis-coaching.com";
+    process.env.AUTH_ALLOWED_EMAIL_DOMAINS = "example.com,example.org";
   });
   afterEach(() => {
     if (prevAnon === undefined) delete process.env.OPENCLAW_ENABLE_ANON_AUTH;
@@ -42,7 +42,7 @@ describe("bootstrap resolves the email from the users row (JWT has no email clai
     const t = convexTest(schema, modules);
     // A real OAuth users row carries the verified email; the JWT identity does NOT.
     const userId = await t.run(async (ctx) =>
-      ctx.db.insert("users", { email: "olivier@lacneu.com", name: "Olivier Neu" }),
+      ctx.db.insert("users", { email: "alice@example.com", name: "Alice Example" }),
     );
     const as = t.withIdentity({ subject: `${userId}|session` }); // no email claim
 
@@ -55,7 +55,7 @@ describe("bootstrap resolves the email from the users row (JWT has no email clai
         .withIndex("by_user", (q) => q.eq("userId", userId))
         .unique();
       expect(profile?.role).toBe("admin");
-      expect(profile?.email).toBe("olivier@lacneu.com");
+      expect(profile?.email).toBe("alice@example.com");
       const meta = await ctx.db.query("appMeta").first();
       expect(meta?.adminAssigned).toBe(true);
     });
@@ -103,14 +103,14 @@ describe("bootstrap resolves the email from the users row (JWT has no email clai
     delete process.env.OPENCLAW_ENABLE_ANON_AUTH;
     const t = convexTest(schema, modules);
     const firstId = await t.run(async (ctx) =>
-      ctx.db.insert("users", { email: "admin@lacneu.com" }),
+      ctx.db.insert("users", { email: "admin@example.com" }),
     );
     const first = await t
       .withIdentity({ subject: `${firstId}|session` })
       .mutation(api.me.bootstrap, {});
     expect(first.role).toBe("admin");
     const secondId = await t.run(async (ctx) =>
-      ctx.db.insert("users", { email: "second@lacneu.com" }),
+      ctx.db.insert("users", { email: "second@example.com" }),
     );
     const second = await t
       .withIdentity({ subject: `${secondId}|session` })

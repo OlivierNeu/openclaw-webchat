@@ -24,19 +24,28 @@ function assertDev() {
   }
 }
 
-// SAFETY (red-team must-fix): live tests hit ONLY the olivier DEV instance —
-// NEVER jerome ("family"/ataraxis, the protected instance). Code-enforced, not
-// just prose: routeUser + testSend refuse any instance outside this allowlist
-// so no autonomous live test can reach the protected tenant. "admin" is the
-// instance's pre-multi-agent name, kept for old bindings; "olivier" is its
-// current name (BRIDGE_INSTANCE_NAME since the multi-agent redesign).
-const DEV_LIVE_ALLOWED_INSTANCES = new Set(["admin", "olivier"]);
+// SAFETY (red-team must-fix): live tests hit ONLY the designated dev bench
+// instance(s) — NEVER a protected tenant. Code-enforced, not just prose:
+// routeUser + testSend refuse any instance outside this allowlist so no
+// autonomous live test can reach a protected tenant. The allowlist is read
+// from DEV_LIVE_INSTANCES (CSV of instance names); it defaults to "admin",
+// the historical pre-multi-agent instance name kept for old bindings.
+function devLiveAllowedInstances(): Set<string> {
+  const csv = process.env.DEV_LIVE_INSTANCES ?? "admin";
+  return new Set(
+    csv
+      .split(",")
+      .map((s) => s.trim())
+      .filter(Boolean),
+  );
+}
 function assertDevInstance(instanceName: string): void {
-  if (!DEV_LIVE_ALLOWED_INSTANCES.has(instanceName)) {
+  const allowed = devLiveAllowedInstances();
+  if (!allowed.has(instanceName)) {
     throw new Error(
-      `dev live ops restricted to [${[...DEV_LIVE_ALLOWED_INSTANCES].join(
+      `dev live ops restricted to [${[...allowed].join(
         ", ",
-      )}] — refusing "${instanceName}" (never touch jerome/family)`,
+      )}] — refusing "${instanceName}" (never touch protected tenants)`,
     );
   }
 }
@@ -183,11 +192,11 @@ export const seedChat = mutation({
         "",
         "- Dossier : `OpenClaw/Hindsight`",
         "- Fichier : `HINDSIGHT-GUIDE.pdf`",
-        "- Lien : [drive.google.com/file/d/1cM8…](https://drive.google.com/file/d/1cM8dJuLJxm4dgBvZaBopvfSPlsAuPB07/view)",
+        "- Lien : [drive.google.com/file/d/EXAMPLE…](https://drive.google.com/file/d/EXAMPLE_FILE_ID/view)",
         "",
         "| Détail | Valeur |",
         "| --- | --- |",
-        "| Compte | `olivier@lacneu.com` |",
+        "| Compte | `alice@example.com` |",
         "| Taille | 542 235 octets |",
         "",
         "À partir de maintenant, à chaque modification du PDF je mettrai à jour **ce même fichier Drive** avec `--replace` :",
@@ -380,7 +389,7 @@ export const searchProbe = query({
  * assigns it as the default agent (userAgents) to the matching profile(s).
  *
  *   npx convex run dev:routeUser \
- *     '{"instanceName":"admin","gatewayUrl":"wss://gateway.lacneu.com","agentId":"olivier","canonical":"olivier"}'
+ *     '{"instanceName":"admin","gatewayUrl":"wss://gateway.example.org","agentId":"alice","canonical":"alice"}'
  *
  * With no `email`, routes EVERY active (user|admin) profile — foolproof on a
  * single-operator dev box where several stale sessions may exist. Pass `email`
@@ -396,7 +405,7 @@ export const routeUser = mutation({
   },
   handler: async (ctx, { instanceName, gatewayUrl, agentId, canonical, email }) => {
     assertDev();
-    assertDevInstance(instanceName); // never route a profile to jerome/family
+    assertDevInstance(instanceName); // never route a profile to a protected tenant
 
     const now = Date.now();
     // Upsert the non-secret instance row (kind = openclaw for the dev gateway).
@@ -536,7 +545,7 @@ export const testSend = mutation({
     // else the user's DEFAULT userAgents row (NOT necessarily `.first()`), and on
     // an instance that may differ from `.first()`. Gating `.first()` could thus
     // allowlist one instance while the send actually reaches another (e.g.
-    // jerome/family) (Codex P2). Resolve the same way dispatch will, then assert
+    // a protected tenant) (Codex P2). Resolve the same way dispatch will, then
     // THAT instance. For a fresh (no chatId) send the new chat is unbound, so a
     // synthetic unbound chat resolves to the same default the real one will.
     const resolveChat: Doc<"chats"> =

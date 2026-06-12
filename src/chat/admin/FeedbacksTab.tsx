@@ -9,7 +9,7 @@ import { m } from "@/paraglide/messages.js";
 
 // Increment B — admin administration of recorded feedback (Settings › Feedbacks).
 //
-// SPLIT BY SENSITIVITY (Olivier's rule): the table shows METADATA only (no
+// SPLIT BY SENSITIVITY (product rule): the table shows METADATA only (no
 // message content), so listing is unaudited like the audit/trace logs. Opening a
 // row's DETAIL calls `readSnapshot` — a MUTATION that is gated by
 // `traces.read.content` and AUDITS the cross-user content access — so every time

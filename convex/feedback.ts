@@ -295,7 +295,7 @@ export const myReportedMessageIds = query({
 // ===========================================================================
 // Increment B — ADMIN administration of recorded feedback (Settings tab).
 //
-// Split by sensitivity (Olivier's rule: admin has no privacy constraint, but
+// Split by sensitivity (product rule: admin has no privacy constraint, but
 // every admin view of ANOTHER user's CONTENT must be audited):
 //   - listForAdmin  = METADATA only (category, who, when, fidelity verdict). No
 //     message content → no per-row audit, like the traces/audit log lists.

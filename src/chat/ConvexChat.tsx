@@ -298,7 +298,7 @@ function ThreadAnnouncer({ chatId }: { chatId: ConvexId<"chats"> }) {
 
 // Empty-state (CHAT_UX_DESIGN Part 3): capability transparency + a few
 // suggested prompts for the "vague prompt" conversation type. Each suggestion
-// Minimal welcome — a calm avatar + prompt, NO suggestion cards (per Olivier's
+// Minimal welcome — a calm avatar + prompt, NO suggestion cards (per product
 // feedback: a new chat should not push canned suggestions).
 function ThreadEmptyState() {
   return (
@@ -941,7 +941,7 @@ function Composer({
   // Voice-input feature flag: resolved via the UI-preferences module (gated by
   // system enablement + the user's override). The mic only renders when true.
   const voiceInput = useUiPrefs().voiceInput;
-  // Unified composer card (per Olivier's reference): the input sits ON TOP, with
+  // Unified composer card (per the design reference): the input sits ON TOP, with
   // a single action bar BELOW it — attach (+) and the tools toggle on the left,
   // the circular send (or stop while running) on the right. The CARD owns the
   // border + focus ring (`:focus-within`), so focusing the textarea never shifts

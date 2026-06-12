@@ -14,7 +14,7 @@
 >   v2026.5.19 protocol/fixtures, Hermes API surface) and the **HONESTY** record
 >   of what is doc-confirmed vs fixture-only vs NOT FOUND. This plan never
 >   invents a provider surface that doc does not list as confirmed.
-> - `docs/PROJECT_STATE.md` §5.2 — the bridge worker is the major un-built
+> - `PROJECT_STATE.md` §5.2 (openclaw-notes, private) — the bridge worker is the major un-built
 >   milestone; this plan supersedes that one-paragraph sketch with the modular
 >   multi-provider/multi-tenant target.
 >
