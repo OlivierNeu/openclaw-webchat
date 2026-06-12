@@ -59,7 +59,6 @@ const TAB_I18N: Partial<Record<Tab, () => string>> = {
   access: () => m.settings_tab_access(),
   integrations: () => m.settings_tab_integrations(),
   theme: () => m.appearance_tab_label(),
-  uiprefs: () => m.uiprefs_tab_label(),
   audit: () => m.settings_tab_audit(),
   feedbacks: () => m.settings_tab_feedbacks(),
 };

@@ -83,7 +83,6 @@ export const TABS = [
   "preferences",
   "integrations",
   "theme",
-  "uiprefs",
   "chatDefaults",
   "audit",
   "feedbacks",
@@ -99,7 +98,6 @@ export const PARAMLESS_TABS = [
   "instances",
   "bridge",
   "theme",
-  "uiprefs",
   "feedbacks",
   "files",
   "agentFiles",
@@ -120,7 +118,6 @@ export const TAB_LABELS: Partial<Record<Tab, string>> = {
   anomalies: "Anomalies",
   integrations: "Intégrations",
   feedbacks: "Feedbacks",
-  uiprefs: "Préférences UI",
   bridge: "Bridge",
   files: "Fichiers", // FR fallback; the nav renders the i18n label (m.files_tab_label)
   agentFiles: "Fichiers d'agent", // FR fallback; nav renders m.afiles_tab_label
@@ -168,7 +165,6 @@ export const TAB_PERMISSION: Record<Tab, string> = {
   // / language) are gated INSIDE the component on me.role==="admin", and the
   // server independently gates each admin mutation on CHARTS_MANAGE / admin.
   theme: "chats.read",
-  uiprefs: "admin.manage",
   // Global chat defaults (CONF-4d) write the gateway's openclaw.json — strictly
   // admin (the agentFiles actions re-check admin.manage server-side).
   chatDefaults: "admin.manage",
@@ -206,6 +202,16 @@ export function tabFromPathname(pathname: string): Tab | undefined {
   const seg = pathname.split("/")[2];
   return (TABS as readonly string[]).includes(seg) ? (seg as Tab) : undefined;
 }
+
+// RETIRED tab keys -> the live tab that absorbed them. The router mounts one
+// static redirect route per entry so old bookmarks (/settings/uiprefs) keep
+// working instead of 404ing. Sources must NOT be in TABS; targets must be
+// (tabAccess.test.ts pins both).
+export const SETTINGS_TAB_REDIRECTS = {
+  // The admin "Préférences UI" governance tab merged into Preferences (per-row
+  // governance controls behind the admin-only "manage defaults & locks" mode).
+  uiprefs: "preferences",
+} as const satisfies Record<string, Tab>;
 
 // Per-row editor for the observability tabs an admin grants to a non-admin user.
 // A dropdown of checkboxes (the GRANTABLE_TABS); toggling persists immediately

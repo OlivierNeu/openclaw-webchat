@@ -30,6 +30,16 @@ describe("mergeOrder", () => {
     expect(new Set(out)).toEqual(new Set(TABS)); // still the full set
   });
 
+  test("a saved order from before the uiprefs merge drops the retired key", () => {
+    // Users who reordered tabs while `uiprefs` existed have it persisted in
+    // me.settingsTabOrder; the merge must silently drop it (no ghost tab, no
+    // crash) while keeping their order intact.
+    const out = mergeOrder(["uiprefs", "preferences", "users"]);
+    expect(out).not.toContain("uiprefs");
+    expect(out.slice(0, 2)).toEqual(["preferences", "users"]);
+    expect(new Set(out)).toEqual(new Set(TABS));
+  });
+
   test("a fully-specified saved order round-trips exactly", () => {
     const reversed = [...TABS].reverse();
     expect(mergeOrder(reversed)).toEqual(reversed);

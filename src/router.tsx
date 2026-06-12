@@ -33,6 +33,7 @@ import {
   createRootRoute,
   createRoute,
   createRouter,
+  redirect,
   Outlet,
   useNavigate,
   useParams,
@@ -58,6 +59,7 @@ import { NotificationBell } from "./chat/NotificationBell";
 import { GlobalSearch } from "./chat/GlobalSearch";
 import {
   PARAMLESS_TABS,
+  SETTINGS_TAB_REDIRECTS,
   UsersTab,
   InstancesTab,
   AuditTab,
@@ -75,7 +77,6 @@ import { KpiTab } from "./chat/admin/KpiTab";
 import { AnomaliesTab } from "./chat/admin/AnomaliesTab";
 import { IntegrationsTab } from "./chat/admin/IntegrationsTab";
 import { FeedbacksTab } from "./chat/admin/FeedbacksTab";
-import { UiPrefsTab } from "./chat/admin/UiPrefsTab";
 import { FilesTab } from "./chat/admin/FilesTab";
 import { AgentFilesTab } from "./chat/admin/AgentFilesTab";
 import { PreferencesTab } from "./chat/admin/PreferencesTab";
@@ -550,8 +551,6 @@ function SettingsParamlessScreen() {
       return <ThemeShowroom />;
     case "feedbacks":
       return <FeedbacksTab />;
-    case "uiprefs":
-      return <UiPrefsTab />;
     case "files":
       return <FilesTab />;
     case "agentFiles":
@@ -649,6 +648,22 @@ const usersRoute = createRoute({
   validateSearch: usersSearchSchema,
   component: UsersTab,
 });
+// Legacy tab URL: the retired `uiprefs` admin tab merged into Preferences.
+// A STATIC route (static beats the $tab param route) that hard-redirects, so
+// old bookmarks land on the absorbing tab instead of a 404 / wrong tab. The
+// source→target table lives in AdminSettings (SETTINGS_TAB_REDIRECTS, pinned
+// by tabAccess.test.ts).
+const uiprefsRedirectRoute = createRoute({
+  getParentRoute: () => settingsRoute,
+  path: "uiprefs",
+  beforeLoad: () => {
+    throw redirect({
+      to: "/settings/$tab",
+      params: { tab: SETTINGS_TAB_REDIRECTS.uiprefs },
+      replace: true,
+    });
+  },
+});
 // Paramless tabs (roles | integrations | instances | theme): one shared route.
 const settingsTabRoute = createRoute({
   getParentRoute: () => settingsRoute,
@@ -725,6 +740,7 @@ const routeTree = rootRoute.addChildren([
     kpiRoute,
     serviceAccountsRoute,
     usersRoute,
+    uiprefsRedirectRoute,
     settingsTabRoute,
   ]),
 ]);

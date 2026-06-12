@@ -9,9 +9,9 @@ import { visibleTabs, type Tab } from "../AdminSettings";
 //
 // Every tab in TABS must belong to EXACTLY one group (settingsGroups.test.ts
 // enforces the lockstep — adding a tab without a group fails CI with a clear
-// message). Decision: `uiprefs` (admin defaults for UI toggles) lives in
-// PERSONAL — it is the governance of the same interface preferences users tune
-// there, not an observability surface.
+// message). Note: the former `uiprefs` admin tab merged INTO `preferences`
+// (per-row governance controls behind the admin-only mode); /settings/uiprefs
+// redirects there (SETTINGS_TAB_REDIRECTS).
 
 export type SettingsGroupId =
   | "personal"
@@ -29,7 +29,7 @@ export const SETTINGS_GROUPS: readonly SettingsGroup[] = [
   {
     id: "personal",
     label: () => m.settings_group_personal(),
-    tabs: ["preferences", "theme", "files", "uiprefs"],
+    tabs: ["preferences", "theme", "files"],
   },
   {
     id: "agents",

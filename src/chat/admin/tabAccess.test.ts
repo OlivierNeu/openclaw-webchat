@@ -3,6 +3,7 @@ import {
   TABS,
   TAB_PERMISSION,
   GRANTABLE_TABS,
+  SETTINGS_TAB_REDIRECTS,
   visibleTabs,
   pathForTab,
   tabFromPathname,
@@ -119,5 +120,24 @@ describe("pathForTab / tabFromPathname (round-trip)", () => {
     expect(tabFromPathname("/settings/bogus")).toBeUndefined();
     expect(tabFromPathname("/chat/abc")).toBeUndefined();
     expect(tabFromPathname("/")).toBeUndefined();
+  });
+});
+
+// Legacy tab URLs: when a tab is retired/merged, its old /settings/<tab>
+// bookmark must redirect to the absorbing tab (the router mounts one static
+// redirect route per entry — see router.tsx uiprefsRedirectRoute).
+describe("SETTINGS_TAB_REDIRECTS (retired tabs)", () => {
+  test("every source is a RETIRED key and every target a live tab", () => {
+    for (const [source, target] of Object.entries(SETTINGS_TAB_REDIRECTS)) {
+      // A source still in TABS would shadow a live tab with a redirect.
+      expect(TABS as readonly string[]).not.toContain(source);
+      expect(TABS).toContain(target);
+    }
+  });
+
+  test("the merged uiprefs tab redirects to preferences", () => {
+    expect(SETTINGS_TAB_REDIRECTS.uiprefs).toBe("preferences");
+    // And uiprefs really left the tab universe (nav, RBAC map, groups).
+    expect(tabFromPathname("/settings/uiprefs")).toBeUndefined();
   });
 });
