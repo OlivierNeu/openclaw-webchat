@@ -169,6 +169,14 @@ export function useConvexChatRuntime({ chatId }: UseConvexChatRuntimeArgs) {
           mimeType: a.mimeType,
         }));
 
+        // TEMP DIAGNOSTIC (prod file-import investigation): how many attachments
+        // survived the adapter and reached the send. `attachments=0` here while a
+        // file was attached means the upload path (adapter.send) never completed.
+        console.info(
+          `[attach] onNew: text.len=${text.length} attachments=${attachments.length} ` +
+            `(raw=${message.attachments?.length ?? 0})`,
+        );
+
         // Mark the turn in-flight IMMEDIATELY (before the await) so isRunning
         // flips this frame — the optimistic echo + gap indicator + double-send
         // gate all engage without waiting on the round-trip. Cleared when the

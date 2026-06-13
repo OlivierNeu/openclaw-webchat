@@ -87,12 +87,19 @@ export function createConvexAttachmentAdapter(
     accept: "*",
 
     async add({ file }: { file: File }): Promise<PendingAttachment> {
+      // TEMP DIAGNOSTIC (prod file-import investigation): trace the client path
+      // at every step. Non-PII metadata only (name/size/type — never content).
+      // Remove once the prod import path is confirmed end-to-end.
+      console.info(
+        `[attach] add: name=${file.name} size=${file.size} type=${file.type || "?"}`,
+      );
       if (file.size > MAX_BYTES) {
+        console.warn(`[attach] add: REJECTED — too large (${file.size} > ${MAX_BYTES})`);
         throw new Error(
           `File too large (${Math.round(file.size / 1024 / 1024)} MB, max 25 MB).`,
         );
       }
-      return {
+      const pending: PendingAttachment = {
         id: makeId(),
         type: inferAttachmentType(file.type),
         name: file.name,
@@ -100,23 +107,38 @@ export function createConvexAttachmentAdapter(
         file,
         status: { type: "running", reason: "uploading", progress: 0 },
       };
+      console.info(`[attach] add: PENDING created id=${pending.id} type=${pending.type}`);
+      return pending;
     },
 
     async send(attachment: PendingAttachment): Promise<CompleteAttachment> {
       const file = attachment.file;
+      // TEMP DIAGNOSTIC (prod file-import investigation) — see add() above.
+      console.info(`[attach] send: START upload name=${file.name} size=${file.size}`);
 
       // 1) One-time signed upload URL from an authenticated mutation.
-      const uploadUrl: string = await convex.mutation(
-        api.chats.generateUploadUrl,
-        {},
-      );
+      let uploadUrl: string;
+      try {
+        uploadUrl = await convex.mutation(api.chats.generateUploadUrl, {});
+        console.info(`[attach] send: generateUploadUrl OK -> ${uploadUrl.slice(0, 60)}…`);
+      } catch (err) {
+        console.error("[attach] send: generateUploadUrl FAILED:", err);
+        throw err;
+      }
 
       // 2) Stream the bytes directly to Convex storage.
-      const res = await fetch(uploadUrl, {
-        method: "POST",
-        headers: { "Content-Type": file.type || "application/octet-stream" },
-        body: file,
-      });
+      let res: Response;
+      try {
+        res = await fetch(uploadUrl, {
+          method: "POST",
+          headers: { "Content-Type": file.type || "application/octet-stream" },
+          body: file,
+        });
+      } catch (err) {
+        console.error("[attach] send: POST to storage THREW (network/CORS/CSP):", err);
+        throw err;
+      }
+      console.info(`[attach] send: POST status=${res.status}`);
       if (!res.ok) {
         throw new Error(`Upload failed (${res.status})`);
       }
@@ -128,6 +150,7 @@ export function createConvexAttachmentAdapter(
       await convex.mutation(api.uploads.registerUpload, {
         storageId: storageId as Id<"_storage">,
       });
+      console.info(`[attach] send: DONE storageId=${storageId}`);
 
       const result: ConvexAttachment = {
         id: attachment.id,
