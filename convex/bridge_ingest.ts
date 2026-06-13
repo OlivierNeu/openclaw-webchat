@@ -18,9 +18,27 @@
 // offline tsc/vitest gate (bridge/tsconfig only includes bridge/src + test). It
 // is validated by `npx convex dev` / a live deployment.
 
-import { httpAction, ActionCtx } from "./_generated/server";
+import { httpAction, ActionCtx, internalQuery } from "./_generated/server";
 import { internal } from "./_generated/api";
 import { Id } from "./_generated/dataModel";
+import { v } from "convex/values";
+
+/**
+ * Stored-object metadata for an outbound media blob — size + content-type, read
+ * from the `_storage` system table (NEVER the deprecated ctx.storage.getMetadata).
+ * Non-PII (no content, no path, no filename). Lets the `addMediaPart` ingest
+ * trace record whether the bytes actually landed: `bytes > 0` means a download
+ * failure is the storage URL ORIGIN (self-hosted serving config), not a missing
+ * object; `null`/`bytes: 0` means the stream never reached storage.
+ */
+export const storageMeta = internalQuery({
+  args: { storageId: v.id("_storage") },
+  handler: async (ctx, { storageId }) => {
+    const meta = await ctx.db.system.get("_storage", storageId);
+    if (!meta) return null;
+    return { bytes: meta.size, contentType: meta.contentType ?? null };
+  },
+});
 
 /**
  * Emit an inbound ingest trace via the `recordEvent` internalMutation (an
@@ -60,10 +78,11 @@ async function traceIngest(
   }
 }
 
-// NOTE: this file exports an httpAction only. httpActions run in the DEFAULT
-// Convex runtime (fetch + ctx.storage are available; Node built-ins are NOT).
-// The secret compare is therefore a pure-JS constant-time comparison over
-// UTF-8 bytes — deliberately NOT node:crypto.timingSafeEqual.
+// NOTE: this file exports the ingest httpAction plus the `storageMeta`
+// internalQuery (above). httpActions run in the DEFAULT Convex runtime (fetch +
+// ctx.storage are available; Node built-ins are NOT). The secret compare is
+// therefore a pure-JS constant-time comparison over UTF-8 bytes — deliberately
+// NOT node:crypto.timingSafeEqual.
 function constantTimeEqual(a: string, b: string): boolean {
   const ab = new TextEncoder().encode(a);
   const bb = new TextEncoder().encode(b);
@@ -259,6 +278,20 @@ export const ingest = httpAction(async (ctx, request) => {
           mimeType,
         },
       });
+      // Read the stored object's size/type for the trace (best-effort, non-PII):
+      // distinguishes "bytes landed -> a failed download is the storage URL
+      // origin" from "nothing stored -> the stream never reached storage".
+      let bytes: number | null = null;
+      let storedType: string | null = null;
+      try {
+        const meta = await ctx.runQuery(internal.bridge_ingest.storageMeta, {
+          storageId: body.storageId as Id<"_storage">,
+        });
+        bytes = meta?.bytes ?? null;
+        storedType = meta?.contentType ?? null;
+      } catch {
+        // Never let a metadata read turn a successful ingest into a 500.
+      }
       await traceIngest(ctx, {
         kind: "openclaw.ingest",
         correlationId: body.messageId,
@@ -267,6 +300,8 @@ export const ingest = httpAction(async (ctx, request) => {
           messageId: body.messageId,
           partKind: "media",
           mimeType,
+          bytes,
+          storedType,
           ok: true,
         },
       });

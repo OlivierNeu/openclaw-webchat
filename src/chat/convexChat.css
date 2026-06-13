@@ -1373,9 +1373,24 @@
 }
 .oc-tool__name {
   font-weight: 600;
+  flex: 0 0 auto;
+}
+/* One-line command/args preview in the collapsed header — takes the middle
+   space and ellipsizes, so a tool-heavy turn is legible without expanding each
+   card (the full input stays in the expandable block). */
+.oc-tool__preview {
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-size: 0.78rem;
+  color: var(--muted-foreground);
 }
 .oc-tool__phase {
   margin-left: auto;
+  flex: 0 0 auto;
   font-size: 0.75rem;
   color: var(--muted-foreground);
 }

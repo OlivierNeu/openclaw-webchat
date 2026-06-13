@@ -65,6 +65,20 @@ function toolPartToActivity(
   };
 }
 
+// The gateway names offloaded media `<base>---<uuid>.<ext>` (media-store id), so
+// an agent-generated file surfaces as e.g.
+// `openclaw-lightrag-jerome---4c23520c-…-….pdf`. Strip the `---<uuid>` segment
+// for DISPLAY (and the download filename) so the chip reads `…-jerome.pdf`. Only
+// a strict UUID immediately before the extension is removed — a user upload like
+// `IFOA Présentation.pptx` (no such segment) is left untouched.
+const GATEWAY_MEDIA_ID_RE =
+  /---[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}(?=\.[^.]+$|$)/i;
+
+export function displayFilename(name: string | undefined): string | undefined {
+  if (!name) return name;
+  return name.replace(GATEWAY_MEDIA_ID_RE, "");
+}
+
 function filePartToContent(
   part:
     | Extract<ConvexMessagePartView, { kind: "media" }>
@@ -79,7 +93,7 @@ function filePartToContent(
     data: part.url,
     // `filename` is non-standard on the file content part but assistant-ui
     // tolerates extra fields and our custom MediaPart renderer reads it.
-    filename: part.filename,
+    filename: displayFilename(part.filename),
   } as ContentPart;
 }
 

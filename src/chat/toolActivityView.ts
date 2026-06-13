@@ -57,6 +57,43 @@ function isRunning(
   return last.result === undefined || last.result === null;
 }
 
+// Argument keys that carry the human-meaningful "what is this call doing", in
+// priority order: a Bash/exec `command`, a search `query`, a fetched `url`, a
+// file `path`/`pattern`, … Mirrors what OpenClaw's Control UI shows on each tool
+// row so a 30×Bash turn is legible WITHOUT expanding every card.
+const PREVIEW_KEYS = [
+  "command",
+  "query",
+  "url",
+  "path",
+  "pattern",
+  "file",
+  "cmd",
+  "prompt",
+] as const;
+
+/**
+ * A one-line, header-level preview of a tool's input. Prefers a known arg key,
+ * falls back to the textual input; whitespace-collapsed to one line (CSS
+ * ellipsis truncates the overflow). Empty when there is nothing to show — the
+ * full input always remains in ToolCard's expandable "input" block.
+ */
+export function toolPreview(args: unknown, argsText: string | undefined): string {
+  let raw = "";
+  if (args && typeof args === "object" && !Array.isArray(args)) {
+    const rec = args as Record<string, unknown>;
+    for (const key of PREVIEW_KEYS) {
+      const v = rec[key];
+      if (typeof v === "string" && v.trim()) {
+        raw = v;
+        break;
+      }
+    }
+  }
+  if (!raw) raw = argsText ?? (typeof args === "string" ? args : "");
+  return raw.replace(/\s+/g, " ").trim();
+}
+
 /**
  * Derives the summary-row view from a message's tool parts + status.
  * Counter is LIVE for free: the bridge appends tool parts as OpenClaw frames

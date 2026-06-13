@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { convertConvexMessage } from "./convertMessage";
+import { convertConvexMessage, displayFilename } from "./convertMessage";
 import type {
   ConvexMessagePartView,
   ConvexMessageView,
@@ -168,5 +168,27 @@ describe("convertConvexMessage metadata.custom.toolParts", () => {
     expect(custom.runId).toBeNull();
     expect(custom.error).toBe("boom");
     expect(custom.rawText).toBe("raw");
+  });
+});
+
+describe("displayFilename (strip the gateway media-id suffix)", () => {
+  it("strips `---<uuid>` before the extension on agent-generated media", () => {
+    expect(
+      displayFilename("openclaw-lightrag-jerome---4c23520c-b8a8-4533-b48b-b735dd8e1297.pdf"),
+    ).toBe("openclaw-lightrag-jerome.pdf");
+  });
+
+  it("leaves a normal user upload untouched", () => {
+    expect(displayFilename("IFOA Présentation.pptx")).toBe("IFOA Présentation.pptx");
+    expect(displayFilename("report-2026.csv")).toBe("report-2026.csv");
+  });
+
+  it("does NOT strip a non-UUID `---` segment (only the gateway id pattern)", () => {
+    expect(displayFilename("a---b---notauuid.txt")).toBe("a---b---notauuid.txt");
+  });
+
+  it("passes through undefined/empty", () => {
+    expect(displayFilename(undefined)).toBeUndefined();
+    expect(displayFilename("")).toBe("");
   });
 });

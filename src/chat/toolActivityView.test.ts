@@ -1,5 +1,9 @@
 import { describe, expect, it } from "vitest";
-import { toolActivitySummary, type ToolActivityPart } from "./toolActivityView";
+import {
+  toolActivitySummary,
+  toolPreview,
+  type ToolActivityPart,
+} from "./toolActivityView";
 
 // Pure-logic tests for the ToolActivity summary line (count label + running
 // state). Tests run with the baseLocale ("fr" — see vitest.setup.ts), so the
@@ -77,5 +81,30 @@ describe("toolActivitySummary running state", () => {
   it("is never running without tool parts", () => {
     expect(toolActivitySummary([], "streaming").running).toBe(false);
     expect(toolActivitySummary([], undefined).running).toBe(false);
+  });
+});
+
+describe("toolPreview (one-line header preview of a tool's input)", () => {
+  it("prefers a Bash/exec command", () => {
+    expect(
+      toolPreview({ command: "find /media/inbound -name '*.csv'", cwd: "/ws" }, undefined),
+    ).toBe("find /media/inbound -name '*.csv'");
+  });
+
+  it("walks the priority keys (query > url > path …) for non-Bash tools", () => {
+    expect(toolPreview({ query: "Fable 5 blocked" }, undefined)).toBe("Fable 5 blocked");
+    expect(toolPreview({ url: "https://x.test/a" }, undefined)).toBe("https://x.test/a");
+    expect(toolPreview({ path: "/etc/hosts" }, undefined)).toBe("/etc/hosts");
+  });
+
+  it("collapses whitespace/newlines to a single line", () => {
+    expect(toolPreview({ command: "a\n  b\t c" }, undefined)).toBe("a b c");
+  });
+
+  it("falls back to argsText, then to a string arg, else empty", () => {
+    expect(toolPreview({ unknownKey: 1 }, '{"x":1}')).toBe('{"x":1}');
+    expect(toolPreview("raw string input", undefined)).toBe("raw string input");
+    expect(toolPreview({ unknownKey: 1 }, undefined)).toBe("");
+    expect(toolPreview(undefined, undefined)).toBe("");
   });
 });

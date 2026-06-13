@@ -7,6 +7,7 @@ import {
   Copy,
   Check,
 } from "lucide-react";
+import { toolPreview } from "./toolActivityView";
 
 // Small copy button for a tool's input/output block. Hover-revealed in the
 // block's top-right (the standard code-copy affordance); flips to a check for a
@@ -80,6 +81,7 @@ export function ToolCard({
   // assistant-ui status.type is "running" | "complete" | "incomplete" | ...
   const phase = phaseClass(status?.type, hasResult);
   const inputText = argsText ?? pretty(args);
+  const preview = toolPreview(args, argsText);
 
   // Agent-plan-style status glyph (neutral — NO loud green check; the "completed"
   // text already carries the state). running = spinner, error = alert, otherwise
@@ -102,6 +104,11 @@ export function ToolCard({
           aria-hidden
         />
         <span className="oc-tool__name">{toolName}</span>
+        {preview ? (
+          <span className="oc-tool__preview" title={preview}>
+            {preview}
+          </span>
+        ) : null}
         <span className="oc-tool__phase">{phase}</span>
         <ChevronRight size={15} className="oc-tool__chevron" aria-hidden />
       </summary>
