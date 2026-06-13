@@ -72,11 +72,17 @@ http.route({
 // managed by admin-only Convex functions (apiKeys.ts), never here.
 // ===========================================================================
 
-/** Small JSON helper for the /api/v1 routes. */
+/** Small JSON helper for the /api/v1 routes. SOC2 CC6.7: responses may carry
+ *  non-PHI metadata that must never be cached by an intermediary/browser, and
+ *  must not be MIME-sniffed. `no-store` + `nosniff` on every API response. */
 function apiJson(value: unknown, status = 200): Response {
   return new Response(JSON.stringify(value), {
     status,
-    headers: { "Content-Type": "application/json" },
+    headers: {
+      "Content-Type": "application/json",
+      "Cache-Control": "no-store",
+      "X-Content-Type-Options": "nosniff",
+    },
   });
 }
 

@@ -15,6 +15,7 @@ import type { ActionCtx } from "../_generated/server";
 import { internal } from "../_generated/api";
 import { hashKey } from "./apikeys";
 import { roleHasPermission, type Permission } from "./rbac";
+import { unauthShardKey, UNAUTH_PER_SHARD_PER_WINDOW } from "../apiRateLimit";
 
 /** A verified non-human principal (service account) behind an API key. */
 export type ServicePrincipal = {
@@ -29,7 +30,7 @@ export type ServicePrincipal = {
 
 export type AuthResult =
   | { ok: true; principal: ServicePrincipal; keyId: string }
-  | { ok: false; status: 401 | 403; error: string };
+  | { ok: false; status: 401 | 403 | 429; error: string };
 
 /**
  * Authenticate an incoming /api/v1 request by its `Authorization: Bearer <key>`
@@ -52,8 +53,22 @@ export async function authenticateApiKey(
     return { ok: false, status: 401, error: "empty bearer token" };
   }
 
-  // Hash the presented key and look it up by hash (plaintext never stored).
+  // Hash the presented key (cheap CPU) — never stored.
   const hash = await hashKey(presented);
+
+  // Pre-resolution DoS guard (SOC2 CC6.6): throttle UNAUTHENTICATED load BEFORE
+  // the findByHash DB read, sharded by the presented-key hash so the counter is
+  // neither a hot row nor bloatable (see apiRateLimit.unauthShardKey). A flood of
+  // bad keys trips this and never reaches the DB read. Valid keys also pass
+  // through, but the per-shard cap is high enough that only a flood trips it.
+  const unauth = await ctx.runMutation(internal.apiRateLimit.checkApiRateLimit, {
+    principalId: unauthShardKey(hash),
+    limit: UNAUTH_PER_SHARD_PER_WINDOW,
+  });
+  if (!unauth.allowed) {
+    return { ok: false, status: 429, error: "rate limit exceeded" };
+  }
+
   const resolved = await ctx.runQuery(internal.apiKeys.findByHash, { hash });
   if (resolved === null) {
     return { ok: false, status: 401, error: "invalid key" };
@@ -68,6 +83,17 @@ export async function authenticateApiKey(
   }
   if (serviceAccount.disabled) {
     return { ok: false, status: 401, error: "service account disabled" };
+  }
+
+  // Per-key rate limit (SOC2 CC6.6): checked HERE so every authenticated route
+  // is covered without per-route wiring (the unauthenticated /health probe never
+  // reaches this, so it is exempt). Only AUTHENTICATED calls count toward the
+  // window — a bad-key flood is an auth concern, out of this control's scope.
+  const rate = await ctx.runMutation(internal.apiRateLimit.checkApiRateLimit, {
+    principalId: serviceAccount._id,
+  });
+  if (!rate.allowed) {
+    return { ok: false, status: 429, error: "rate limit exceeded" };
   }
 
   // Best-effort lastUsedAt bump (do not block the request on it).

@@ -470,6 +470,12 @@ export default defineSchema({
   // requirement for the impersonation module. This is a NEW table (no existing
   // rows) so its fields are required. NEVER stores message content or other PHI:
   // only the action verb + the resource kind/id that was touched.
+  //
+  // APPEND-ONLY (SOC2 CC7.3): rows are only ever INSERTED (lib/audit.recordAudit
+  // — the sole writer). There is intentionally NO mutation anywhere that patches
+  // or deletes an auditLog row (enforced by code review + grep, see
+  // docs/SOC2_API_CONTROLS.md §7). It is NOT retention-purged (unlike traceEvents)
+  // so the trail survives the full audit period.
   auditLog: defineTable({
     at: v.number(),
     action: v.string(), // e.g. "chat.create", "chat.delete", "impersonation.start"
@@ -988,6 +994,39 @@ export default defineSchema({
     .index("by_at", ["at"]) // retention scan + recent-events listing
     .index("by_correlation", ["correlationId"]) // follow a span chain
     .index("by_principal", ["principalType", "principalId"]),
+
+  // Per-key API rate-limit counters (SOC2 CC6.6). One row per (principal, fixed
+  // 1-min window); checkApiRateLimit upserts + counts. A purge cron drops old
+  // windows so the table stays small. Anti-scraping control on the /api/v1
+  // surface (a valid key enumerating chatIds is the threat — see docs/SOC2).
+  apiRateLimits: defineTable({
+    principalId: v.string(), // serviceAccount id (string)
+    windowStart: v.number(), // epoch ms, floored to the window
+    count: v.number(),
+  })
+    .index("by_principal_window", ["principalId", "windowStart"])
+    .index("by_window", ["windowStart"]), // bounded purge of old windows
+
+  // Durable ACCESS LOG (SOC2 CC6.1/CC7.2). A dedicated, long-retention copy of
+  // every authenticated `/api/v1` access — WHO (service-account principal+role)
+  // touched WHICH route/chat, WHEN, with what status. Dual-written from the
+  // `api.call` trace (recordEvent) so the trace viewer is unchanged, but kept for
+  // the full audit period (ACCESS_LOG_RETENTION_DAYS, default 90 — vs the 14-day
+  // traceEvents purge). METADATA ONLY (no content; mirrors a redacted trace).
+  // APPEND-ONLY: inserted by recordEvent, removed ONLY by the retention purge —
+  // never patched (see docs/SOC2_API_CONTROLS.md §7).
+  accessLog: defineTable({
+    at: v.number(),
+    principalId: v.optional(v.string()), // serviceAccount id (string)
+    roleKey: v.optional(v.string()),
+    route: v.optional(v.string()),
+    method: v.optional(v.string()),
+    status: v.optional(v.number()),
+    chatId: v.optional(v.string()), // present on chat-state reads
+    latencyMs: v.optional(v.number()),
+  })
+    .index("by_at", ["at"]) // retention purge + recent listing
+    .index("by_principal_at", ["principalId", "at"]), // per-key access review
 
   // Small, aggregated, long-lived KPI rollups (D1). STUB for increment 1 — the
   // cron aggregation bodies land in increment 4. Defined now so the schema/

@@ -192,6 +192,53 @@ describe("anomaly detection", () => {
     expect(open.some((a) => a.kind === "self.repair")).toBe(true);
   });
 
+  test("access-scan: a key reading many distinct chats trips an ACCESS_SCAN anomaly", async () => {
+    const t = convexTest(schema, modules);
+    await t.run(async (ctx) => {
+      const now = Date.now();
+      // "scanner" reads 30 distinct chats (> 25 WARN, < 100 CRITICAL); "legit"
+      // reads only 2 (a normal debug session). status 200 -> not an error burst.
+      for (let i = 0; i < 30; i++) {
+        await ctx.db.insert("traceEvents", {
+          at: now - i * 1000,
+          kind: "api.call",
+          principalType: "service",
+          principalId: "scanner",
+          roleKey: "agent",
+          route: "/api/v1/chat-state",
+          status: 200,
+          chatId: `chat-${i}`,
+          redacted: true,
+        });
+      }
+      for (let i = 0; i < 2; i++) {
+        await ctx.db.insert("traceEvents", {
+          at: now - i * 1000,
+          kind: "api.call",
+          principalType: "service",
+          principalId: "legit",
+          roleKey: "agent",
+          route: "/api/v1/chat-state",
+          status: 200,
+          chatId: `c-${i}`,
+          redacted: true,
+        });
+      }
+    });
+    const r = await t.mutation(internal.anomalies.detectAnomalies, {});
+    expect(r.detected).toContain("api.access_scan");
+    const rows = await t.run((ctx) => ctx.db.query("anomalies").collect());
+    const scan = rows.find((a) => a.kind === "api.access_scan");
+    expect(scan).toBeDefined();
+    expect(scan!.severity).toBe("warn");
+    const ev = JSON.parse(scan!.evidence!) as {
+      principalId: string;
+      distinctChats: number;
+    };
+    expect(ev.principalId).toBe("scanner"); // the worst key, not "legit"
+    expect(ev.distinctChats).toBe(30);
+  });
+
   test("error ratio below the minimum denominator does not fire", async () => {
     const t = convexTest(schema, modules);
     // 1 error / 1 call = 100% ratio but only 1 call -> below the floor (10).

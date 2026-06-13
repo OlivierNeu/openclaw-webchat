@@ -73,6 +73,13 @@ const STREAM_ERROR_CRITICAL = 10;
 const INGEST_DENIED_WARN = 3;
 const INGEST_DENIED_CRITICAL = 10;
 
+// api.access_scan (SOC2 CC7.2): a single service-account key reading many
+// DISTINCT chats via the diagnostic API in the window. Operationalizes the
+// documented IDOR compensating control — legitimate debugging touches a few
+// chats, so a burst of distinct reads is the fingerprint of a chatId scan.
+const ACCESS_SCAN_DISTINCT_WARN = 25;
+const ACCESS_SCAN_DISTINCT_CRITICAL = 100;
+
 // Default page size for the listing/heartbeat queries.
 const DEFAULT_LIST_LIMIT = 100;
 const MAX_LIST_LIMIT = 500;
@@ -91,6 +98,7 @@ export const ANOMALY_KINDS = {
   DISPATCH_FAILURES: "openclaw.dispatch_failures",
   STREAM_ERRORS: "assistant.stream_errors",
   INGEST_DENIED: "openclaw.ingest_denied",
+  ACCESS_SCAN: "api.access_scan",
 } as const;
 
 /** Is this `assistant.stream` row an error/aborted finalize? (mirrors kpi.ts) */
@@ -159,6 +167,9 @@ type WindowAgg = {
   dispatchSampleCorrelation?: string;
   streamErrors: number;
   ingestDenied: number;
+  // principalId -> set of DISTINCT chatIds it read via the diagnostic API in the
+  // window (access-scan detector). Non-PHI: a service-account id + chat ids.
+  accessByPrincipal: Map<string, Set<string>>;
 };
 
 /**
@@ -288,12 +299,19 @@ export const detectAnomalies = internalMutation({
       dispatchCodes: {},
       streamErrors: 0,
       ingestDenied: 0,
+      accessByPrincipal: new Map(),
     };
     for (const row of rows) {
       switch (row.kind) {
         case "api.call": {
           agg.apiCalls += 1;
           if (row.status !== undefined && row.status >= 400) agg.apiErrors += 1;
+          // Track distinct chats a key read (only chat reads carry a chatId).
+          if (row.chatId && row.principalId) {
+            const set = agg.accessByPrincipal.get(row.principalId) ?? new Set();
+            set.add(row.chatId);
+            agg.accessByPrincipal.set(row.principalId, set);
+          }
           break;
         }
         case "openclaw.dispatch": {
@@ -410,6 +428,37 @@ export const detectAnomalies = internalMutation({
         },
       });
       detected.push(ANOMALY_KINDS.INGEST_DENIED);
+    }
+
+    // 5) Cross-chat access scan (SOC2 CC7.2): the worst key by DISTINCT chats
+    //    read via the diagnostic API in the window. Operationalizes the
+    //    documented IDOR compensating control — an active detector on the
+    //    formally-accepted risk, not just a passive compensation.
+    let scanPrincipal: string | undefined;
+    let scanDistinct = 0;
+    for (const [principalId, chats] of agg.accessByPrincipal) {
+      if (chats.size > scanDistinct) {
+        scanDistinct = chats.size;
+        scanPrincipal = principalId;
+      }
+    }
+    if (scanDistinct >= ACCESS_SCAN_DISTINCT_WARN && scanPrincipal !== undefined) {
+      const severity: Severity =
+        scanDistinct >= ACCESS_SCAN_DISTINCT_CRITICAL ? "critical" : "warn";
+      await upsertDetectorAnomaly(ctx, {
+        kind: ANOMALY_KINDS.ACCESS_SCAN,
+        severity,
+        message: `API key reading many distinct chats: ${scanDistinct} in ${windowMin}m (possible chatId scan)`,
+        evidence: {
+          // serviceAccount id + counts — non-PHI by construction (no content).
+          principalId: scanPrincipal,
+          distinctChats: scanDistinct,
+          windowMs: DETECT_WINDOW_MS,
+          warnThreshold: ACCESS_SCAN_DISTINCT_WARN,
+          criticalThreshold: ACCESS_SCAN_DISTINCT_CRITICAL,
+        },
+      });
+      detected.push(ANOMALY_KINDS.ACCESS_SCAN);
     }
 
     // Auto-resolve detector anomalies whose condition cleared this run, so the

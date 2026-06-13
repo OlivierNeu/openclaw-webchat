@@ -13,6 +13,7 @@ import type * as agentFiles from "../agentFiles.js";
 import type * as agents from "../agents.js";
 import type * as anomalies from "../anomalies.js";
 import type * as apiKeys from "../apiKeys.js";
+import type * as apiRateLimit from "../apiRateLimit.js";
 import type * as auth from "../auth.js";
 import type * as bridge from "../bridge.js";
 import type * as bridgeHealth from "../bridgeHealth.js";
@@ -74,6 +75,7 @@ declare const fullApi: ApiFromModules<{
   agents: typeof agents;
   anomalies: typeof anomalies;
   apiKeys: typeof apiKeys;
+  apiRateLimit: typeof apiRateLimit;
   auth: typeof auth;
   bridge: typeof bridge;
   bridgeHealth: typeof bridgeHealth;

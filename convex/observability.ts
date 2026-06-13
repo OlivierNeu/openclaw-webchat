@@ -126,7 +126,55 @@ export async function writeTraceEvent(
 export const recordEvent = internalMutation({
   args: traceEventArgs,
   handler: async (ctx, args) => {
-    return await writeTraceEvent(ctx, args);
+    const id = await writeTraceEvent(ctx, args);
+    // SOC2 durable access log: every authenticated /api/v1 access (kind
+    // "api.call") is ALSO appended to the long-retention `accessLog` table, so
+    // the access trail survives the 14-day traceEvents purge for the full audit
+    // period. Metadata only (same redacted fields). The trace viewer is
+    // unchanged (it still reads api.call from traceEvents).
+    if (args.kind === "api.call") {
+      await ctx.db.insert("accessLog", {
+        at: Date.now(),
+        principalId: args.principalId,
+        roleKey: args.roleKey,
+        route: args.route,
+        method: args.method,
+        status: args.status,
+        chatId: args.chatId,
+        latencyMs: args.latencyMs,
+      });
+    }
+    return id;
+  },
+});
+
+/** Resolve the access-log retention horizon (days) from env; default 90 — long
+ *  enough to span a SOC2 Type II audit period. Distinct from the 14-day trace
+ *  retention because access logs are the compliance artifact, not debug noise. */
+function accessLogRetentionDays(): number {
+  const raw = process.env.ACCESS_LOG_RETENTION_DAYS;
+  if (!raw) return 90;
+  const n = Number(raw);
+  return Number.isFinite(n) && n > 0 ? n : 90;
+}
+
+/** Bounded purge of access-log rows past the (long) retention horizon. Mirrors
+ *  purgeOldTraces: one batch + self-reschedule while a backlog remains. */
+export const purgeOldAccessLog = internalMutation({
+  args: {},
+  handler: async (ctx): Promise<{ deleted: number; more: boolean }> => {
+    const cutoff = Date.now() - accessLogRetentionDays() * 24 * 60 * 60 * 1000;
+    const stale = await ctx.db
+      .query("accessLog")
+      .withIndex("by_at", (q) => q.lt("at", cutoff))
+      .order("asc")
+      .take(PURGE_BATCH);
+    for (const row of stale) await ctx.db.delete(row._id);
+    const more = stale.length === PURGE_BATCH;
+    if (more) {
+      await ctx.scheduler.runAfter(0, internal.observability.purgeOldAccessLog, {});
+    }
+    return { deleted: stale.length, more };
   },
 });
 
@@ -280,6 +328,42 @@ export const listEvents = query({
     // admins. The wildcard makes admins pass. Write/sensitive paths stay admin.
     await requirePermission(ctx, PERMISSIONS.TRACES_READ);
     return await fetchRecentEvents(ctx, { limit, kind, correlationId, filter });
+  },
+});
+
+/**
+ * Durable access-log review (SOC2 CC7.2): the long-retention access trail,
+ * newest first, optionally scoped to one service-account principal — so an
+ * operator can review WHO accessed the API over the audit period (beyond the
+ * 14-day trace window). Gated `traces.read` (metadata only, like the viewer).
+ * Bounded. This is the read side of the access-log review procedure.
+ */
+export const listAccessLog = query({
+  args: {
+    principalId: v.optional(v.string()),
+    limit: v.optional(v.number()),
+  },
+  handler: async (ctx, { principalId, limit }) => {
+    await requirePermission(ctx, PERMISSIONS.TRACES_READ);
+    const cap = Math.min(Math.max(1, limit ?? 200), 500);
+    const rows = principalId
+      ? await ctx.db
+          .query("accessLog")
+          .withIndex("by_principal_at", (q) => q.eq("principalId", principalId))
+          .order("desc")
+          .take(cap)
+      : await ctx.db.query("accessLog").withIndex("by_at").order("desc").take(cap);
+    return rows.map((r) => ({
+      _id: r._id,
+      at: r.at,
+      principalId: r.principalId ?? null,
+      roleKey: r.roleKey ?? null,
+      route: r.route ?? null,
+      method: r.method ?? null,
+      status: r.status ?? null,
+      chatId: r.chatId ?? null,
+      latencyMs: r.latencyMs ?? null,
+    }));
   },
 });
 

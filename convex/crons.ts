@@ -95,4 +95,24 @@ crons.interval(
   {},
 );
 
+// Durable access-log retention (SOC2): daily bounded purge of access-log rows
+// past ACCESS_LOG_RETENTION_DAYS (default 90 — spans a Type II audit period,
+// vs the 14-day traceEvents purge). Self-reschedules to drain a backlog.
+crons.cron(
+  "purge old access log",
+  "30 3 * * *",
+  internal.observability.purgeOldAccessLog,
+  {},
+);
+
+// API rate-limit window cleanup (SOC2): hourly bounded purge of expired
+// per-key counter rows so the apiRateLimits table stays tiny. Self-reschedules
+// while a backlog remains (mirrors purgeOldTraces).
+crons.interval(
+  "purge old rate limits",
+  { hours: 1 },
+  internal.apiRateLimit.purgeOldRateLimits,
+  {},
+);
+
 export default crons;
