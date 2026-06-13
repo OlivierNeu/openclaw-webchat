@@ -33,6 +33,7 @@ import {
 import { DataTableShell } from "./admin/DataTableShell";
 import { EntitySheet } from "./admin/EntitySheet";
 import { useToast } from "@/components/ui/toast";
+import { useConfirm } from "@/components/ConfirmDialog";
 import { FilterBar } from "./admin/filters/FilterBar";
 import { AdvancedFilter } from "./admin/filters/AdvancedFilter";
 import { useResolvedRange } from "./admin/filters/TimeRangePicker";
@@ -291,6 +292,8 @@ export function UsersTab() {
   const setRole = useMutation(api.admin.setRole);
   const setPerms = useMutation(api.admin.setUserPermissions);
   const startImpersonation = useMutation(api.admin.startImpersonation);
+  const deleteUser = useMutation(api.admin.deleteUser);
+  const confirm = useConfirm();
   const toast = useToast();
   // The user whose Access editor (instance+agent assignment) is open. Replaces
   // the legacy free-text override/group columns (H4).
@@ -332,6 +335,27 @@ export function UsersTab() {
     }
   }
 
+  // Hard-delete a user (profile + all owned data). Irreversible, so it goes
+  // behind the type-to-confirm guard; the server re-checks the same invariants
+  // (never yourself, never the last admin) and surfaces a refusal as a toast.
+  async function onDeleteUser(u: NonNullable<typeof users>[number]) {
+    const label = u.email || u.name || u.canonical || u.userId.slice(0, 8);
+    const ok = await confirm({
+      title: m.settings_delete_user_title(),
+      description: m.settings_delete_user_desc({ user: label }),
+      confirmWord: m.settings_delete_user_confirm_word(),
+      confirmLabel: m.settings_delete_user_action(),
+      destructive: true,
+    });
+    if (!ok) return;
+    try {
+      await deleteUser({ profileId: u._id });
+      toast.success(m.settings_delete_user_done({ user: label }));
+    } catch (err) {
+      toast.error(m.settings_delete_user_refused(), err);
+    }
+  }
+
   return (
     <>
     <FilterBar
@@ -369,6 +393,11 @@ export function UsersTab() {
                 label: m.settings_view_as_user(),
                 onSelect: () =>
                   void startImpersonation({ profileId: u._id }),
+              },
+              {
+                label: m.settings_delete_user(),
+                variant: "destructive" as const,
+                onSelect: () => void onDeleteUser(u),
               },
             ]
       }

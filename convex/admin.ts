@@ -11,6 +11,7 @@ import { Id } from "./_generated/dataModel";
 import { getProfile, requireAdmin, roleOf } from "./lib/access";
 import { isGrantableUserPermission } from "./lib/rbac";
 import { recordAudit } from "./lib/audit";
+import { cascadeDeleteChat } from "./chats";
 import {
   isUiPrefKey,
   UI_PREF_SYSTEM_GATE,
@@ -133,6 +134,95 @@ export const approveUser = mutation({
   handler: async (ctx, { profileId }) => {
     await requireAdmin(ctx);
     await applyRoleChange(ctx, profileId, "user");
+  },
+});
+
+// Hard-delete a user: their profile + ALL owned data (chats and — via the shared
+// cascadeDeleteChat helper — each chat's messages/parts/pending outbox/mirrored
+// files rows; plus projects, agent grants, group memberships, uploads, feedback,
+// notifications). Guards mirror applyRoleChange: never yourself (requireAdmin
+// returns the REAL admin id, so an impersonating admin can't self-delete via the
+// target), never the last admin (lockout). The deleted user's live session (if
+// any) is neutralized at its NEXT request: ensureProfile re-BLOCKS a duplicate
+// identity (its email is still owned by the kept profile) or re-provisions a
+// fresh "pending" profile for a unique one — hard session invalidation needs an
+// action wrapper (invalidateSessions), deferred. Audited. TRANSACTIONAL: a user
+// with more data than one mutation's write budget rolls back WHOLE (no partial
+// delete); batch in a follow-up if that ever bites (this tool's data is small).
+export const deleteUser = mutation({
+  args: { profileId: v.id("profiles") },
+  handler: async (ctx, { profileId }) => {
+    const realUserId = await requireAdmin(ctx);
+    const target = await ctx.db.get(profileId);
+    if (target === null) throw new Error("Not found: profile");
+    const userId = target.userId;
+    if (userId === realUserId) {
+      throw new Error("Refused: cannot delete your own account");
+    }
+    if (roleOf(target) === "admin" && (await adminCount(ctx)) <= 1) {
+      throw new Error("Refused: cannot delete the last admin");
+    }
+
+    // Chats first — the shared helper also clears each chat's messages, parts,
+    // pending outbox and the mirrored files rows.
+    const chats = await ctx.db
+      .query("chats")
+      .withIndex("by_user", (q) => q.eq("userId", userId))
+      .collect();
+    for (const c of chats) await cascadeDeleteChat(ctx, c._id);
+
+    // Remaining per-user rows, each via its `by_user` index.
+    for (const r of await ctx.db
+      .query("projects")
+      .withIndex("by_user", (q) => q.eq("userId", userId))
+      .collect()) {
+      await ctx.db.delete(r._id);
+    }
+    for (const r of await ctx.db
+      .query("userAgents")
+      .withIndex("by_user", (q) => q.eq("userId", userId))
+      .collect()) {
+      await ctx.db.delete(r._id);
+    }
+    for (const r of await ctx.db
+      .query("groupMembers")
+      .withIndex("by_user", (q) => q.eq("userId", userId))
+      .collect()) {
+      await ctx.db.delete(r._id);
+    }
+    for (const r of await ctx.db
+      .query("feedback")
+      .withIndex("by_user", (q) => q.eq("userId", userId))
+      .collect()) {
+      await ctx.db.delete(r._id);
+    }
+    for (const r of await ctx.db
+      .query("notifications")
+      .withIndex("by_user", (q) => q.eq("userId", userId))
+      .collect()) {
+      await ctx.db.delete(r._id);
+    }
+    // uploads + any stray (non-chat-mirrored) files use compound by_user* indexes.
+    for (const r of await ctx.db
+      .query("uploads")
+      .withIndex("by_user_storage", (q) => q.eq("userId", userId))
+      .collect()) {
+      await ctx.db.delete(r._id);
+    }
+    for (const r of await ctx.db
+      .query("files")
+      .withIndex("by_user_created", (q) => q.eq("userId", userId))
+      .collect()) {
+      await ctx.db.delete(r._id);
+    }
+
+    await ctx.db.delete(profileId);
+    await recordAudit(
+      ctx,
+      { realUserId, effectiveUserId: realUserId, impersonating: false },
+      "user.delete",
+      { resource: "user", resourceId: userId },
+    );
   },
 });
 
