@@ -752,6 +752,7 @@
   "runstatus_thinking": "Réflexion…",
   "runstatus_generating": "Génération…",
   "runstatus_error": "Erreur",
+  "runstatus_error_orphaned": "La réponse a été générée côté agent mais n’a pas pu être finalisée (connexion au bridge interrompue en cours de route). Vous pouvez supprimer ou régénérer ce message.",
   "runstatus_aborted": "Interrompu",
   "advfilter_op_contains": "contient",
   "advfilter_toggle": "Filtre avancé",

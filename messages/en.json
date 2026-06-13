@@ -752,6 +752,7 @@
   "runstatus_thinking": "Thinking…",
   "runstatus_generating": "Generating…",
   "runstatus_error": "Error",
+  "runstatus_error_orphaned": "The reply was generated on the agent side but could not be finalized (the bridge connection dropped mid-stream). You can delete or regenerate this message.",
   "runstatus_aborted": "Stopped",
   "advfilter_op_contains": "contains",
   "advfilter_toggle": "Advanced filter",

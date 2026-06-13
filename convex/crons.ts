@@ -83,4 +83,16 @@ crons.interval(
   {},
 );
 
+// Stuck-stream watchdog: every 2 minutes, flip assistant messages left
+// `status:"streaming"` with no update for >12 min to `error`. Heals the bridge's
+// lost-finalize failure mode (gateway finished the turn but the bridge never
+// relayed the finalize frame), which otherwise pins the message "streaming"
+// forever — eternal "Réflexion…" AND no per-message actions. See stuckStreams.ts.
+crons.interval(
+  "reconcile stuck streams",
+  { minutes: 2 },
+  internal.stuckStreams.reconcileStuckStreams,
+  {},
+);
+
 export default crons;

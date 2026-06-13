@@ -161,6 +161,12 @@ export const listAnomaliesInput = {
   kind: z.string().optional().describe("Filter by anomaly kind/type."),
 } as const;
 
+export const getChatStateInput = {
+  chatId: z.string().describe(
+    "The chat id (the /chat/<id> path segment) to inspect (required).",
+  ),
+} as const;
+
 /** Build a query string from defined values only (Bearer is never in the URL). */
 function qs(params: Record<string, string | number | undefined>): string {
   const sp = new URLSearchParams();
@@ -193,6 +199,20 @@ export function getCompat(
   options?: ApiFetchOptions,
 ): Promise<unknown> {
   return apiFetch(config, "/compat", {}, options);
+}
+
+/**
+ * GET /api/v1/chat-state — per-message lifecycle of one chat (METADATA ONLY: no
+ * text). Requires `traces.read`. Exposes the stuck-streaming signal: a message
+ * `status:"streaming"` with a large `ageSeconds` (`stuckStreaming:true`) is a
+ * turn whose finalize frame the bridge never relayed.
+ */
+export function getChatState(
+  config: Config,
+  args: { chatId: string },
+  options?: ApiFetchOptions,
+): Promise<unknown> {
+  return apiFetch(config, `/chat-state${qs({ chatId: args.chatId })}`, {}, options);
 }
 
 /** GET /api/v1/traces — recent trace events. Requires `traces.read`. */

@@ -17,8 +17,15 @@
 // `listByChatPaginated`) rather than widen this window.
 
 import { v } from "convex/values";
-import { query, mutation } from "./_generated/server";
+import { query, mutation, internalQuery, type QueryCtx } from "./_generated/server";
 import { internal } from "./_generated/api";
+import { STALE_STREAM_MS } from "./stuckStreams";
+import {
+  runStatusKind,
+  textLenBucket,
+  normalizeMessageErrorCode,
+  mimeTypeBase,
+} from "./lib/chatRenderState";
 import { Id } from "./_generated/dataModel";
 import { requireActive, requireOwnedChat } from "./lib/access";
 import { auditImpersonated } from "./lib/audit";
@@ -91,28 +98,15 @@ function compactProvenancePart(part: StoredProvenancePart): StoredProvenancePart
   return { ...part, items, ...(hasExcerpts ? { hasExcerpts: true } : {}) };
 }
 
-export const listByChat = query({
-  // v.string (NOT v.id): the chatId comes straight from the URL (/chat/$chatId)
-  // and may be malformed (a truncated/typo'd deep link). With v.id, a bad value
-  // throws an ArgumentValidationError that surfaces as the router's raw
-  // "Something went wrong" screen — the opposite of a clean app-shell message.
-  // We accept a string and validate via normalizeId instead.
-  args: { chatId: v.string() },
-  handler: async (ctx, { chatId }) => {
-    const { userId } = await requireActive(ctx);
-    // normalizeId validates the id FORMAT for this table WITHOUT throwing (null on
-    // a malformed shape). A well-formed-but-deleted id passes here, then db.get
-    // returns null — so malformed AND deleted both funnel to the same clean empty
-    // result the client renders as "conversation introuvable". A chat owned by
-    // someone else still throws (an IDOR signal, handled by the route fallback).
-    const id = ctx.db.normalizeId("chats", chatId);
-    if (id === null) return [];
-    const chat = await ctx.db.get(id);
-    if (chat === null) return [];
-    if (chat.userId !== userId) throw new Error("Forbidden: chat not owned by user");
-
-    // Bounded read: most-recent MESSAGE_WINDOW messages, newest first.
-    const recentDesc = await ctx.db
+// Shared CORE of the chat view: the EXACT bounded read + per-message part
+// resolution the client renders from. Extracted so the key-authed diagnostic
+// (chatStateInternal) consumes the SAME data path as listByChat — a structural
+// bug surfaces identically in both, never hidden behind a second implementation
+// (the projection-drift the API was asked to eliminate). Auth + owner-scoping
+// stay in the CALLERS; this core is identity-agnostic, keyed by a validated id.
+async function loadChatView(ctx: QueryCtx, id: Id<"chats">) {
+  // Bounded read: most-recent MESSAGE_WINDOW messages, newest first.
+  const recentDesc = await ctx.db
       .query("messages")
       .withIndex("by_chat", (q) => q.eq("chatId", id))
       .order("desc")
@@ -198,7 +192,117 @@ export const listByChat = query({
       }),
     );
 
-    return result;
+  return result;
+}
+
+export const listByChat = query({
+  // v.string (NOT v.id): the chatId comes straight from the URL (/chat/$chatId)
+  // and may be malformed (a truncated/typo'd deep link). With v.id a bad value
+  // throws an ArgumentValidationError that surfaces as the router's raw "Something
+  // went wrong" screen. We accept a string and validate via normalizeId instead.
+  args: { chatId: v.string() },
+  handler: async (ctx, { chatId }) => {
+    const { userId } = await requireActive(ctx);
+    // normalizeId validates the id FORMAT (null on a malformed shape). A
+    // well-formed-but-deleted id passes here, then db.get returns null — so
+    // malformed AND deleted both funnel to the same clean empty result the client
+    // renders as "conversation introuvable". A chat owned by someone else still
+    // throws (an IDOR signal, handled by the route fallback).
+    const id = ctx.db.normalizeId("chats", chatId);
+    if (id === null) return [];
+    const chat = await ctx.db.get(id);
+    if (chat === null) return [];
+    if (chat.userId !== userId) {
+      throw new Error("Forbidden: chat not owned by user");
+    }
+    return await loadChatView(ctx, id);
+  },
+});
+
+/**
+ * Diagnostic chat-state inspector behind the key-authed GET /api/v1/chat-state.
+ *
+ * SAME FUNCTIONS AS THE CLIENT: it consumes loadChatView (the EXACT data path
+ * listByChat renders from) and the SHARED runStatusKind derivation — so a
+ * structural/derived bug surfaces identically here and in the browser, with no
+ * second implementation to drift.
+ *
+ * SOC2 / PHI: a POSITIVE-ALLOWLIST serializer — it emits STRUCTURE + LIFECYCLE
+ * only, NEVER content (per the regulatory spec). No message text, filename,
+ * storage URL, tool input/output, reasoning text or provenance source ever
+ * leaves; `error` is normalized to a stable code, exact `textLen` is bucketed,
+ * `mimeType` is reduced to its base. The no-content guarantee is pinned by a
+ * sentinel test (see chatState.test). `internalQuery`: the HTTP route owns the
+ * key auth + permission (traces.read).
+ */
+export const chatStateInternal = internalQuery({
+  args: { chatId: v.string() },
+  handler: async (ctx, { chatId }) => {
+    const id = ctx.db.normalizeId("chats", chatId);
+    if (id === null) return { ok: false as const, error: "bad chatId" };
+    const chat = await ctx.db.get(id);
+    if (chat === null) return { ok: false as const, error: "not found" };
+    // SAME data path as the client.
+    const view = await loadChatView(ctx, id);
+    const now = Date.now();
+    const messages = view.map((mDoc) => {
+      const ageMs = now - mDoc.updatedAt;
+      const hasText = (mDoc.text?.length ?? 0) > 0;
+      // Redacted structural parts (allowlist) — presence/type/order, never bytes.
+      const parts = mDoc.parts.map((p) => {
+        switch (p.kind) {
+          case "tool":
+            return {
+              kind: "tool" as const,
+              name: p.name, // base tool name as stored (no instantiated args)
+              phase: p.phase ?? null,
+              hasInput: p.input !== undefined,
+              hasOutput: p.output !== undefined,
+            };
+          case "media":
+          case "file":
+            return {
+              kind: p.kind,
+              mimeType: mimeTypeBase(p.mimeType),
+              hasFilename: Boolean(p.filename),
+              hasStorageUrl: p.url !== null && p.url !== undefined,
+            };
+          case "reasoning":
+            return { kind: "reasoning" as const }; // presence only — never .text
+          case "provenance":
+            return { kind: "provenance" as const }; // presence only — never source/items
+          default:
+            return { kind: "unknown" as const };
+        }
+      });
+      return {
+        messageId: mDoc._id,
+        role: mDoc.role,
+        status: mDoc.status,
+        runId: mDoc.runId ?? null,
+        updatedAt: mDoc.updatedAt,
+        ageSeconds: Math.round(ageMs / 1000),
+        textLenBucket: textLenBucket(mDoc.text?.length ?? 0),
+        errorCode: normalizeMessageErrorCode(mDoc.error), // stable code, never raw
+        // Client's DERIVED render-state from the SHARED logic (runStatusView core).
+        runStatusKind: runStatusKind(mDoc.status, hasText),
+        stuckStreaming: mDoc.status === "streaming" && ageMs > STALE_STREAM_MS,
+        partCount: parts.length,
+        parts,
+      };
+    });
+    return {
+      ok: true as const,
+      chatId: id,
+      // The slug (instances.name), never the admin-settable displayName.
+      instanceName: chat.instanceName ?? null,
+      agentId: chat.agentId ?? null,
+      messageCount: messages.length,
+      streamingCount: messages.filter((m) => m.status === "streaming").length,
+      stuckCount: messages.filter((m) => m.stuckStreaming).length,
+      anyStreaming: messages.some((m) => m.status === "streaming"),
+      messages,
+    };
   },
 });
 

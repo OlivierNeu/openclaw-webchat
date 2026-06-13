@@ -41,6 +41,7 @@ import type * as lib_audit from "../lib/audit.js";
 import type * as lib_authDomains from "../lib/authDomains.js";
 import type * as lib_chartValidation from "../lib/chartValidation.js";
 import type * as lib_charts from "../lib/charts.js";
+import type * as lib_chatRenderState from "../lib/chatRenderState.js";
 import type * as lib_compat from "../lib/compat.js";
 import type * as lib_files from "../lib/files.js";
 import type * as lib_filters from "../lib/filters.js";
@@ -58,6 +59,7 @@ import type * as routing from "../routing.js";
 import type * as search from "../search.js";
 import type * as send from "../send.js";
 import type * as stream from "../stream.js";
+import type * as stuckStreams from "../stuckStreams.js";
 import type * as uploads from "../uploads.js";
 
 import type {
@@ -100,6 +102,7 @@ declare const fullApi: ApiFromModules<{
   "lib/authDomains": typeof lib_authDomains;
   "lib/chartValidation": typeof lib_chartValidation;
   "lib/charts": typeof lib_charts;
+  "lib/chatRenderState": typeof lib_chatRenderState;
   "lib/compat": typeof lib_compat;
   "lib/files": typeof lib_files;
   "lib/filters": typeof lib_filters;
@@ -117,6 +120,7 @@ declare const fullApi: ApiFromModules<{
   search: typeof search;
   send: typeof send;
   stream: typeof stream;
+  stuckStreams: typeof stuckStreams;
   uploads: typeof uploads;
 }>;
 

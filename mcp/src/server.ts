@@ -18,6 +18,8 @@ import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
 import { ApiError, resolveConfig } from "./config.js";
 import {
+  getChatState,
+  getChatStateInput,
   getCompat,
   getKpi,
   getKpiInput,
@@ -96,6 +98,20 @@ function main(): void {
       inputSchema: {},
     },
     async () => run(() => getCompat(config)),
+  );
+
+  server.registerTool(
+    "get_chat_state",
+    {
+      title: "Inspect chat state",
+      description:
+        "Per-message lifecycle of one chat (GET /chat-state). Key must have " +
+        "traces.read. METADATA ONLY (no message text). Exposes a stuck-streaming " +
+        "turn: a message with status 'streaming' + large ageSeconds " +
+        "(stuckStreaming:true) = the bridge never relayed its finalize frame.",
+      inputSchema: getChatStateInput,
+    },
+    async (args) => run(() => getChatState(config, args)),
   );
 
   server.registerTool(

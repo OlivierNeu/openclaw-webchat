@@ -612,6 +612,77 @@ http.route({
   }),
 });
 
+// Diagnostic chat-state inspector (key-authed). Lets an operator debug a chat
+// from the terminal: per-message lifecycle (status/runId/age/partCount) — the
+// signal that exposes a stuck-streaming turn (status "streaming" + large age =
+// the bridge never relayed finalize). Mirrors /api/v1/traces EXACTLY:
+// authenticate -> require traces.read -> record an `api.call` trace -> return.
+// METADATA ONLY (no message text) — chatStateInternal returns lengths/counts.
+http.route({
+  path: "/api/v1/chat-state",
+  method: "GET",
+  handler: httpAction(async (ctx, request) => {
+    const startedAt = Date.now();
+    const url = new URL(request.url);
+
+    const authResult = await authenticateApiKey(ctx, request);
+    if (!authResult.ok) {
+      return apiJson({ ok: false, error: authResult.error }, authResult.status);
+    }
+    const { principal } = authResult;
+
+    if (!principalHasPermission(principal, PERMISSIONS.TRACES_READ)) {
+      await ctx.runMutation(internal.observability.recordEvent, {
+        kind: "api.call",
+        direction: "inbound",
+        principalType: "service",
+        principalId: principal.id,
+        roleKey: principal.roleKey,
+        route: "/api/v1/chat-state",
+        method: "GET",
+        status: 403,
+        latencyMs: Date.now() - startedAt,
+      });
+      return apiJson(
+        { ok: false, error: "missing permission: traces.read" },
+        403,
+      );
+    }
+
+    const chatId = strParam(url, "chatId");
+    if (chatId === undefined) {
+      return apiJson({ ok: false, error: "chatId required" }, 400);
+    }
+    const state = await ctx.runQuery(internal.messages.chatStateInternal, {
+      chatId,
+    });
+
+    // SOC2 access log (CC6.1/CC7.2): WHO read WHICH chat + how much — non-PHI
+    // counts only (detects a key scraping chatIds). No content in the trace.
+    const auditMeta = state.ok
+      ? JSON.stringify({
+          messageCount: state.messageCount,
+          stuckCount: state.stuckCount,
+        })
+      : JSON.stringify({ result: state.error });
+    await ctx.runMutation(internal.observability.recordEvent, {
+      kind: "api.call",
+      direction: "inbound",
+      principalType: "service",
+      principalId: principal.id,
+      roleKey: principal.roleKey,
+      route: "/api/v1/chat-state",
+      method: "GET",
+      status: 200,
+      chatId,
+      latencyMs: Date.now() - startedAt,
+      meta: auditMeta,
+    });
+
+    return apiJson(state);
+  }),
+});
+
 // Heartbeat summary (key-authed) so an OpenClaw heartbeat learns whether
 // anomalies appeared -> can self-repair. Mirrors /api/v1/traces:
 // authenticate -> require anomalies.read -> record an `api.call` trace -> return.

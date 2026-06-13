@@ -1,64 +1,46 @@
 import { m } from "@/paraglide/messages.js";
+import {
+  runStatusKind,
+  messageHasText as sharedMessageHasText,
+  type RunStatusKind,
+} from "../../convex/lib/chatRenderState";
 
-// Pure mapping from a turn's (status, hasText) to the run-status chip view.
-//
-// Extracted as a pure function on purpose: the streaming states it drives
-// ("Réflexion…", "Génération…") are TRANSIENT and hard to screenshot reliably
-// (a fast turn's no-text window can be <200ms), so correctness is pinned by a
-// unit test here rather than only by a live capture (see runStatusView.test.ts).
-//
-//   thinking   = streaming with NO visible text yet  -> the typing indicator
-//   generating = streaming WITH text                 -> "still writing" footer
-//   error      = the run failed                       -> legible error + message
+// Thin localization wrapper over the SHARED pure derivation
+// (convex/lib/chatRenderState). The status->kind mapping lives in that one
+// module so the key-authed /api/v1/chat-state diagnostic reproduces the client's
+// derived render-state from the IDENTICAL logic (no projection drift — the bug
+// the API is meant to expose can't hide behind a second implementation). Here we
+// only attach the FR/EN labels:
+//   thinking   = streaming, no text yet              -> typing indicator
+//   generating = streaming, with text                -> "still writing"
+//   error      = the run failed                       -> error card
 //   aborted    = the user stopped it                  -> "Interrompu"
 //   (complete or unknown)                             -> null (no chip)
 
-export type RunStatusKind = "thinking" | "generating" | "error" | "aborted";
+export type { RunStatusKind };
 
 export interface RunStatusView {
   kind: RunStatusKind;
-  /** French, user-facing. */
+  /** French/EN, user-facing. */
   label: string;
 }
+
+const LABEL: Record<RunStatusKind, () => string> = {
+  thinking: m.runstatus_thinking,
+  generating: m.runstatus_generating,
+  error: m.runstatus_error,
+  aborted: m.runstatus_aborted,
+};
 
 export function runStatusView(
   status: string | undefined,
   hasText: boolean,
 ): RunStatusView | null {
-  // `undefined` status is the assistant-ui core's OPTIMISTIC placeholder (the
-  // upcoming-message it injects while `isRunning` before any real assistant doc
-  // exists) — it carries no `metadata.custom.status`. Render the SAME "thinking"
-  // indicator so this placeholder fills the send->first-token gap, then hands off
-  // seamlessly to the real streaming doc (identical label). Handled BEFORE the
-  // switch so a real "complete" message still maps to null (no chip). Real
-  // messages always carry a schema-required status, so this only ever matches
-  // the placeholder.
-  if (status === undefined)
-    return { kind: "thinking", label: m.runstatus_thinking() };
-  switch (status) {
-    case "streaming":
-      return hasText
-        ? { kind: "generating", label: m.runstatus_generating() }
-        : { kind: "thinking", label: m.runstatus_thinking() };
-    case "error":
-      return { kind: "error", label: m.runstatus_error() };
-    case "aborted":
-      return { kind: "aborted", label: m.runstatus_aborted() };
-    default:
-      // "complete" (and any unknown/absent status) shows no chip.
-      return null;
-  }
+  const kind = runStatusKind(status, hasText);
+  if (kind === null) return null;
+  return { kind, label: LABEL[kind]() };
 }
 
-/** True if the assistant message has at least one non-empty text part. */
-export function messageHasText(
-  content: ReadonlyArray<{ type?: string; text?: unknown }> | undefined,
-): boolean {
-  if (!content) return false;
-  return content.some(
-    (p) =>
-      p?.type === "text" &&
-      typeof p.text === "string" &&
-      p.text.trim().length > 0,
-  );
-}
+/** Re-exported from the shared module so existing importers (RunStatus) are
+ *  unchanged while the implementation stays single-source. */
+export const messageHasText = sharedMessageHasText;

@@ -610,6 +610,13 @@ export default defineSchema({
     updatedAt: v.number(),
   })
     .index("by_chat", ["chatId"])
+    // Bounded scan for the stuck-stream watchdog: a message left `status:
+    // "streaming"` whose `updatedAt` is far in the past = the bridge lost the
+    // run's WS subscription and never relayed the finalize frame (the UI then
+    // shows "Réflexion…" forever AND hides the per-message actions, since a
+    // streaming message keeps the runtime `isRunning`). The reconciler ranges
+    // exactly the streaming set ordered by updatedAt and flips the stale ones.
+    .index("by_status_updated", ["status", "updatedAt"])
     // Full-text search over message bodies for the global conversation search
     // (topbar palette). `userId` is a filter field so a single index serves the
     // owner-scoped query directly: q.search("text", term).eq("userId", userId).

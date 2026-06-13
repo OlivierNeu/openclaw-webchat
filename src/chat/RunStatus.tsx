@@ -2,6 +2,14 @@ import { useMessage } from "@assistant-ui/react";
 import { CircleAlert, Square } from "lucide-react";
 import type { MessageStatus } from "./convexTypes";
 import { runStatusView, messageHasText } from "./runStatusView";
+import { m } from "@/paraglide/messages.js";
+
+// Map a stored, stable error CODE to a localized, actionable message; any other
+// (gateway-provided) error text is shown verbatim. Keep the code in sync with
+// convex/stuckStreams.STUCK_STREAM_ERROR_CODE.
+function errorMessageFor(error: string): string {
+  return error === "stream_orphaned" ? m.runstatus_error_orphaned() : error;
+}
 
 // Renders the run lifecycle for an assistant message, driven by the normalizer's
 // `run.status {status, runId}` events which the bridge materialises into the
@@ -44,7 +52,9 @@ export function RunStatus() {
         <CircleAlert size={18} className="oc-error-card__icon" aria-hidden />
         <div className="oc-error-card__body">
           <span className="oc-error-card__title">{view.label}</span>
-          {error ? <span className="oc-error-card__msg">{error}</span> : null}
+          {error ? (
+            <span className="oc-error-card__msg">{errorMessageFor(error)}</span>
+          ) : null}
         </div>
       </div>
     );
