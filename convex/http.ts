@@ -179,61 +179,6 @@ http.route({
   }),
 });
 
-// Bridge compatibility snapshot for a key-authed principal. Mirrors the
-// /api/v1/traces route (authenticate -> require bridge.read -> record an
-// `api.call` trace -> return the snapshot). Exposes the SAME data the Settings
-// Bridge tab reads (reachable, bridgeVersion, per-instance targets + their
-// gatewayVersion), so an `observer` key can diagnose the "version gateway
-// inconnue" gating WITHOUT UI access: empty `targets` or a `gatewayVersion:null`
-// target is exactly what gates AgentFiles/ChatDefaults off.
-http.route({
-  path: "/api/v1/compat",
-  method: "GET",
-  handler: httpAction(async (ctx, request) => {
-    const startedAt = Date.now();
-
-    const authResult = await authenticateApiKey(ctx, request);
-    if (!authResult.ok) {
-      return apiJson({ ok: false, error: authResult.error }, authResult.status);
-    }
-    const { principal } = authResult;
-
-    if (!principalHasPermission(principal, PERMISSIONS.BRIDGE_READ)) {
-      await ctx.runMutation(internal.observability.recordEvent, {
-        kind: "api.call",
-        direction: "inbound",
-        principalType: "service",
-        principalId: principal.id,
-        roleKey: principal.roleKey,
-        route: "/api/v1/compat",
-        method: "GET",
-        status: 403,
-        latencyMs: Date.now() - startedAt,
-      });
-      return apiJson(
-        { ok: false, error: "missing permission: bridge.read" },
-        403,
-      );
-    }
-
-    const snapshot = await ctx.runQuery(internal.compat.snapshotForApi, {});
-
-    await ctx.runMutation(internal.observability.recordEvent, {
-      kind: "api.call",
-      direction: "inbound",
-      principalType: "service",
-      principalId: principal.id,
-      roleKey: principal.roleKey,
-      route: "/api/v1/compat",
-      method: "GET",
-      status: 200,
-      latencyMs: Date.now() - startedAt,
-    });
-
-    return apiJson({ ok: true, compat: snapshot });
-  }),
-});
-
 // Recent KPI rollups for a key-authed principal (increment 4). Mirrors the
 // /api/v1/traces route exactly: authenticate -> require kpi.read -> record an
 // `api.call` trace -> return recent rollups. 401 on a bad/disabled/expired key,
