@@ -143,6 +143,12 @@ export const BUILTIN_ROLES: Record<
       PERMISSIONS.OPENCLAW_QUERY,
       PERMISSIONS.ANOMALIES_READ,
       PERMISSIONS.ANOMALIES_REPORT,
+      // Agent is a SUPERSET of observer's read access — it must also see the
+      // bridge compat/version snapshot (the agent supervises its own runtime;
+      // and an operator using an agent key to diagnose needs /api/v1/compat).
+      // seedBuiltinRoles reconciles this onto an existing `agent` row on the
+      // next listRoles / mintApiKey (same migration path as observer.bridge.read).
+      PERMISSIONS.BRIDGE_READ,
     ],
   },
 };

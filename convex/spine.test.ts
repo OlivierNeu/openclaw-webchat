@@ -105,6 +105,17 @@ describe("observability spine", () => {
         false,
       );
 
+      // agent is a SUPERSET of observer's read access: it carries bridge.read
+      // (compat) too, PLUS its write perm (anomalies.report). So an agent key
+      // can reach /api/v1/compat (the observer-vs-agent gap that 403'd compat).
+      const agentPerms = await permissionsForRoleKey(ctx, "agent");
+      expect(roleHasPermission(agentPerms, PERMISSIONS.BRIDGE_READ)).toBe(true);
+      expect(roleHasPermission(agentPerms, PERMISSIONS.TRACES_READ)).toBe(true);
+      expect(roleHasPermission(agentPerms, PERMISSIONS.ANOMALIES_REPORT)).toBe(
+        true,
+      );
+      expect(roleHasPermission(agentPerms, PERMISSIONS.ADMIN_MANAGE)).toBe(false);
+
       // admin is the wildcard superset -> every permission.
       const adminPerms = await permissionsForRoleKey(ctx, "admin");
       expect(roleHasPermission(adminPerms, PERMISSIONS.ADMIN_MANAGE)).toBe(true);
