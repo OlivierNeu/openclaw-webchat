@@ -42,6 +42,14 @@ export type CompatSummary = {
     protocolVersion: number | null;
     supported: { openclaw: ProviderSupport };
   };
+  // Snapshot freshness/health — so a key-authed reader (the observer API) can
+  // tell a FRESH poll from a stale last-good one, and a successful poll from a
+  // preserved-on-failure one, WITHOUT UI access. `reachable:false` keeps the
+  // last-good `instances`; `fetchedAt` is the timestamp of the LAST poll attempt
+  // (success or failure). Null only when no poll has ever run.
+  reachable: boolean | null;
+  lastError: string | null;
+  fetchedAt: number | null;
   instances: Array<{
     instanceName: string;
     provider: string;
@@ -220,6 +228,9 @@ export function summarizeCompat(
     protocolVersion: number | null;
     compat: unknown;
     targets: CompatTarget[];
+    reachable?: boolean;
+    lastError?: string | null;
+    fetchedAt?: number;
   } | null,
 ): CompatSummary {
   if (doc === null) {
@@ -229,6 +240,9 @@ export function summarizeCompat(
         protocolVersion: null,
         supported: { openclaw: { range: null, validatedVersions: [] } },
       },
+      reachable: null,
+      lastError: null,
+      fetchedAt: null,
       instances: [],
     };
   }
@@ -238,6 +252,9 @@ export function summarizeCompat(
       protocolVersion: doc.protocolVersion,
       supported: { openclaw: providerSupport(doc.compat, "openclaw") },
     },
+    reachable: doc.reachable ?? null,
+    lastError: doc.lastError ?? null,
+    fetchedAt: doc.fetchedAt ?? null,
     instances: doc.targets.map((t) => ({
       instanceName: t.instanceName,
       provider: t.provider,

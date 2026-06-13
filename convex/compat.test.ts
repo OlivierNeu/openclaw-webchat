@@ -277,6 +277,42 @@ describe("providerSupport + summarizeCompat (the /api/v1/compat payload)", () =>
     expect(s.bridge.version).toBeNull();
     expect(s.bridge.supported.openclaw.range).toBeNull();
     expect(s.instances).toEqual([]);
+    // Freshness/health are null when no poll has ever landed.
+    expect(s.reachable).toBeNull();
+    expect(s.lastError).toBeNull();
+    expect(s.fetchedAt).toBeNull();
+  });
+
+  test("surfaces snapshot freshness/health (reachable/lastError/fetchedAt)", () => {
+    // A FRESH, reachable poll.
+    const ok = summarizeCompat({
+      bridgeVersion: "0.1.0",
+      protocolVersion: 2,
+      compat: MANIFEST,
+      targets: [],
+      reachable: true,
+      lastError: null,
+      fetchedAt: 1781330000000,
+    });
+    expect(ok.reachable).toBe(true);
+    expect(ok.lastError).toBeNull();
+    expect(ok.fetchedAt).toBe(1781330000000);
+
+    // A FAILED poll preserving last-good: reachable false + a reason code, but
+    // fetchedAt still advances (timestamp of the last ATTEMPT) so a reader can
+    // tell the snapshot was just re-checked even though it stayed stale.
+    const failed = summarizeCompat({
+      bridgeVersion: "0.1.0",
+      protocolVersion: 2,
+      compat: MANIFEST,
+      targets: [],
+      reachable: false,
+      lastError: "unreachable",
+      fetchedAt: 1781330300000,
+    });
+    expect(failed.reachable).toBe(false);
+    expect(failed.lastError).toBe("unreachable");
+    expect(failed.fetchedAt).toBe(1781330300000);
   });
 
   test("capabilitiesForInstance projects one target or null", () => {
