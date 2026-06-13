@@ -73,8 +73,15 @@ export const pollBridgeCompat = internalAction({
       const body: unknown = await res.json();
       // Defensive normalization of the network body; a LEGACY bridge (no
       // additive fields) lands as nulls + empty targets — stored as-is so the
-      // readers can apply the legacy policy.
-      const normalized = normalizeCapabilitiesBody(body);
+      // readers can apply the legacy policy. BRIDGE_INSTANCE_NAME (the instance
+      // THIS single bridge serves — Convex owns instance identity) lets the
+      // normalizer attribute + resolve the served instance from the bridge's
+      // top-level gatewayVersion, so the version-gated UI resolves even with no
+      // live session and no OPENCLAW_INSTANCE_NAME on the bridge.
+      const normalized = normalizeCapabilitiesBody(
+        body,
+        process.env.BRIDGE_INSTANCE_NAME ?? null,
+      );
       await ctx.runMutation(internal.compat.upsertBridgeCompat, normalized);
     } catch {
       await ctx.runMutation(internal.compat.recordCompatFailure, {

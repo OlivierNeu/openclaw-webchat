@@ -23,6 +23,9 @@
 
 export const LIVE_CAPABILITIES_BODY = {
   instanceName: "main",
+  // Top-level best-known version of the single gateway this bridge serves,
+  // reported independently of any target (Convex attributes instance identity).
+  gatewayVersion: "2026.5.19",
   capabilities: {
     kind: "openclaw",
     agentDiscovery: true,

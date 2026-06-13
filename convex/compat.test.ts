@@ -18,7 +18,9 @@ import {
   normalizeCapabilitiesBody,
   normalizeCompatTarget,
   parseVersion,
+  providerCapabilityTable,
   providerSupport,
+  resolveCapabilitiesFromManifest,
   summarizeCompat,
   withinSupport,
   type CompatTarget,
@@ -199,6 +201,119 @@ describe("normalizeCapabilitiesBody (new vs LEGACY bridge)", () => {
     expect(boundCompatManifest([1, 2, 3])).toBeNull();
     expect(boundCompatManifest({ big: "x".repeat(70 * 1024) })).toBeNull();
     expect(boundCompatManifest({ ok: true })).toEqual({ ok: true });
+  });
+});
+
+describe("resolveCapabilitiesFromManifest (Convex mirrors the bridge)", () => {
+  test("reads a provider's capability->minVersion table; odd shapes -> {}", () => {
+    expect(providerCapabilityTable(MANIFEST, "openclaw").agentFiles).toBe(
+      "2026.6.5",
+    );
+    expect(providerCapabilityTable(MANIFEST, "hermes")).toEqual({});
+    expect(providerCapabilityTable(null, "openclaw")).toEqual({});
+    expect(providerCapabilityTable({ providers: 7 }, "openclaw")).toEqual({});
+  });
+
+  test("a within-range version: 6.5 unlocks the 6.5-only caps", () => {
+    const r = resolveCapabilitiesFromManifest(MANIFEST, "openclaw", "2026.6.5");
+    expect(r.versionBeyondValidated).toBe(false);
+    expect(r.capabilities.agentFiles).toBe(true);
+    expect(r.capabilities.configDefaults).toBe(true);
+    expect(r.capabilities.knobThinkingLevel).toBe(true);
+  });
+
+  test("6.1: the 6.5-only caps stay OFF, the 6.1 cap is ON", () => {
+    const r = resolveCapabilitiesFromManifest(MANIFEST, "openclaw", "2026.6.1");
+    expect(r.capabilities.agentFiles).toBe(false);
+    expect(r.capabilities.configDefaults).toBe(false);
+    expect(r.capabilities.inboundAttachments).toBe(true);
+    expect(r.capabilities.knobThinkingLevel).toBe(true);
+  });
+
+  test("the floor (5.19): only floor-min caps are on", () => {
+    const r = resolveCapabilitiesFromManifest(MANIFEST, "openclaw", "2026.5.19");
+    expect(r.capabilities.agentFiles).toBe(false);
+    expect(r.capabilities.inboundAttachments).toBe(false);
+    expect(r.capabilities.knobThinkingLevel).toBe(true);
+  });
+
+  test("null/unparseable version -> CONSERVATIVE floor (minVersion === range.min)", () => {
+    for (const v of [null, "v2026.6.5", "garbage"]) {
+      const r = resolveCapabilitiesFromManifest(MANIFEST, "openclaw", v);
+      expect(r.capabilities.agentFiles).toBe(false); // min 6.5 != floor
+      expect(r.capabilities.knobThinkingLevel).toBe(true); // min == floor
+      expect(r.versionBeyondValidated).toBe(false);
+    }
+  });
+
+  test("a version BEYOND maxValidated -> all caps true + the flag", () => {
+    const r = resolveCapabilitiesFromManifest(MANIFEST, "openclaw", "2027.1.0");
+    expect(r.versionBeyondValidated).toBe(true);
+    expect(r.capabilities.agentFiles).toBe(true);
+    expect(r.capabilities.inboundAttachments).toBe(true);
+  });
+
+  test("a provider with no published range -> zero capabilities", () => {
+    const r = resolveCapabilitiesFromManifest(MANIFEST, "hermes", "2026.6.5");
+    expect(r.capabilities).toEqual({});
+    expect(r.versionBeyondValidated).toBe(false);
+  });
+});
+
+describe("normalizeCapabilitiesBody — Convex attributes the served instance", () => {
+  // THE prod scenario: an IDLE bridge (no live session, no OPENCLAW_INSTANCE_NAME)
+  // reports its gateway version ONLY at the top level. Convex, owning instance
+  // identity via BRIDGE_INSTANCE_NAME, synthesizes the served instance's target
+  // and resolves its capabilities — so AgentFiles/ChatDefaults resolve with no
+  // env on the bridge and no chat open.
+  const IDLE_BODY = {
+    instanceName: null,
+    gatewayVersion: "2026.6.5",
+    bridgeVersion: "0.1.0",
+    protocolVersion: 2,
+    compat: MANIFEST,
+    targets: [] as unknown[],
+  };
+
+  test("idle bridge + top-level version -> served target synthesized + resolved", () => {
+    const n = normalizeCapabilitiesBody(IDLE_BODY, "olivier");
+    expect(n.targets).toHaveLength(1);
+    const t = n.targets[0]!;
+    expect(t.instanceName).toBe("olivier");
+    expect(t.provider).toBe("openclaw");
+    expect(t.gatewayVersion).toBe("2026.6.5");
+    expect(t.capabilities.agentFiles).toBe(true);
+    expect(t.capabilities.configDefaults).toBe(true);
+    // End-to-end through the projection the frontend reads:
+    const cap = capabilitiesForInstance(n.targets, "olivier");
+    expect(cap?.capabilities?.agentFiles).toBe(true);
+  });
+
+  test("a live target already covering the served instance is NOT duplicated", () => {
+    // NEW_CAPABILITIES_BODY's live target is instanceName "main" — serve "main".
+    const body = { ...NEW_CAPABILITIES_BODY, gatewayVersion: "2026.6.5" };
+    const n = normalizeCapabilitiesBody(body, "main");
+    expect(n.targets).toHaveLength(1);
+    // The LIVE target wins (its real captured version 5.19), no synthetic 6.5 dupe.
+    expect(n.targets[0]!.gatewayVersion).toBe("2026.5.19");
+  });
+
+  test("no servedInstance -> no synthesis (backward compatible)", () => {
+    const n = normalizeCapabilitiesBody(IDLE_BODY);
+    expect(n.targets).toEqual([]);
+  });
+
+  test("served set but NO top-level version -> no synthesis", () => {
+    const n = normalizeCapabilitiesBody({ ...IDLE_BODY, gatewayVersion: null }, "olivier");
+    expect(n.targets).toEqual([]);
+  });
+
+  test("served set but LEGACY bridge (compat:null) -> no all-false target", () => {
+    const n = normalizeCapabilitiesBody(
+      { instanceName: null, gatewayVersion: "2026.6.5", targets: [] },
+      "olivier",
+    );
+    expect(n.targets).toEqual([]);
   });
 });
 
@@ -413,6 +528,62 @@ describe("pollBridgeCompat (cron storage, both endpoints mocked)", () => {
       versionBeyondValidated: false,
     });
     expect(typeof doc?.fetchedAt).toBe("number");
+  });
+
+  test("idle bridge + BRIDGE_INSTANCE_NAME: Convex synthesizes the served target (full wiring)", async () => {
+    // THE prod scenario, end-to-end through the REAL poller: an idle bridge with
+    // NO live session and NO OPENCLAW_INSTANCE_NAME reports its gateway version
+    // ONLY at the top level (empty targets). Convex, owning instance identity via
+    // BRIDGE_INSTANCE_NAME, must synthesize the served target — and it must survive
+    // the bridgeCompatTarget schema on upsert + surface through summarizeCompat +
+    // capabilitiesForInstance (the front path). This is the wiring the pure-function
+    // tests cannot prove (poller env -> normalize -> stored doc -> readers).
+    const t = convexTest(schema, modules);
+    const prevInst = process.env.BRIDGE_INSTANCE_NAME;
+    process.env.BRIDGE_INSTANCE_NAME = "olivier";
+    const IDLE_BODY = {
+      instanceName: null,
+      gatewayVersion: "2026.6.5",
+      bridgeVersion: "0.1.0",
+      protocolVersion: 2,
+      compat: MANIFEST,
+      targets: [],
+    };
+    const stub = stubBridge({ "/capabilities": json(IDLE_BODY) });
+    try {
+      await t.action(internal.compat.pollBridgeCompat, {});
+    } finally {
+      stub.restore();
+      if (prevInst === undefined) delete process.env.BRIDGE_INSTANCE_NAME;
+      else process.env.BRIDGE_INSTANCE_NAME = prevInst;
+    }
+
+    const doc = await readCompatDoc(t);
+    expect(doc?.reachable).toBe(true);
+    expect(doc?.targets).toHaveLength(1);
+    expect(doc?.targets[0]).toMatchObject({
+      instanceName: "olivier",
+      provider: "openclaw",
+      gatewayVersion: "2026.6.5",
+    });
+    expect(doc?.targets[0]?.capabilities.agentFiles).toBe(true);
+    expect(doc?.targets[0]?.capabilities.configDefaults).toBe(true);
+
+    // get_compat path: summarizeCompat exposes the synthesized instance.
+    const summary = summarizeCompat(doc);
+    expect(summary.instances).toEqual([
+      {
+        instanceName: "olivier",
+        provider: "openclaw",
+        gatewayVersion: "2026.6.5",
+        withinSupport: true,
+        versionBeyondValidated: false,
+      },
+    ]);
+    // front path: capabilitiesForInstance resolves agentFiles for the served chat.
+    expect(
+      capabilitiesForInstance(doc!.targets, "olivier")?.capabilities?.agentFiles,
+    ).toBe(true);
   });
 
   test("a LEGACY bridge (backward skew) stores compat:null", async () => {

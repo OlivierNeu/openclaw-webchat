@@ -172,22 +172,68 @@ export function boundCompatManifest(raw: unknown): unknown {
 
 /** Normalize a whole /capabilities response body. BACKWARD SKEW: an old bridge
  *  (no bridgeVersion/protocolVersion/compat/targets) normalizes to nulls + an
- *  empty target list — the reader treats compat:null as "legacy bridge". */
-export function normalizeCapabilitiesBody(raw: unknown): NormalizedCapabilities {
+ *  empty target list — the reader treats compat:null as "legacy bridge".
+ *
+ *  `servedInstance` (= the deployment's BRIDGE_INSTANCE_NAME) makes Convex the
+ *  AUTHORITY on instance identity: the bridge reports the raw `gatewayVersion`
+ *  of the single gateway it serves at the TOP LEVEL, and when no per-session
+ *  target already covers the served instance, we SYNTHESIZE its target here —
+ *  resolving capabilities from the manifest ourselves. This removes the bridge's
+ *  need to echo OPENCLAW_INSTANCE_NAME for the version-gated UI to resolve (an
+ *  idle bridge with no live session still yields the served instance's caps). */
+export function normalizeCapabilitiesBody(
+  raw: unknown,
+  servedInstance?: string | null,
+): NormalizedCapabilities {
   const o = (
     typeof raw === "object" && raw !== null ? raw : {}
   ) as Record<string, unknown>;
   const targetsRaw = Array.isArray(o.targets) ? o.targets : [];
-  const targets = dedupeTargetsByInstance(
+  let targets = dedupeTargetsByInstance(
     targetsRaw
       .map(normalizeCompatTarget)
       .filter((t): t is CompatTarget => t !== null),
   );
+  const compat = boundCompatManifest(o.compat);
+
+  // Convex owns instance identity: attribute + resolve the served instance from
+  // the bridge's top-level gateway version when no per-session target covers it.
+  const topGatewayVersion = str(o.gatewayVersion);
+  if (
+    servedInstance &&
+    topGatewayVersion !== null &&
+    !targets.some((t) => t.instanceName === servedInstance)
+  ) {
+    // Provider is hardcoded "openclaw": the bridge is openclaw-only today (one
+    // gateway per bridge). When Hermes lands (Phase 3), the bridge must report a
+    // top-level provider alongside gatewayVersion and this reads it instead.
+    const resolved = resolveCapabilitiesFromManifest(
+      compat,
+      "openclaw",
+      topGatewayVersion,
+    );
+    // Only synthesize when the manifest actually resolved a capability table — a
+    // legacy bridge (compat:null) yields none, so we leave it to the legacy policy
+    // instead of inventing an all-false target.
+    if (Object.keys(resolved.capabilities).length > 0) {
+      targets = [
+        ...targets,
+        {
+          instanceName: servedInstance,
+          provider: "openclaw",
+          gatewayVersion: topGatewayVersion,
+          capabilities: resolved.capabilities,
+          versionBeyondValidated: resolved.versionBeyondValidated,
+        },
+      ];
+    }
+  }
+
   return {
     bridgeVersion: str(o.bridgeVersion),
     protocolVersion:
       typeof o.protocolVersion === "number" ? o.protocolVersion : null,
-    compat: boundCompatManifest(o.compat),
+    compat,
     targets,
   };
 }
@@ -217,6 +263,62 @@ export function providerSupport(
     ? e.validatedVersions.filter((x): x is string => typeof x === "string")
     : [];
   return { range, validatedVersions };
+}
+
+/** Read a provider's capability->minVersion table out of a stored CompatManifest.
+ *  Defensive (manifest is v.any()): any odd shape degrades to {}. */
+export function providerCapabilityTable(
+  compat: unknown,
+  provider: string,
+): Record<string, string> {
+  if (typeof compat !== "object" || compat === null) return {};
+  const providers = (compat as Record<string, unknown>).providers;
+  if (typeof providers !== "object" || providers === null) return {};
+  const entry = (providers as Record<string, unknown>)[provider];
+  if (typeof entry !== "object" || entry === null) return {};
+  const caps = (entry as Record<string, unknown>).capabilities;
+  if (typeof caps !== "object" || caps === null) return {};
+  const out: Record<string, string> = {};
+  for (const [k, v] of Object.entries(caps as Record<string, unknown>)) {
+    if (typeof v === "string") out[k] = v;
+  }
+  return out;
+}
+
+/** Resolve a provider's capability table against a gateway version, from the
+ *  stored CompatManifest. EXACT MIRROR of the bridge's resolveCapabilities
+ *  (src/compat.ts) so Convex — which OWNS instance identity (BRIDGE_INSTANCE_NAME)
+ *  — can attribute + resolve capabilities for the served instance itself, even
+ *  when the bridge reports no per-session target. Policy (identical to the bridge):
+ *   - provider with no published range: zero capabilities;
+ *   - null/unparseable version: CONSERVATIVE floor — a capability is true only
+ *     when its minVersion IS the supported floor (`range.min`);
+ *   - version within range: true iff version >= its minVersion;
+ *   - version beyond `maxValidated`: every capability true + `versionBeyondValidated`.
+ *  Both sides fail CLOSED on the same inputs (the `parseVersion` mirror guarantees it). */
+export function resolveCapabilitiesFromManifest(
+  compat: unknown,
+  provider: string,
+  gatewayVersion: string | null,
+): { capabilities: Record<string, boolean>; versionBeyondValidated: boolean } {
+  const range = providerSupport(compat, provider).range;
+  if (range === null) return { capabilities: {}, versionBeyondValidated: false };
+  const table = providerCapabilityTable(compat, provider);
+  const capabilities: Record<string, boolean> = {};
+  const parsed = gatewayVersion === null ? null : parseVersion(gatewayVersion);
+  if (parsed === null) {
+    for (const [cap, minVersion] of Object.entries(table)) {
+      capabilities[cap] = minVersion === range.min;
+    }
+    return { capabilities, versionBeyondValidated: false };
+  }
+  const beyondCmp = compareVersions(gatewayVersion as string, range.maxValidated);
+  const beyond = beyondCmp !== null && beyondCmp > 0;
+  for (const [cap, minVersion] of Object.entries(table)) {
+    const cmp = compareVersions(gatewayVersion as string, minVersion);
+    capabilities[cap] = beyond || (cmp !== null && cmp >= 0);
+  }
+  return { capabilities, versionBeyondValidated: beyond };
 }
 
 /** Build the /api/v1/compat summary from the stored snapshot (or null when no
