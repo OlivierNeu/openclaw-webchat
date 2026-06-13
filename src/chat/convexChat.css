@@ -3415,3 +3415,88 @@
   font-size: 0.74rem;
   color: var(--muted-foreground);
 }
+
+/* ── Sources (provenance/v1) — what memory/document plugins fed the LLM this
+   turn. Same UX grammar as ToolActivity: compact summary line, expandable
+   detail. Namespaced .oc-sources (container uniqueness — GC-P5 lesson). */
+.oc-sources {
+  margin-top: 0.35rem;
+}
+.oc-sources__summary {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.45rem;
+  padding: 0.25rem 0.55rem;
+  border: 1px solid transparent;
+  border-radius: var(--radius-md);
+  background: transparent;
+  color: var(--muted-foreground);
+  font-size: 0.78rem;
+  cursor: pointer;
+}
+.oc-sources__summary:hover {
+  background: var(--muted);
+  color: var(--foreground);
+}
+.oc-sources__summary:focus-visible {
+  outline: 2px solid var(--ring);
+  outline-offset: 2px;
+}
+.oc-sources__label {
+  font-weight: 600;
+}
+.oc-sources__detail {
+  margin: 0.35rem 0 0 1.4rem;
+  display: grid;
+  gap: 0.6rem;
+}
+.oc-sources__group-title {
+  display: flex;
+  align-items: baseline;
+  gap: 0.5rem;
+  margin: 0 0 0.3rem;
+  font-size: 0.75rem;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: var(--muted-foreground);
+}
+.oc-sources__plugin {
+  font-weight: 400;
+  text-transform: none;
+  letter-spacing: normal;
+  font-size: 0.72rem;
+  opacity: 0.8;
+}
+.oc-sources__items {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  display: grid;
+  gap: 0.4rem;
+}
+.oc-sources__item-head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.4rem;
+  font-size: 0.82rem;
+}
+.oc-sources__item-title {
+  font-weight: 500;
+}
+.oc-sources__chip {
+  padding: 0.05rem 0.45rem;
+  font-size: 0.7rem;
+  color: var(--muted-foreground);
+  background: var(--muted);
+  border-radius: 999px;
+  white-space: nowrap;
+}
+.oc-sources__excerpt {
+  margin: 0.25rem 0 0;
+  padding: 0.3rem 0.6rem;
+  font-size: 0.78rem;
+  color: var(--muted-foreground);
+  border-left: 2px solid var(--border);
+}

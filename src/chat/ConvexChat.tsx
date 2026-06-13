@@ -60,6 +60,7 @@ import { uiPrefOptimisticUpdate } from "./uiPrefOptimistic";
 import { deleteMessageOptimisticUpdate } from "./deleteMessageOptimistic";
 import { RunStatus } from "./RunStatus";
 import { ToolActivity } from "./ToolActivity";
+import { SourcesActivity } from "./SourcesActivity";
 import { MediaPart } from "./MediaPart";
 import { MarkdownText } from "./MarkdownText";
 import { FeedbackButton } from "./FeedbackDialog";
@@ -919,6 +920,9 @@ function AssistantMessage() {
           ) : (
             <MessagePrimitive.Parts components={assistantComponents} />
           )}
+          {/* "Sources" (provenance/v1): what memory/document plugins fed the
+              LLM this turn. Data-driven — renders nothing without reports. */}
+          <SourcesActivity />
           <RunStatus />
         </div>
         {/* Per-message actions, hidden while a turn runs + revealed on hover for

@@ -6,6 +6,7 @@ import {
   isMediaPart,
   isReasoningPart,
   isToolPart,
+  type ProvenancePartView,
 } from "./convexTypes";
 import type { ToolActivityPart } from "./toolActivityView";
 
@@ -95,16 +96,21 @@ export function convertConvexMessage(
 ): ThreadMessageLike {
   const content: ContentPart[] = [];
   const toolParts: ToolActivityPart[] = [];
+  const provenanceParts: ProvenancePartView[] = [];
 
   // 1) Parts that PRECEDE the text chronologically (listByChat returns parts
   //    flat + sorted by order): reasoning goes into content; tool calls are
   //    diverted to metadata.custom.toolParts (rendered by ToolActivity, never
   //    interleaved with the body — fixes the text-inserted-above-cards bug).
+  //    Provenance reports are likewise diverted (rendered by SourcesActivity
+  //    under the reply, never inside the body).
   message.parts.forEach((p, index) => {
     if (isReasoningPart(p)) {
       content.push({ type: "reasoning", text: p.text } as ContentPart);
     } else if (isToolPart(p)) {
       toolParts.push(toolPartToActivity(message, index, p));
+    } else if (p.kind === "provenance") {
+      provenanceParts.push(p);
     }
   });
 
@@ -154,6 +160,9 @@ export function convertConvexMessage(
         // the expanded ToolCards stream live as the bridge appends/patches
         // tool parts.
         toolParts,
+        // Provenance reports (what the gateway plugins fed the LLM this turn),
+        // in part order — rendered by SourcesActivity as the "Sources" line.
+        provenanceParts,
         // The EXACT stored text — the verbatim string for the "Source" view (no
         // markdown, no autocorrect, no transformation). For the user turn this is
         // what was typed/sent; for the assistant turn it is the gateway's final

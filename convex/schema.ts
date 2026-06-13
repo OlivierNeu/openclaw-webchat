@@ -46,6 +46,45 @@ export const messagePart = v.union(
     kind: v.literal("reasoning"),
     text: v.string(),
   }),
+  // Provenance report (provenance/v1, docs/PROVENANCE_CONTRACT.md): what a
+  // gateway context-injecting plugin (conversational memory / document RAG)
+  // fed the LLM for THIS turn. Emitted by the plugin on its gateway-scoped
+  // agent-event stream, validated + bounded by the bridge before ingest
+  // (bridge core/provenance.ts), re-validated by this union. `pluginId` is
+  // stamped by the GATEWAY (authenticated emitter), never plugin-declared.
+  v.object({
+    kind: v.literal("provenance"),
+    v: v.number(),
+    pluginId: v.string(),
+    source: v.string(),
+    group: v.union(v.literal("memory"), v.literal("documents")),
+    injected: v.optional(
+      v.object({
+        chars: v.optional(v.number()),
+        position: v.optional(v.string()),
+        truncated: v.optional(v.boolean()),
+      }),
+    ),
+    retrieval: v.optional(
+      v.object({
+        route: v.optional(v.string()),
+        bank: v.optional(v.string()),
+        collections: v.optional(v.array(v.string())),
+        lightragMode: v.optional(v.string()),
+      }),
+    ),
+    items: v.array(
+      v.object({
+        id: v.optional(v.string()),
+        type: v.optional(v.string()),
+        date: v.optional(v.string()),
+        score: v.optional(v.number()),
+        text: v.optional(v.string()),
+        file_name: v.optional(v.string()),
+        collection: v.optional(v.string()),
+      }),
+    ),
+  }),
 );
 
 // One target's health, flattened from the bridge's /health snapshot. Non-PHI:

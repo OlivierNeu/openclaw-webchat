@@ -38,7 +38,58 @@ type ClientPart =
   | { kind: "tool"; name: string; phase: string; input?: unknown; output?: unknown }
   | { kind: "media"; url: string | null; filename: string; mimeType: string }
   | { kind: "file"; url: string | null; filename: string; mimeType: string }
-  | { kind: "reasoning"; text: string };
+  | { kind: "reasoning"; text: string }
+  // Provenance reports (docs/PROVENANCE_CONTRACT.md). The REACTIVE projection
+  // is COMPACT: item texts are stripped (Codex review P2 — the window-wide
+  // stream must never carry megabytes of excerpts); `hasExcerpts` flags that
+  // the on-demand getProvenanceParts query has more for this message.
+  | {
+      kind: "provenance";
+      v: number;
+      pluginId: string;
+      source: string;
+      group: "memory" | "documents";
+      hasExcerpts?: boolean;
+      injected?: { chars?: number; position?: string; truncated?: boolean };
+      retrieval?: {
+        route?: string;
+        bank?: string;
+        collections?: string[];
+        lightragMode?: string;
+      };
+      items: {
+        id?: string;
+        type?: string;
+        date?: string;
+        score?: number;
+        text?: string;
+        file_name?: string;
+        collection?: string;
+      }[];
+    };
+
+/** Stored provenance part shape (matches the schema union variant). */
+type StoredProvenancePart = Extract<
+  ClientPart,
+  { kind: "provenance" }
+>;
+
+/**
+ * Reactive-stream projection of a provenance part: identical metadata, item
+ * TEXTS stripped (they can weigh up to 32KB per report and the stream carries
+ * the whole MESSAGE_WINDOW). `hasExcerpts` lets the UI decide whether
+ * expanding the Sources panel should fetch getProvenanceParts.
+ */
+function compactProvenancePart(part: StoredProvenancePart): StoredProvenancePart {
+  let hasExcerpts = false;
+  const items = part.items.map((item) => {
+    if (item.text === undefined) return item;
+    hasExcerpts = true;
+    const { text: _text, ...rest } = item;
+    return rest;
+  });
+  return { ...part, items, ...(hasExcerpts ? { hasExcerpts: true } : {}) };
+}
 
 export const listByChat = query({
   // v.string (NOT v.id): the chatId comes straight from the URL (/chat/$chatId)
@@ -112,6 +163,16 @@ export const listByChat = query({
             case "reasoning":
               parts.push({ kind: "reasoning", text: part.text });
               break;
+            case "provenance":
+              // COMPACT projection (Codex review P2): the reactive stream
+              // carries the whole MESSAGE_WINDOW, so shipping the `full`-level
+              // excerpts verbatim could reach tens of MB (200 msgs × 8
+              // reports × 32KB) even with the Sources panel collapsed. Strip
+              // item texts here; `hasExcerpts` tells the UI whether expanding
+              // should fetch the bounded per-message detail
+              // (getProvenanceParts) on demand.
+              parts.push(compactProvenancePart(part));
+              break;
           }
         }
 
@@ -138,6 +199,33 @@ export const listByChat = query({
     );
 
     return result;
+  },
+});
+
+/**
+ * ON-DEMAND provenance detail for ONE message (Codex review P2): the reactive
+ * listByChat ships the COMPACT projection (no item texts); the Sources panel
+ * fetches the full reports — excerpts included — only when the user expands
+ * it. Bounded by construction: a single message's provenance parts (bridge
+ * caps: ≤8 reports × ≤32KB). Owner-scoped through the message's chat.
+ */
+export const getProvenanceParts = query({
+  args: { messageId: v.id("messages") },
+  handler: async (ctx, { messageId }) => {
+    const { userId } = await requireActive(ctx);
+    const message = await ctx.db.get(messageId);
+    if (message === null) return []; // deleted mid-expand: render nothing
+    await requireOwnedChat(ctx, userId, message.chatId);
+    const partDocs = await ctx.db
+      .query("messageParts")
+      .withIndex("by_message", (q) => q.eq("messageId", messageId))
+      .collect();
+    partDocs.sort((a, b) => a.order - b.order);
+    const parts: StoredProvenancePart[] = [];
+    for (const { part } of partDocs) {
+      if (part.kind === "provenance") parts.push(part);
+    }
+    return parts;
   },
 });
 

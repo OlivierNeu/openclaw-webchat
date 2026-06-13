@@ -64,7 +64,45 @@ export type ConvexMessagePartView =
   | {
       kind: "reasoning";
       text: string;
-    };
+    }
+  | ProvenancePartView;
+
+/**
+ * Provenance report (provenance/v1 — docs/PROVENANCE_CONTRACT.md): what a
+ * gateway context-injecting plugin fed the LLM for this turn. `pluginId` is
+ * gateway-stamped (authenticated emitter). Rendered by SourcesActivity.
+ *
+ * The REACTIVE stream (listByChat) carries the COMPACT projection: item texts
+ * stripped, `hasExcerpts` set when the on-demand detail query
+ * (messages.getProvenanceParts) has more. The detail query returns the same
+ * shape WITH texts.
+ */
+export interface ProvenancePartView {
+  kind: "provenance";
+  v: number;
+  pluginId: string;
+  source: string;
+  group: "memory" | "documents";
+  hasExcerpts?: boolean;
+  injected?: { chars?: number; position?: string; truncated?: boolean };
+  retrieval?: {
+    route?: string;
+    bank?: string;
+    collections?: string[];
+    lightragMode?: string;
+  };
+  items: ProvenanceItemView[];
+}
+
+export interface ProvenanceItemView {
+  id?: string;
+  type?: string;
+  date?: string;
+  score?: number;
+  text?: string;
+  file_name?: string;
+  collection?: string;
+}
 
 /**
  * A chat message as returned by `api.messages.listByChat`.
