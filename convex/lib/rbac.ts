@@ -123,6 +123,11 @@ export const BUILTIN_ROLES: Record<
       PERMISSIONS.TRACES_READ,
       PERMISSIONS.KPI_READ,
       PERMISSIONS.ANOMALIES_READ,
+      // Bridge compat/version is observability too: without this the key-authed
+      // GET /api/v1/compat (bridge.read) is unreachable by ANY service-account
+      // role — the gap that 403'd the observer key. seedBuiltinRoles reconciles
+      // this onto the existing `observer` row on the next listRoles/mintApiKey.
+      PERMISSIONS.BRIDGE_READ,
     ],
   },
   agent: {

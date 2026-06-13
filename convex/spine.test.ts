@@ -90,6 +90,17 @@ describe("observability spine", () => {
       expect(roleHasPermission(observerPerms, PERMISSIONS.TRACES_READ)).toBe(
         true,
       );
+      // Observer is the read-only OBSERVABILITY role: bridge compat/version
+      // (GET /api/v1/compat) is observability, so it MUST be granted — without
+      // it the key-authed compat route is unreachable by any service account.
+      expect(roleHasPermission(observerPerms, PERMISSIONS.BRIDGE_READ)).toBe(
+        true,
+      );
+      // ...but it stays READ-ONLY: no write perms (agent's anomalies.report) and
+      // no admin.
+      expect(
+        roleHasPermission(observerPerms, PERMISSIONS.ANOMALIES_REPORT),
+      ).toBe(false);
       expect(roleHasPermission(observerPerms, PERMISSIONS.ADMIN_MANAGE)).toBe(
         false,
       );
@@ -104,6 +115,41 @@ describe("observability spine", () => {
       expect(roleHasPermission(unknownPerms, PERMISSIONS.TRACES_READ)).toBe(
         false,
       );
+    });
+  });
+
+  // Load-bearing for the prod fix: a deployment seeded BEFORE bridge.read was
+  // added to the observer definition holds a stale `roles` row. The next
+  // re-seed (lazy on listRoles/mintApiKey, or at deploy) MUST reconcile the
+  // drift and grant bridge.read — otherwise the observer key keeps getting 403
+  // on /api/v1/compat even after the code ships. This pins that migration.
+  test("re-seed reconciles a pre-existing observer role missing bridge.read", async () => {
+    const t = convexTest(schema, modules);
+    await t.run(async (ctx) => {
+      // Simulate the deployed-prod state (observer row WITHOUT bridge.read).
+      await ctx.db.insert("roles", {
+        key: "observer",
+        name: "Observer",
+        description: "Read-only observability service account.",
+        builtin: true,
+        permissions: [
+          PERMISSIONS.TRACES_READ,
+          PERMISSIONS.KPI_READ,
+          PERMISSIONS.ANOMALIES_READ,
+        ],
+      });
+
+      const before = await permissionsForRoleKey(ctx, "observer");
+      expect(roleHasPermission(before, PERMISSIONS.BRIDGE_READ)).toBe(false);
+
+      // Deploy-time / hot-path re-seed reconciles the drift.
+      await seedBuiltinRoles(ctx);
+
+      const after = await permissionsForRoleKey(ctx, "observer");
+      expect(roleHasPermission(after, PERMISSIONS.BRIDGE_READ)).toBe(true);
+      // Existing grants survive the reconcile (no clobber).
+      expect(roleHasPermission(after, PERMISSIONS.TRACES_READ)).toBe(true);
+      expect(roleHasPermission(after, PERMISSIONS.KPI_READ)).toBe(true);
     });
   });
 });
