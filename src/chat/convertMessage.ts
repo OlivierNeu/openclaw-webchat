@@ -70,7 +70,7 @@ function toolPartToActivity(
 // `openclaw-lightrag-jerome---4c23520c-…-….pdf`. Strip the `---<uuid>` segment
 // for DISPLAY (and the download filename) so the chip reads `…-jerome.pdf`. Only
 // a strict UUID immediately before the extension is removed — a user upload like
-// `IFOA Présentation.pptx` (no such segment) is left untouched.
+// `IFOA Presentation.pptx` (no such segment) is left untouched.
 const GATEWAY_MEDIA_ID_RE =
   /---[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}(?=\.[^.]+$|$)/i;
 
