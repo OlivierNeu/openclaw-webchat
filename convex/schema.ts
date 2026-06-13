@@ -220,7 +220,12 @@ export default defineSchema({
     impersonatingUserId: v.optional(v.id("users")),
   })
     .index("by_user", ["userId"])
-    .index("by_role", ["role"]),
+    .index("by_role", ["role"])
+    // Email-collision lookup at provisioning: ensureProfile refuses to AUTO-create
+    // a SECOND profile for a NEW identity (provider+subject) whose email already
+    // belongs to an existing profile — cross-provider account linking must be an
+    // explicit, signed-in action, never an implicit merge. See lib/access.
+    .index("by_email", ["email"]),
 
   // OpenClaw / Hermes instances the deployment knows about. NO secrets (gateway
   // tokens and device identities are bridge-env only — the bridge maps `name` ->

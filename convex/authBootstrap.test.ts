@@ -118,3 +118,83 @@ describe("bootstrap resolves the email from the users row (JWT has no email clai
     expect(second.role).toBe("pending"); // prod: approval required
   });
 });
+
+// Cross-provider duplicate-account guard (the "two Olivier Neu" bug). A second
+// OAuth identity (provider+subject -> a fresh convex-auth userId) whose email
+// already owns a profile must be BLOCKED at provisioning — linking is explicit
+// (signed-in, from settings), never an implicit second profile. anon OFF =
+// production posture.
+describe("cross-provider email collision is blocked (no silent duplicate profile)", () => {
+  let prevAnon: string | undefined;
+  let prevDomains: string | undefined;
+  beforeEach(() => {
+    prevAnon = process.env.OPENCLAW_ENABLE_ANON_AUTH;
+    prevDomains = process.env.AUTH_ALLOWED_EMAIL_DOMAINS;
+    delete process.env.OPENCLAW_ENABLE_ANON_AUTH;
+    process.env.AUTH_ALLOWED_EMAIL_DOMAINS = "example.com,example.org";
+  });
+  afterEach(() => {
+    if (prevAnon === undefined) delete process.env.OPENCLAW_ENABLE_ANON_AUTH;
+    else process.env.OPENCLAW_ENABLE_ANON_AUTH = prevAnon;
+    if (prevDomains === undefined) delete process.env.AUTH_ALLOWED_EMAIL_DOMAINS;
+    else process.env.AUTH_ALLOWED_EMAIL_DOMAINS = prevDomains;
+  });
+
+  test("a NEW identity with an already-owned email is refused, with ZERO side effects", async () => {
+    const t = convexTest(schema, modules);
+    // Identity A (e.g. Google) signs in first -> admin, owns the email.
+    const userA = await t.run(async (ctx) =>
+      ctx.db.insert("users", { email: "olivier@example.com", name: "Olivier Neu" }),
+    );
+    expect(
+      (await t.withIdentity({ subject: `${userA}|sA` }).mutation(api.me.bootstrap, {}))
+        .role,
+    ).toBe("admin");
+
+    // Identity B (e.g. Microsoft Entra) — a fresh userId, SAME email.
+    const userB = await t.run(async (ctx) =>
+      ctx.db.insert("users", { email: "olivier@example.com", name: "Olivier Neu" }),
+    );
+    await expect(
+      t.withIdentity({ subject: `${userB}|sB` }).mutation(api.me.bootstrap, {}),
+    ).rejects.toThrow(/compte existe déjà pour cet email/);
+
+    // No second profile; admin flag not re-flipped (blocked BEFORE any write).
+    await t.run(async (ctx) => {
+      const profiles = await ctx.db.query("profiles").collect();
+      expect(profiles).toHaveLength(1);
+      expect(profiles[0].userId).toBe(userA);
+      const metas = await ctx.db.query("appMeta").collect();
+      expect(metas).toHaveLength(1);
+      expect(metas[0].adminAssigned).toBe(true);
+    });
+  });
+
+  test("identity A re-signs in -> resolves to its existing profile (never blocked)", async () => {
+    const t = convexTest(schema, modules);
+    const userA = await t.run(async (ctx) =>
+      ctx.db.insert("users", { email: "olivier@example.com", name: "Olivier" }),
+    );
+    const asA = t.withIdentity({ subject: `${userA}|s1` });
+    await asA.mutation(api.me.bootstrap, {});
+    await expect(asA.mutation(api.me.bootstrap, {})).resolves.toBeDefined();
+    await t.run(async (ctx) => {
+      expect(await ctx.db.query("profiles").collect()).toHaveLength(1);
+    });
+  });
+
+  test("a DIFFERENT email is NOT blocked (distinct person -> own profile)", async () => {
+    const t = convexTest(schema, modules);
+    const userA = await t.run(async (ctx) =>
+      ctx.db.insert("users", { email: "olivier@example.com", name: "O" }),
+    );
+    await t.withIdentity({ subject: `${userA}|s` }).mutation(api.me.bootstrap, {});
+    const userC = await t.run(async (ctx) =>
+      ctx.db.insert("users", { email: "jerome@example.com", name: "J" }),
+    );
+    await t.withIdentity({ subject: `${userC}|s` }).mutation(api.me.bootstrap, {});
+    await t.run(async (ctx) => {
+      expect(await ctx.db.query("profiles").collect()).toHaveLength(2);
+    });
+  });
+});

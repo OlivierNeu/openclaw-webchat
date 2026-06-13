@@ -165,6 +165,30 @@ export async function ensureProfile(ctx: MutationCtx): Promise<Id<"users">> {
     return userId;
   }
 
+  // ACCOUNT LINKING (security). This identity (provider+subject -> a fresh
+  // convex-auth userId) has NO profile yet. If a profile ALREADY exists with the
+  // SAME email, it belongs to a DIFFERENT identity — e.g. the user authenticated
+  // via Google before and is now coming in via Microsoft Entra. Cross-provider
+  // linking MUST be EXPLICIT (a signed-in user adds a provider from settings),
+  // never an implicit auto-merge nor a silent SECOND profile (the duplicate-
+  // account bug). BLOCK the auto-provision here — placed BEFORE any appMeta /
+  // admin-claim write so a blocked sign-in has ZERO side effects (it must never
+  // flip `adminAssigned`). Org SSO emails are case-stable, so the exact-match
+  // index lookup is reliable in practice.
+  if (email !== undefined) {
+    const emailOwner = await ctx.db
+      .query("profiles")
+      .withIndex("by_email", (q) => q.eq("email", email))
+      .first();
+    if (emailOwner !== null) {
+      throw new Error(
+        "Un compte existe déjà pour cet email via une autre méthode de " +
+          "connexion. Connectez-vous avec celle-ci, puis liez ce fournisseur " +
+          "depuis vos paramètres.",
+      );
+    }
+  }
+
   // Resolve the singleton, creating it on first ever call.
   let meta = await ctx.db
     .query("appMeta")
