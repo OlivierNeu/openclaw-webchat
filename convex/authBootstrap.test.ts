@@ -198,3 +198,82 @@ describe("cross-provider email collision is blocked (no silent duplicate profile
     });
   });
 });
+
+// Display fields (email/name) self-heal on re-sign-in: a profile created before
+// name persistence — or whose name changed at the IdP — is refreshed from the
+// users row WITHOUT touching role or canonical. anon OFF = production posture.
+describe("ensureProfile refreshes display name/email on re-sign-in", () => {
+  let prevAnon: string | undefined;
+  let prevDomains: string | undefined;
+  beforeEach(() => {
+    prevAnon = process.env.OPENCLAW_ENABLE_ANON_AUTH;
+    prevDomains = process.env.AUTH_ALLOWED_EMAIL_DOMAINS;
+    delete process.env.OPENCLAW_ENABLE_ANON_AUTH;
+    process.env.AUTH_ALLOWED_EMAIL_DOMAINS = "example.com";
+  });
+  afterEach(() => {
+    if (prevAnon === undefined) delete process.env.OPENCLAW_ENABLE_ANON_AUTH;
+    else process.env.OPENCLAW_ENABLE_ANON_AUTH = prevAnon;
+    if (prevDomains === undefined) delete process.env.AUTH_ALLOWED_EMAIL_DOMAINS;
+    else process.env.AUTH_ALLOWED_EMAIL_DOMAINS = prevDomains;
+  });
+
+  test("backfills a missing name (legacy profile) without changing role/canonical", async () => {
+    const t = convexTest(schema, modules);
+    const userId = await t.run(async (ctx) =>
+      ctx.db.insert("users", { email: "olivier@example.com", name: "Olivier Neu" }),
+    );
+    const as = t.withIdentity({ subject: `${userId}|session` });
+    await as.mutation(api.me.bootstrap, {}); // first user -> admin, name persisted
+    // Simulate a profile created BEFORE name persistence: clear the name.
+    const canonicalBefore = await t.run(async (ctx) => {
+      const p = await ctx.db
+        .query("profiles")
+        .withIndex("by_user", (q) => q.eq("userId", userId))
+        .unique();
+      await ctx.db.patch(p!._id, { name: undefined });
+      return p!.canonical;
+    });
+
+    await as.mutation(api.me.bootstrap, {}); // re-sign-in heals the name
+
+    await t.run(async (ctx) => {
+      const p = await ctx.db
+        .query("profiles")
+        .withIndex("by_user", (q) => q.eq("userId", userId))
+        .unique();
+      expect(p?.name).toBe("Olivier Neu");
+      expect(p?.role).toBe("admin"); // role untouched
+      expect(p?.canonical).toBe(canonicalBefore); // routing key untouched
+    });
+  });
+
+  test("does NOT overwrite an existing (user-owned) name with the IdP value", async () => {
+    const t = convexTest(schema, modules);
+    const userId = await t.run(async (ctx) =>
+      ctx.db.insert("users", { email: "olivier@example.com", name: "Maiden Name" }),
+    );
+    const as = t.withIdentity({ subject: `${userId}|session` });
+    await as.mutation(api.me.bootstrap, {}); // seeds profile.name = "Maiden Name"
+    // The user edits their display name (e.g. newly married). The IdP users row
+    // still carries the old name (the IdP may even change later too).
+    await t.run(async (ctx) => {
+      const p = await ctx.db
+        .query("profiles")
+        .withIndex("by_user", (q) => q.eq("userId", userId))
+        .unique();
+      await ctx.db.patch(p!._id, { name: "Married Name" });
+      await ctx.db.patch(userId, { name: "IdP Changed Name" });
+    });
+
+    await as.mutation(api.me.bootstrap, {}); // re-sign-in must NOT clobber it
+
+    await t.run(async (ctx) => {
+      const p = await ctx.db
+        .query("profiles")
+        .withIndex("by_user", (q) => q.eq("userId", userId))
+        .unique();
+      expect(p?.name).toBe("Married Name"); // user edit wins, IdP never overwrites
+    });
+  });
+});

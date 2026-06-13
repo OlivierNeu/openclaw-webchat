@@ -152,4 +152,33 @@ describe("observability spine", () => {
       expect(roleHasPermission(after, PERMISSIONS.KPI_READ)).toBe(true);
     });
   });
+
+  // Built-in roles carry a non-empty, DISTINCT description (the user couldn't
+  // tell observer from agent). seedBuiltinRoles also reconciles a stale stored
+  // description onto the canonical one — same drift path as the perms above.
+  test("seedBuiltinRoles writes distinct descriptions + reconciles a stale one", async () => {
+    const t = convexTest(schema, modules);
+    await t.run(async (ctx) => {
+      await ctx.db.insert("roles", {
+        key: "observer",
+        name: "Observer",
+        description: "old terse desc",
+        builtin: true,
+        permissions: [PERMISSIONS.TRACES_READ],
+      });
+      await seedBuiltinRoles(ctx);
+      const observer = await ctx.db
+        .query("roles")
+        .withIndex("by_key", (q) => q.eq("key", "observer"))
+        .unique();
+      const agent = await ctx.db
+        .query("roles")
+        .withIndex("by_key", (q) => q.eq("key", "agent"))
+        .unique();
+      expect(observer?.description).toBeTruthy();
+      expect(observer?.description).not.toBe("old terse desc"); // reconciled
+      expect(agent?.description).toBeTruthy();
+      expect(observer?.description).not.toBe(agent?.description); // distinct
+    });
+  });
 });

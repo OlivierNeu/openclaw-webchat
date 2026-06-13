@@ -310,6 +310,34 @@ export const setLocale = mutation({
   },
 });
 
+// Set the calling user's OWN display name (shown in the user list + account
+// menu). Identity-level (effective user, like setLocale) so it works while
+// impersonating too. The display name is USER-OWNED: ensureProfile only SEEDS it
+// from the IdP and never overwrites a set value, so this edit sticks across
+// sign-ins (e.g. a newly married last name). Blank clears it (the list then
+// falls back to the email). Bounded so it can never become an unbounded blob.
+export const setMyName = mutation({
+  args: { name: v.string() },
+  handler: async (ctx, { name }) => {
+    const trimmed = name.trim().slice(0, 120);
+    const next = trimmed.length > 0 ? trimmed : undefined;
+    const actor = await getActor(ctx);
+    const userId = actor.effectiveUserId;
+    const profile = await getProfile(ctx, userId);
+    if (profile === null) {
+      // Pre-bootstrap (real user only): a minimal pending profile carrying the
+      // name, mirroring setLocale's pre-bootstrap path.
+      await ctx.db.insert("profiles", { userId, role: "pending", name: next });
+      return;
+    }
+    await ctx.db.patch(profile._id, { name: next });
+    await auditImpersonated(ctx, actor, "name.set", {
+      resource: "profile",
+      resourceId: userId,
+    });
+  },
+});
+
 // Whether the caller is CURRENTLY impersonating, for the warning banner. Keyed
 // off the REAL identity (requireRealUserId) so it never resolves through the
 // impersonation it is reporting on. Returns false for non-admins (no leak).

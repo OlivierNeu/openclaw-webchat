@@ -2357,11 +2357,20 @@
 .oc-matrix__phi { color: var(--destructive); }
 .oc-matrix__corner, .oc-matrix__rolecell {
   position: sticky; left: 0; z-index: 1; background: var(--background);
-  text-align: left; min-width: 11rem;
+  text-align: left; min-width: 11rem; max-width: 22rem;
 }
 .oc-matrix thead .oc-matrix__corner { z-index: 3; background: var(--muted); }
-.oc-matrix__rolename { display: flex; align-items: center; gap: 0.4rem; }
-.oc-matrix__rolekey { display: block; font-size: 0.75rem; color: var(--muted-foreground); margin-top: 0.15rem; }
+.oc-matrix__rolename { display: flex; align-items: center; flex-wrap: wrap; gap: 0.4rem; }
+/* The key is a small inline identifier chip next to the name — NOT a second
+   title line (that read as a duplicate of the name for built-in roles). */
+.oc-matrix__rolekey {
+  font-size: 0.7rem; color: var(--muted-foreground);
+  background: var(--muted); border-radius: 0.25rem; padding: 0.05rem 0.3rem;
+}
+.oc-matrix__roledesc {
+  font-size: 0.75rem; line-height: 1.35; color: var(--muted-foreground);
+  margin-top: 0.3rem; white-space: normal; font-weight: 400;
+}
 .oc-matrix__unseeded { display: block; font-size: 0.7rem; color: var(--destructive); margin-top: 0.1rem; }
 .oc-matrix__cell { vertical-align: middle; }
 .oc-matrix__cell .peer { margin: 0 auto; }

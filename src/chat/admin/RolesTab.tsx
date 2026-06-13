@@ -4,6 +4,7 @@ import { Lock } from "lucide-react";
 import { api } from "../convexApi";
 import type { Id } from "../convexApi";
 import { EntitySheet } from "./EntitySheet";
+import { roleDescription } from "./roleDescriptions";
 import { useConfirm } from "@/components/ConfirmDialog";
 import { useToast } from "@/components/ui/toast";
 import { Badge } from "@/components/ui/badge";
@@ -272,6 +273,7 @@ export function RolesTab() {
                     <th className="oc-matrix__rolecell">
                       <div className="oc-matrix__rolename">
                         <span>{role.name}</span>
+                        <code className="oc-matrix__rolekey">{role.key}</code>
                         {role.builtin ? (
                           <Badge variant="outline" className="gap-1">
                             <Lock /> {m.roles_badge_builtin()}
@@ -280,7 +282,11 @@ export function RolesTab() {
                           <Badge variant="secondary">{m.roles_badge_custom()}</Badge>
                         )}
                       </div>
-                      <code className="oc-matrix__rolekey">{role.key}</code>
+                      {roleDescription(role) ? (
+                        <p className="oc-matrix__roledesc">
+                          {roleDescription(role)}
+                        </p>
+                      ) : null}
                     </th>
                     {ALL_PERMISSION_KEYS.map((permKey) => {
                       const granted =

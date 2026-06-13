@@ -137,6 +137,29 @@ export const approveUser = mutation({
   },
 });
 
+// Admin: set ANY user's display name (the user list shows it). Mirrors setRole
+// (requireAdmin, addressed by profileId). The name is the SAME user-owned field
+// a user edits via me.setMyName; an admin can correct it on someone's behalf.
+// Blank clears it (the list falls back to the email). Audited.
+export const setUserName = mutation({
+  args: { profileId: v.id("profiles"), name: v.string() },
+  handler: async (ctx, { profileId, name }) => {
+    const adminId = await requireAdmin(ctx);
+    const target = await ctx.db.get(profileId);
+    if (target === null) throw new Error("Not found: profile");
+    const trimmed = name.trim().slice(0, 120);
+    await ctx.db.patch(profileId, {
+      name: trimmed.length > 0 ? trimmed : undefined,
+    });
+    await recordAudit(
+      ctx,
+      { realUserId: adminId, effectiveUserId: adminId, impersonating: false },
+      "user.setName",
+      { resource: "user", resourceId: target.userId },
+    );
+  },
+});
+
 // Hard-delete a user: their profile + ALL owned data (chats and — via the shared
 // cascadeDeleteChat helper — each chat's messages/parts/pending outbox/mirrored
 // files rows; plus projects, agent grants, group memberships, uploads, feedback,

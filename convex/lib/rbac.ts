@@ -103,22 +103,25 @@ export const BUILTIN_ROLES: Record<
 > = {
   pending: {
     name: "Pending",
-    description: "Authenticated but not yet approved (blocked).",
+    description:
+      "Authenticated but not yet approved — access is blocked until an admin approves the account.",
     permissions: [],
   },
   user: {
     name: "User",
-    description: "Approved user with chat access.",
+    description: "Approved person with chat access.",
     permissions: [PERMISSIONS.CHATS_READ],
   },
   admin: {
     name: "Admin",
-    description: "Full access (superset). UI/admin only.",
+    description:
+      "Full access (superset): manages users, roles, agents, instances and observability.",
     permissions: WILDCARD,
   },
   observer: {
     name: "Observer",
-    description: "Read-only observability service account.",
+    description:
+      "READ-ONLY service account for monitoring: views traces, KPIs, anomalies and bridge/version status through the API. Cannot write or trigger anything.",
     permissions: [
       PERMISSIONS.TRACES_READ,
       PERMISSIONS.KPI_READ,
@@ -132,7 +135,8 @@ export const BUILTIN_ROLES: Record<
   },
   agent: {
     name: "Agent",
-    description: "OpenClaw agent service account (query + report).",
+    description:
+      "Service account for an OpenClaw agent itself: the observer's read access PLUS querying OpenClaw and REPORTING anomalies (write — e.g. heartbeat / self-repair). Use it for an automated agent, not a human watching dashboards.",
     permissions: [
       PERMISSIONS.TRACES_READ,
       PERMISSIONS.KPI_READ,

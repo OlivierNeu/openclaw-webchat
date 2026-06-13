@@ -6,6 +6,7 @@ import { api } from "../convexApi";
 import type { Id } from "../convexApi";
 import { DataTableShell } from "./DataTableShell";
 import { EntitySheet } from "./EntitySheet";
+import { roleDescription } from "./roleDescriptions";
 import { FilterBar } from "./filters/FilterBar";
 import { useConfirm } from "@/components/ConfirmDialog";
 import { useToast } from "@/components/ui/toast";
@@ -116,6 +117,7 @@ export function ServiceAccountsTab() {
   const roles = useQuery(api.apiKeys.listRoles, {});
 
   const createServiceAccount = useMutation(api.apiKeys.createServiceAccount);
+  const updateServiceAccount = useMutation(api.apiKeys.updateServiceAccount);
   const deleteServiceAccount = useMutation(api.apiKeys.deleteServiceAccount);
   const mintApiKey = useAction(api.apiKeys.mintApiKey);
   const revokeApiKey = useMutation(api.apiKeys.revokeApiKey);
@@ -130,6 +132,8 @@ export function ServiceAccountsTab() {
 
   const [sheetOpen, setSheetOpen] = useState(false);
   const [form, setForm] = useState<AccountForm>(EMPTY_ACCOUNT);
+  // The account being edited (null = create mode). The EntitySheet is shared.
+  const [editing, setEditing] = useState<Id<"serviceAccounts"> | null>(null);
   const [expanded, setExpanded] = useState<Set<string>>(new Set());
   const [minting, setMinting] = useState<Id<"serviceAccounts"> | null>(null);
   // L5: synchronous guard against a double-click minting two keys. React state
@@ -166,17 +170,43 @@ export function ServiceAccountsTab() {
 
   async function submitAccount() {
     try {
-      await createServiceAccount({
-        name: form.name,
-        roleKey: form.roleKey,
-        description: form.description || undefined,
-      });
+      if (editing) {
+        await updateServiceAccount({
+          serviceAccountId: editing,
+          name: form.name,
+          roleKey: form.roleKey,
+          description: form.description,
+        });
+        toast.success(m.serviceaccounts_toast_update_done());
+      } else {
+        await createServiceAccount({
+          name: form.name,
+          roleKey: form.roleKey,
+          description: form.description || undefined,
+        });
+      }
       setForm(EMPTY_ACCOUNT);
+      setEditing(null);
       setSheetOpen(false);
     } catch (err) {
       // M5: surface duplicate-key / validation rejection instead of swallowing.
-      toast.error(m.serviceaccounts_toast_create_error(), err);
+      toast.error(
+        editing
+          ? m.serviceaccounts_toast_update_error()
+          : m.serviceaccounts_toast_create_error(),
+        err,
+      );
     }
+  }
+
+  function openEdit(account: ServiceAccountRow) {
+    setForm({
+      name: account.name,
+      roleKey: account.roleKey,
+      description: account.description ?? "",
+    });
+    setEditing(account._id);
+    setSheetOpen(true);
   }
 
   async function mint(account: ServiceAccountRow) {
@@ -313,6 +343,7 @@ export function ServiceAccountsTab() {
         addLabel={m.serviceaccounts_add()}
         onAdd={() => {
           setForm(EMPTY_ACCOUNT);
+          setEditing(null);
           setSheetOpen(true);
         }}
         emptyHint={m.serviceaccounts_empty()}
@@ -326,6 +357,10 @@ export function ServiceAccountsTab() {
           />
         )}
         rowActions={(a) => [
+          {
+            label: m.serviceaccounts_action_edit(),
+            onSelect: () => openEdit(a),
+          },
           {
             label: m.serviceaccounts_action_mint(),
             onSelect: () => void mint(a),
@@ -361,7 +396,19 @@ export function ServiceAccountsTab() {
               </Button>
             ),
           },
-          { header: m.serviceaccounts_col_name(), cell: (a) => a.name },
+          {
+            header: m.serviceaccounts_col_name(),
+            cell: (a) => (
+              <div className="flex flex-col">
+                <span>{a.name}</span>
+                {a.description ? (
+                  <span className="text-muted-foreground text-xs">
+                    {a.description}
+                  </span>
+                ) : null}
+              </div>
+            ),
+          },
           {
             header: m.serviceaccounts_col_role(),
             cell: (a) => <Badge variant="secondary">{a.roleKey}</Badge>,
@@ -419,12 +466,25 @@ export function ServiceAccountsTab() {
 
       <EntitySheet
         open={sheetOpen}
-        onOpenChange={setSheetOpen}
-        title={m.serviceaccounts_sheet_title()}
-        description={m.serviceaccounts_sheet_description()}
+        onOpenChange={(o) => {
+          setSheetOpen(o);
+          if (!o) setEditing(null); // back to create mode when closed
+        }}
+        title={
+          editing
+            ? m.serviceaccounts_edit_title()
+            : m.serviceaccounts_sheet_title()
+        }
+        description={
+          editing
+            ? m.serviceaccounts_edit_description()
+            : m.serviceaccounts_sheet_description()
+        }
         canSubmit={Boolean(form.name && form.roleKey)}
         onSubmit={submitAccount}
-        submitLabel={m.serviceaccounts_submit()}
+        submitLabel={
+          editing ? m.serviceaccounts_edit_submit() : m.serviceaccounts_submit()
+        }
       >
         <div className="oc-form">
           <label className="oc-field">
@@ -451,6 +511,15 @@ export function ServiceAccountsTab() {
                 ))}
               </SelectContent>
             </Select>
+            {(() => {
+              // Show the chosen role's description right under the picker so the
+              // observer-vs-agent difference is clear at the moment of choosing.
+              const chosen = (roles ?? []).find((r) => r.key === form.roleKey);
+              const desc = chosen ? roleDescription(chosen) : null;
+              return desc ? (
+                <span className="text-muted-foreground text-xs">{desc}</span>
+              ) : null;
+            })()}
           </label>
           <label className="oc-field">
             <span className="oc-field__label">{m.serviceaccounts_field_description()}</span>

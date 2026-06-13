@@ -155,12 +155,32 @@ export async function ensureProfile(ctx: MutationCtx): Promise<Id<"users">> {
     throw new Error("Forbidden: email domain not allowed");
   }
 
+  // Display name resolved like email: the JWT may not carry `name`, so the users
+  // row (written by the provider profile()) is the source of truth, with
+  // identity as a fallback for any provider that does include it.
+  const name =
+    (identity?.name as string | undefined) ??
+    (userDoc?.name as string | undefined) ??
+    undefined;
+
   const existing = await getProfile(ctx, userId);
   if (existing !== null) {
-    // Backfill a role-less legacy row to "pending" (least privilege) so the
-    // rest of the code can assume a role is present after ensureProfile.
-    if (existing.role === undefined) {
-      await ctx.db.patch(existing._id, { role: "pending" });
+    // Backfill a role-less legacy row to "pending" (least privilege) so the rest
+    // of the code can assume a role is present after ensureProfile. ALSO BACKFILL
+    // the DISPLAY fields (email/name) from the IdP source of truth — but ONLY
+    // when MISSING, never overwriting an existing value. The display `name` is
+    // USER-OWNED once set (a user can edit it — e.g. a new married name — via
+    // me.setMyName, an admin via admin.setUserName), so a later sign-in must not
+    // clobber it back to the IdP value; the IdP only SEEDS it. This heals legacy
+    // / pre-persistence profiles without fighting user edits. Never touches
+    // `role` (the claim flow above owns it) nor `canonical` (write-once routing
+    // key — a change would fork the gateway session). Idempotent once filled.
+    const patch: { role?: Role; email?: string; name?: string } = {};
+    if (existing.role === undefined) patch.role = "pending";
+    if (existing.email === undefined && email !== undefined) patch.email = email;
+    if (existing.name === undefined && name !== undefined) patch.name = name;
+    if (Object.keys(patch).length > 0) {
+      await ctx.db.patch(existing._id, patch);
     }
     return userId;
   }
@@ -217,13 +237,6 @@ export async function ensureProfile(ctx: MutationCtx): Promise<Id<"users">> {
   } else {
     role = "pending";
   }
-
-  // Display name from the auth identity, falling back to the users row (same
-  // reason as email: the JWT may not carry `name`).
-  const name =
-    (identity?.name as string | undefined) ??
-    (userDoc?.name as string | undefined) ??
-    undefined;
 
   await ctx.db.insert("profiles", {
     userId,

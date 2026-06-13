@@ -159,6 +159,59 @@ export const createServiceAccount = mutation({
   },
 });
 
+// Admin: rename a service account and/or change its role. Both fields optional
+// (patch only what's provided). roleKey runs the SAME validation as create — the
+// human-only guard (reject pending|user|admin) + must resolve to a real role —
+// so an API-key principal can never be escalated to a human/wildcard role. A
+// role change takes effect immediately for EXISTING keys (auth resolves
+// account.roleKey -> permissions per request; no re-mint needed). Audited.
+export const updateServiceAccount = mutation({
+  args: {
+    serviceAccountId: v.id("serviceAccounts"),
+    name: v.optional(v.string()),
+    roleKey: v.optional(v.string()),
+    description: v.optional(v.string()),
+  },
+  handler: async (ctx, { serviceAccountId, name, roleKey, description }) => {
+    await requireAdmin(ctx);
+    const account = await ctx.db.get(serviceAccountId);
+    if (account === null) throw new Error("Not found: serviceAccount");
+    const patch: { name?: string; roleKey?: string; description?: string } = {};
+    if (name !== undefined) {
+      const trimmed = name.trim();
+      if (trimmed.length === 0) {
+        throw new Error("Refused: name cannot be empty");
+      }
+      patch.name = trimmed;
+    }
+    if (description !== undefined) {
+      const trimmed = description.trim();
+      patch.description = trimmed.length > 0 ? trimmed : undefined;
+    }
+    if (roleKey !== undefined) {
+      if (HUMAN_ONLY_ROLE_KEYS.has(roleKey)) {
+        throw new Error(
+          `Refused: roleKey '${roleKey}' is human-only; use observer/agent or a custom role`,
+        );
+      }
+      await seedBuiltinRoles(ctx);
+      const role = await ctx.db
+        .query("roles")
+        .withIndex("by_key", (q) => q.eq("key", roleKey))
+        .unique();
+      if (role === null) throw new Error(`Unknown roleKey: ${roleKey}`);
+      patch.roleKey = roleKey;
+    }
+    if (Object.keys(patch).length === 0) return; // no-op (nothing provided)
+    await ctx.db.patch(serviceAccountId, patch);
+    const actor = await getActor(ctx);
+    await recordAudit(ctx, actor, "serviceAccount.update", {
+      resource: "serviceAccount",
+      resourceId: serviceAccountId,
+    });
+  },
+});
+
 export const listServiceAccounts = query({
   args: { filter: v.optional(filterValidator) },
   handler: async (ctx, { filter }) => {

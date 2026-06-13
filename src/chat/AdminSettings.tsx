@@ -33,7 +33,7 @@ import {
 import { DataTableShell } from "./admin/DataTableShell";
 import { EntitySheet } from "./admin/EntitySheet";
 import { useToast } from "@/components/ui/toast";
-import { useConfirm } from "@/components/ConfirmDialog";
+import { useConfirm, usePrompt } from "@/components/ConfirmDialog";
 import { FilterBar } from "./admin/filters/FilterBar";
 import { AdvancedFilter } from "./admin/filters/AdvancedFilter";
 import { useResolvedRange } from "./admin/filters/TimeRangePicker";
@@ -293,7 +293,9 @@ export function UsersTab() {
   const setPerms = useMutation(api.admin.setUserPermissions);
   const startImpersonation = useMutation(api.admin.startImpersonation);
   const deleteUser = useMutation(api.admin.deleteUser);
+  const setUserName = useMutation(api.admin.setUserName);
   const confirm = useConfirm();
+  const prompt = usePrompt();
   const toast = useToast();
   // The user whose Access editor (instance+agent assignment) is open. Replaces
   // the legacy free-text override/group columns (H4).
@@ -356,6 +358,26 @@ export function UsersTab() {
     }
   }
 
+  // Admin sets a user's display name (the same user-owned field a user edits in
+  // their own preferences). Available on every row, including the admin's own.
+  async function onRenameUser(u: NonNullable<typeof users>[number]) {
+    const label = u.email || u.name || u.userId.slice(0, 8);
+    const next = await prompt({
+      title: m.settings_rename_user_title(),
+      label: m.settings_rename_user_label({ user: label }),
+      placeholder: m.settings_rename_user_placeholder(),
+      defaultValue: u.name ?? "",
+      confirmLabel: m.settings_save(),
+    });
+    if (next === null) return;
+    try {
+      await setUserName({ profileId: u._id, name: next });
+      toast.success(m.settings_rename_user_done());
+    } catch (err) {
+      toast.error(m.settings_rename_user_refused(), err);
+    }
+  }
+
   return (
     <>
     <FilterBar
@@ -383,29 +405,58 @@ export function UsersTab() {
       title={m.settings_users_title()}
       rows={users}
       emptyHint={m.settings_users_empty()}
-      rowActions={(u) =>
-        // No self-impersonation (the server also rejects it); hide the action
-        // on the admin's own row.
-        u.userId === me?.userId
-          ? []
-          : [
-              {
-                label: m.settings_view_as_user(),
-                onSelect: () =>
-                  void startImpersonation({ profileId: u._id }),
-              },
-              {
-                label: m.settings_delete_user(),
-                variant: "destructive" as const,
-                onSelect: () => void onDeleteUser(u),
-              },
-            ]
-      }
+      rowActions={(u) => {
+        // Rename is allowed on EVERY row (incl. the admin's own — harmless).
+        const actions: {
+          label: string;
+          onSelect: () => void;
+          variant?: "default" | "destructive";
+        }[] = [
+          {
+            label: m.settings_rename_user(),
+            onSelect: () => void onRenameUser(u),
+          },
+        ];
+        // Impersonation + delete are hidden on the admin's own row (the server
+        // also rejects self-impersonation and self-delete).
+        if (u.userId !== me?.userId) {
+          actions.push(
+            {
+              label: m.settings_view_as_user(),
+              onSelect: () => void startImpersonation({ profileId: u._id }),
+            },
+            {
+              label: m.settings_delete_user(),
+              variant: "destructive" as const,
+              onSelect: () => void onDeleteUser(u),
+            },
+          );
+        }
+        return actions;
+      }}
       columns={[
         {
           header: m.settings_col_user(),
-          cell: (u) =>
-            u.email || u.name || u.canonical || u.userId.slice(0, 8),
+          // Email is the stable identifier (what we key/dedupe on), so it leads.
+          // The persisted display name (from primo-auth, often hidden behind the
+          // email by the old `||` coalesce) rides underneath as a muted subline
+          // when present and distinct — never an empty line for name-less rows.
+          cell: (u) => {
+            const primary =
+              u.email || u.name || u.canonical || u.userId.slice(0, 8);
+            const subline =
+              u.email && u.name && u.name !== u.email ? u.name : null;
+            return (
+              <div className="flex flex-col">
+                <span>{primary}</span>
+                {subline ? (
+                  <span className="text-muted-foreground text-xs">
+                    {subline}
+                  </span>
+                ) : null}
+              </div>
+            );
+          },
         },
         {
           header: m.settings_col_role(),
