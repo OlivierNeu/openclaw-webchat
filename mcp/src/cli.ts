@@ -21,6 +21,7 @@
 
 import { ApiError, resolveConfig, type Config } from "./config.js";
 import {
+  getCompat,
   getKpi,
   health,
   listAnomalies,
@@ -74,6 +75,7 @@ const USAGE = `openclaw-webchat — thin CLI over the /api/v1 observability surf
 
 Commands:
   health                              GET  /health
+  compat                              GET  /compat            (bridge.read)
   traces [--limit N] [--q TEXT] [--from T] [--to T] [--kind K] [--status CODE]
          [--status-class 2xx|4xx|5xx] [--direction D] [--principal-type T]
          [--role-key K] [--correlation-id ID]
@@ -104,6 +106,8 @@ async function dispatch(
   switch (command) {
     case "health":
       return health(config);
+    case "compat":
+      return getCompat(config);
     case "traces": {
       const statusClass = str(flags["status-class"]);
       if (

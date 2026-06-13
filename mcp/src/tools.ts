@@ -181,6 +181,20 @@ export function health(
   return apiFetch(config, "/health", {}, options);
 }
 
+/**
+ * GET /api/v1/compat — the bridge compatibility snapshot (reachable,
+ * bridgeVersion, per-instance targets + their gatewayVersion). Requires
+ * `bridge.read`. Diagnoses the "version gateway inconnue" gating: empty
+ * `targets` (or a `gatewayVersion: null` target) is what gates AgentFiles /
+ * ChatDefaults off.
+ */
+export function getCompat(
+  config: Config,
+  options?: ApiFetchOptions,
+): Promise<unknown> {
+  return apiFetch(config, "/compat", {}, options);
+}
+
 /** GET /api/v1/traces — recent trace events. Requires `traces.read`. */
 export function listTraces(
   config: Config,

@@ -18,6 +18,7 @@ import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
 import { ApiError, resolveConfig } from "./config.js";
 import {
+  getCompat,
   getKpi,
   getKpiInput,
   health,
@@ -82,6 +83,19 @@ function main(): void {
       inputSchema: {},
     },
     async () => run(() => health(config)),
+  );
+
+  server.registerTool(
+    "get_compat",
+    {
+      title: "Bridge compatibility snapshot",
+      description:
+        "Bridge version + per-instance gateway versions/capabilities (GET /compat). " +
+        "Requires bridge.read. Diagnoses 'version gateway inconnue': empty targets " +
+        "or a null gatewayVersion gates AgentFiles/ChatDefaults off.",
+      inputSchema: {},
+    },
+    async () => run(() => getCompat(config)),
   );
 
   server.registerTool(

@@ -166,6 +166,33 @@ export const getBridgeCompat = query({
   },
 });
 
+/**
+ * Same snapshot as `getBridgeCompat`, but as an internalQuery for the key-authed
+ * `/api/v1/compat` route (the httpAction runs the permission check itself, so
+ * this must NOT call requirePermission). Lets an `observer` key diagnose the
+ * "version gateway inconnue" gating from outside: an EMPTY `targets` (or a
+ * `gatewayVersion: null` target) is exactly what makes AgentFiles/ChatDefaults
+ * gate off — visible here without UI access. The full `compat` manifest is
+ * omitted (large); `targets` carries the per-instance version + capabilities.
+ */
+export const snapshotForApi = internalQuery({
+  args: {},
+  handler: async (ctx) => {
+    const doc = await readDoc(ctx);
+    if (doc === null) return null;
+    const instances = await ctx.db.query("instances").collect();
+    return {
+      reachable: doc.reachable,
+      lastError: doc.lastError ?? null,
+      bridgeVersion: doc.bridgeVersion,
+      protocolVersion: doc.protocolVersion,
+      fetchedAt: doc.fetchedAt,
+      configuredInstances: instances.map((r) => r.name),
+      targets: doc.targets,
+    };
+  },
+});
+
 /** One instance's provider/version/capabilities (bridge.read — introspection
  *  surface). null = instance unknown to the snapshot (legacy bridge / never
  *  polled) -> the frontend's legacy policy. Direct singleton read — no N+1. */
