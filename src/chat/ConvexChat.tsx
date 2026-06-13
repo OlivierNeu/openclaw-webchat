@@ -1,9 +1,11 @@
 import {
   ActionBarPrimitive,
   AssistantRuntimeProvider,
+  AttachmentPrimitive,
   ComposerPrimitive,
   MessagePrimitive,
   ThreadPrimitive,
+  useAttachment,
   useMessage,
 } from "@assistant-ui/react";
 import {
@@ -39,6 +41,9 @@ import {
   CircleAlert,
   Bot,
   LoaderCircle,
+  Paperclip,
+  Image as ImageIcon,
+  X,
 } from "lucide-react";
 import {
   DropdownMenu,
@@ -976,6 +981,53 @@ function SystemMessage() {
 // streaming doc. We deliberately do NOT render a second gap-filler frame here —
 // doing so double-stacks the assistant avatar/name during every gap.
 
+// Composer attachment chip (BUG-2 fix). Without an `Attachment` component
+// passed to <ComposerPrimitive.Attachments>, assistant-ui's getComponent
+// returns undefined for every attachment type and renders NOTHING — so a
+// selected file was added to the composer state but stayed INVISIBLE (no chip,
+// no upload status, no error surfaced): "the import does nothing, no trace".
+// This chip restores the missing feedback for ALL types (images + documents):
+// an icon, the filename, the live upload status, and a remove button.
+function ComposerAttachmentChip() {
+  const status = useAttachment((a) => a.status?.type);
+  const type = useAttachment((a) => a.type);
+  // A composer attachment is "pending" (status "running") between selection and
+  // message-send: the upload is deferred to composer.send() (assistant-ui calls
+  // adapter.send() then), so the chip is NOT actively uploading here — showing
+  // "envoi…" persistently would lie. The chip's presence + filename IS the
+  // feedback (the bug was that NO chip rendered at all). Only a genuine failure
+  // ("incomplete") surfaces a state, so an upload error is never silent.
+  const failed = status === "incomplete";
+  return (
+    <AttachmentPrimitive.Root
+      className={`oc-attach${failed ? " oc-attach--error" : ""}`}
+      data-status={status}
+    >
+      <span className="oc-attach__icon" aria-hidden>
+        {failed ? (
+          <CircleAlert size={14} />
+        ) : type === "image" ? (
+          <ImageIcon size={14} />
+        ) : (
+          <Paperclip size={14} />
+        )}
+      </span>
+      <span className="oc-attach__name">
+        <AttachmentPrimitive.Name />
+      </span>
+      {failed ? (
+        <span className="oc-attach__state">{m.chat_attach_failed()}</span>
+      ) : null}
+      <AttachmentPrimitive.Remove
+        className="oc-attach__remove"
+        aria-label={m.chat_attach_remove()}
+      >
+        <X size={13} aria-hidden />
+      </AttachmentPrimitive.Remove>
+    </AttachmentPrimitive.Root>
+  );
+}
+
 function Composer({
   showTools,
   onToggleTools,
@@ -996,10 +1048,13 @@ function Composer({
   // layout. (Voice/dictation mic intentionally omitted until the talk.* phase —
   // a non-functional control would mislead.)
   return (
+    // eslint-disable-next-line @typescript-eslint/no-use-before-define
     <ComposerPrimitive.Root
       className={`oc-composer${unavailable ? " oc-composer--disabled" : ""}`}
     >
-      <ComposerPrimitive.Attachments components={{}} />
+      <ComposerPrimitive.Attachments
+        components={{ Attachment: ComposerAttachmentChip }}
+      />
       {/* Content fidelity: disable the browser/OS conventions that MUTATE typed
           text (autocorrect, auto-capitalize, autocomplete) so a word is sent
           exactly as typed — never silently swapped at submit. `data-gramm`

@@ -3500,3 +3500,66 @@
   color: var(--muted-foreground);
   border-left: 2px solid var(--border);
 }
+
+/* ── Composer attachment chip (BUG-2): selecting a file used to render nothing
+   (empty components map → no Attachment component). This chip restores the
+   feedback — icon, filename, live upload status, remove — for all types. */
+.oc-attach {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.4rem;
+  max-width: 18rem;
+  margin: 0.35rem 0.35rem 0 0.35rem;
+  padding: 0.3rem 0.5rem;
+  font-size: 0.8rem;
+  color: var(--foreground);
+  background: var(--muted);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+}
+.oc-attach--error {
+  color: var(--destructive);
+  border-color: color-mix(in srgb, var(--destructive) 45%, var(--border));
+  background: color-mix(in srgb, var(--destructive) 10%, transparent);
+}
+.oc-attach__icon {
+  display: inline-flex;
+  flex: none;
+  color: var(--muted-foreground);
+}
+.oc-attach--error .oc-attach__icon {
+  color: var(--destructive);
+}
+.oc-attach__spin {
+  animation: oc-spin 1s linear infinite;
+}
+.oc-attach__name {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.oc-attach__state {
+  flex: none;
+  font-size: 0.72rem;
+  color: var(--muted-foreground);
+}
+.oc-attach--error .oc-attach__state {
+  color: var(--destructive);
+}
+.oc-attach__remove {
+  display: inline-grid;
+  place-items: center;
+  flex: none;
+  width: 1.2rem;
+  height: 1.2rem;
+  margin-left: 0.1rem;
+  color: var(--muted-foreground);
+  background: transparent;
+  border: none;
+  border-radius: var(--radius-sm);
+  cursor: pointer;
+}
+.oc-attach__remove:hover {
+  color: var(--foreground);
+  background: color-mix(in srgb, var(--muted) 60%, var(--border));
+}
